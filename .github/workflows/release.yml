@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheel and sdist
+        run: |
+          pip install --upgrade pip build
+          python -m build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          name: "PocketFleet v0.1.0 — Initial Public Release"
+          body: |
+            ## 🚀 PocketFleet v0.1.0 — Stop babysitting your CLI. Ship code from Telegram.
+
+            We are thrilled to announce the first public release of **PocketFleet**, the lightweight Telegram remote cockpit for Claude Code and Aider.
+
+            ### ⚡ Key Features
+            - **100% Local & Private**: Code execution stays strictly on your machine. Zero relay servers sniffing your code or keys.
+            - **True Fire-and-Forget Asynchronous Dispatch**: Dispatch tasks from your phone Telegram anywhere, receive PR diff summaries when finished.
+            - **Echo-Proof Single-Direction DAG Engine**: Strict role gating and circuit breaker, preventing runaway bot-to-bot infinite loops.
+            - **60-Second Setup Wizard**: Run `pocketfleet --init` to automatically pair your private Chat ID and verify local agents.
+            - **Dual Coding Agent Support**: Built-in support for Anthropic's **Claude Code** CLI and open-source **Aider**.
+
+            ### 📦 Quick Install
+            ```bash
+            # Download and install wheel
+            pip install pocketfleet-0.1.0-py3-none-any.whl
+
+            # Or install from source
+            pip install .
+            ```
+
+            ### 🛠️ Getting Started
+            ```bash
+            # Run the 60-second interactive setup wizard
+            pocketfleet --init
+
+            # Start daemon
+            pocketfleet
+            ```
+
+            *Designed with defensive software engineering for independent developers worldwide.*
+          draft: false
+          prerelease: false
