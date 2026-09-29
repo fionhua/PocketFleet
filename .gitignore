@@ -2,6 +2,9 @@
 .env
 *.secret
 *.token
+pocketfleet.json
+*.sqlite3
+*.sqlite3-journal
 
 # Python cache & artifacts
 __pycache__/

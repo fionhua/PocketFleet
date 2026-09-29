@@ -70,13 +70,15 @@ PocketFleet Bot @ 12:41:            <----------          [PocketFleet] Completed
 ### Step 1: Install Package
 
 ```bash
-# Option A: Install from PyPI wheel (Zero external dependencies)
-pip install pocketfleet
+# Option A: Install official pre-built wheel from GitHub Release (Zero dependencies)
+pip install https://github.com/fionhua/PocketFleet/releases/download/v0.2.0/pocketfleet-0.2.0-py3-none-any.whl
 
 # Option B: Install from source
 git clone https://github.com/fionhua/PocketFleet.git
 cd PocketFleet
 pip install -e .
+
+# (pip install pocketfleet via PyPI is coming soon)
 ```
 
 ### Step 2: Run the Interactive Setup Wizard
@@ -274,6 +276,12 @@ Configuration can be supplied via CLI flags, environment variables, or `pocketfl
 | Workspace | `--cwd` | `POCKETFLEET_WORKSPACE` | Current Working Dir | Target Git repository root path |
 | Default Worker | `--worker` | `POCKETFLEET_WORKER` | `auto` | Preferred agent (`claude_code`, `aider`, `auto`) |
 | Interactive Wizard | `--init` | — | `False` | Launches 60-second setup onboarding |
+
+## 💎 Open-Core & Commercial Licensing
+
+PocketFleet follows an **Open-Core** model:
+- **Community Edition (Open-Source MIT)**: 100% free and open forever. Run single-instance background daemons, connect Telegram bots, and dispatch to Claude Code and Aider without paying a cent.
+- **Solo Hacker License ($19.99 Lifetime)**: For serious indie hackers who want pre-packaged self-healing scripts, priority Local Web Cockpit integrations, and dedicated maintenance support.
 
 ---
 
