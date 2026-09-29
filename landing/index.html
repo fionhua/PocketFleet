@@ -21,6 +21,7 @@
       <nav class="nav-links">
         <a href="#features">Features</a>
         <a href="#demo">Live Simulator</a>
+        <a href="#deployment">Deployment</a>
         <a href="#storyboard">15s Story</a>
         <a href="#pricing">Pricing</a>
         <a href="https://github.com/fionhua/PocketFleet" target="_blank" class="github-link">
@@ -255,6 +256,90 @@
           </tr>
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- Production Deployment Recipes -->
+  <section id="deployment" class="deployment-section">
+    <div class="section-header">
+      <span class="section-tag">24/7 PRODUCTION READINESS</span>
+      <h2>Production Deployment Recipes</h2>
+      <p>Run PocketFleet seamlessly in the background on Linux VPS, Windows workstations, or Docker containers.</p>
+    </div>
+
+    <div class="deployment-box">
+      <div class="deploy-tabs">
+        <button class="deploy-tab active" data-tab="systemd">🐧 Linux Systemd (VPS)</button>
+        <button class="deploy-tab" data-tab="docker">🐳 Docker Container</button>
+        <button class="deploy-tab" data-tab="windows">🪟 Windows Auto-Start</button>
+        <button class="deploy-tab" data-tab="nohup">⚡ Quick Nohup</button>
+      </div>
+
+      <div class="deploy-content">
+        <!-- Linux Systemd -->
+        <div id="tab-systemd" class="deploy-panel active">
+          <div class="deploy-header-bar">
+            <span>/etc/systemd/system/pocketfleet.service</span>
+            <button class="copy-btn" onclick="copyDeployCode('code-systemd')">Copy Configuration</button>
+          </div>
+          <pre><code id="code-systemd">[Unit]
+Description=PocketFleet Telegram Coding Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projects/my-repo
+Environment="POCKETFLEET_BOT_TOKEN=your_telegram_bot_token"
+ExecStart=/home/ubuntu/.local/bin/pocketfleet --cwd /home/ubuntu/projects/my-repo
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+          <div class="deploy-commands">
+            <code>sudo systemctl daemon-reload &amp;&amp; sudo systemctl enable --now pocketfleet</code>
+          </div>
+        </div>
+
+        <!-- Docker -->
+        <div id="tab-docker" class="deploy-panel">
+          <div class="deploy-header-bar">
+            <span>docker run (Isolated Sandbox)</span>
+            <button class="copy-btn" onclick="copyDeployCode('code-docker')">Copy Command</button>
+          </div>
+          <pre><code id="code-docker">docker run -d \
+  --name pocketfleet \
+  --restart unless-stopped \
+  -v /home/user/my-repo:/workspace \
+  -e POCKETFLEET_BOT_TOKEN="your_bot_token" \
+  -e ANTHROPIC_API_KEY="your_anthropic_api_key" \
+  python:3.11-slim \
+  sh -c "pip install pocketfleet && pocketfleet --cwd /workspace"</code></pre>
+        </div>
+
+        <!-- Windows -->
+        <div id="tab-windows" class="deploy-panel">
+          <div class="deploy-header-bar">
+            <span>run_pocketfleet.bat (Windows Startup)</span>
+            <button class="copy-btn" onclick="copyDeployCode('code-windows')">Copy Batch Script</button>
+          </div>
+          <pre><code id="code-windows">@echo off
+cd /d "D:\projects\my-app"
+pocketfleet</code></pre>
+          <p class="deploy-tip">💡 Press Win+R, type <code>shell:startup</code>, and place a shortcut to this .bat file.</p>
+        </div>
+
+        <!-- Nohup -->
+        <div id="tab-nohup" class="deploy-panel">
+          <div class="deploy-header-bar">
+            <span>nohup background session (No Root Needed)</span>
+            <button class="copy-btn" onclick="copyDeployCode('code-nohup')">Copy Command</button>
+          </div>
+          <pre><code id="code-nohup">nohup pocketfleet --cwd /var/www/my-project > pocketfleet.log 2>&1 &
+tail -f pocketfleet.log</code></pre>
+        </div>
+      </div>
     </div>
   </section>
 

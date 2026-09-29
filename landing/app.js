@@ -131,3 +131,42 @@ window.sendSimPrompt = function(promptText) {
     }, step.delay);
   });
 };
+
+// Deployment Tabs Logic
+document.querySelectorAll(".deploy-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    const target = tab.getAttribute("data-tab");
+    document.querySelectorAll(".deploy-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".deploy-panel").forEach(p => p.classList.remove("active"));
+
+    tab.classList.add("active");
+    const activePanel = document.getElementById(`tab-${target}`);
+    if (activePanel) {
+      activePanel.classList.add("active");
+    }
+  });
+});
+
+// Copy Deployment Code Function
+window.copyDeployCode = function(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const text = el.innerText || el.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event?.target;
+    if (btn) {
+      const origText = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      btn.style.background = "rgba(16, 185, 129, 0.3)";
+      btn.style.borderColor = "#10b981";
+      setTimeout(() => {
+        btn.textContent = origText;
+        btn.style.background = "";
+        btn.style.borderColor = "";
+      }, 2000);
+    }
+  }).catch(err => {
+    console.error("Clipboard copy failed:", err);
+  });
+};
+
