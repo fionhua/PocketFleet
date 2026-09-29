@@ -5,6 +5,7 @@ PocketFleet Control Panel (Solo Hacker Edition)
 XAMPP-Style Desktop Tray Controller for PocketFleet
 
 Features:
+- Built-in GUI Setup Wizard for 60-second Telegram Bot onboarding
 - In-process Web Cockpit server (Port 8765) with 100% reliable zero-delay startup
 - In-process DispatchLoop supervisor with Telegram connectivity
 - Thread-safe queue architecture avoiding Tkinter mainloop collision
@@ -78,6 +79,263 @@ def create_tray_image(color: str = "cyan") -> Image.Image:
 
 
 # ==============================================================================
+# Configuration Wizard Dialog (Interactive Onboarding Modal)
+# ==============================================================================
+class ConfigWizardDialog(tk.Toplevel):
+    def __init__(self, parent, on_save_callback):
+        super().__init__(parent)
+        self.parent = parent
+        self.on_save_callback = on_save_callback
+
+        self.title("Telegram Bot Setup Wizard — PocketFleet")
+        self.geometry("560x520")
+        self.resizable(False, False)
+        self.configure(bg="#0b0f19")
+        self.transient(parent)
+        self.grab_set()
+
+        # Center on parent
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        cx = max(0, px + (pw - 560) // 2)
+        cy = max(0, py + (ph - 520) // 2)
+        self.geometry(f"+{cx}+{cy}")
+
+        self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
+        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
+        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        self.font_mono = tkfont.Font(family="Consolas", size=10)
+
+        self._build_ui()
+        self._load_existing_values()
+
+    def _build_ui(self):
+        # Header banner
+        header = tk.Frame(self, bg="#0f172a", padx=20, pady=14)
+        header.pack(fill=tk.X)
+        tk.Label(
+            header,
+            text="⚡ Telegram Bot Setup Wizard (60-Second Fast Track)",
+            fg="#38bdf8",
+            bg="#0f172a",
+            font=self.font_title,
+        ).pack(anchor="w")
+        tk.Label(
+            header,
+            text="Configure your credentials to command coding agents directly from Telegram.",
+            fg="#94a3b8",
+            bg="#0f172a",
+            font=self.font_sub,
+        ).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(self, bg="#0b0f19", padx=24, pady=16)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        # Field 1: Bot Token
+        f1_hdr = tk.Frame(content, bg="#0b0f19")
+        f1_hdr.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(f1_hdr, text="1. Telegram Bot Token (* Required):", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(side=tk.LEFT)
+        btn_botfather = tk.Button(
+            f1_hdr,
+            text="Get Token from @BotFather ↗",
+            fg="#38bdf8",
+            bg="#1e293b",
+            activebackground="#334155",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=6,
+            command=lambda: webbrowser.open("https://t.me/BotFather"),
+        )
+        btn_botfather.pack(side=tk.RIGHT)
+
+        self.entry_token = tk.Entry(
+            content,
+            bg="#1e293b",
+            fg="#38bdf8",
+            insertbackground="#38bdf8",
+            font=self.font_mono,
+            relief=tk.FLAT,
+            bd=6,
+        )
+        self.entry_token.pack(fill=tk.X, pady=(0, 14))
+
+        # Field 2: Authorized Chat / User ID
+        f2_hdr = tk.Frame(content, bg="#0b0f19")
+        f2_hdr.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(f2_hdr, text="2. Authorized User ID (Security Lock):", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(side=tk.LEFT)
+        btn_userid = tk.Button(
+            f2_hdr,
+            text="Find My ID via @userinfobot ↗",
+            fg="#38bdf8",
+            bg="#1e293b",
+            activebackground="#334155",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=6,
+            command=lambda: webbrowser.open("https://t.me/userinfobot"),
+        )
+        btn_userid.pack(side=tk.RIGHT)
+
+        self.entry_userid = tk.Entry(
+            content,
+            bg="#1e293b",
+            fg="#f8fafc",
+            insertbackground="#f8fafc",
+            font=self.font_mono,
+            relief=tk.FLAT,
+            bd=6,
+        )
+        self.entry_userid.pack(fill=tk.X, pady=(0, 14))
+
+        # Field 3: Target AI Worker
+        tk.Label(content, text="3. Default AI Coding Executor:", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(anchor="w", pady=(0, 4))
+        self.worker_var = tk.StringVar(value="claude_code")
+        f3_frame = tk.Frame(content, bg="#1e293b", padx=12, pady=8)
+        f3_frame.pack(fill=tk.X, pady=(0, 16))
+
+        rb1 = tk.Radiobutton(
+            f3_frame,
+            text="Claude Code (Recommended)",
+            variable=self.worker_var,
+            value="claude_code",
+            bg="#1e293b",
+            fg="#f1f5f9",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            font=self.font_sub,
+        )
+        rb1.pack(anchor="w")
+
+        rb2 = tk.Radiobutton(
+            f3_frame,
+            text="Aider (Multi-Model Git Agent)",
+            variable=self.worker_var,
+            value="aider",
+            bg="#1e293b",
+            fg="#f1f5f9",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            font=self.font_sub,
+        )
+        rb2.pack(anchor="w")
+
+        # Bottom Actions
+        actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        actions.pack(fill=tk.X, side=tk.BOTTOM)
+
+        btn_save = tk.Button(
+            actions,
+            text="🚀 Save & Start Fleet Daemon",
+            bg="#10b981",
+            fg="#ffffff",
+            activebackground="#059669",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=16,
+            pady=6,
+            cursor="hand2",
+            command=self._save_and_start,
+        )
+        btn_save.pack(side=tk.RIGHT, padx=(8, 0))
+
+        btn_cancel = tk.Button(
+            actions,
+            text="Cancel",
+            bg="#334155",
+            fg="#cbd5e1",
+            activebackground="#475569",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=self.destroy,
+        )
+        btn_cancel.pack(side=tk.RIGHT)
+
+        btn_raw = tk.Button(
+            actions,
+            text="Open RAW JSON",
+            bg="#0f172a",
+            fg="#64748b",
+            activebackground="#1e293b",
+            activeforeground="#94a3b8",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._open_raw,
+        )
+        btn_raw.pack(side=tk.LEFT)
+
+    def _load_existing_values(self):
+        if CONFIG_FILE.is_file():
+            try:
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                tok = data.get("bot_token", "")
+                if tok and tok != "YOUR_TELEGRAM_BOT_TOKEN":
+                    self.entry_token.insert(0, tok)
+                uids = data.get("authorized_user_ids", [])
+                if uids and uids != [12345678]:
+                    self.entry_userid.insert(0, ", ".join(map(str, uids)))
+                exec_type = data.get("executor", "claude_code")
+                if exec_type in ("claude_code", "aider"):
+                    self.worker_var.set(exec_type)
+            except Exception:
+                pass
+
+    def _save_and_start(self):
+        token = self.entry_token.get().strip()
+        if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
+            messagebox.showwarning(
+                "Bot Token Required",
+                "Please enter a valid Telegram Bot Token from @BotFather.",
+                parent=self,
+            )
+            self.entry_token.focus_set()
+            return
+
+        raw_uid = self.entry_userid.get().strip()
+        uids = []
+        if raw_uid:
+            for part in raw_uid.replace("，", ",").split(","):
+                part = part.strip()
+                if part.isdigit():
+                    uids.append(int(part))
+
+        payload = {
+            "bot_token": token,
+            "authorized_user_ids": uids,
+            "executor": self.worker_var.get(),
+        }
+
+        try:
+            CONFIG_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to write pocketfleet.json: {e}", parent=self)
+            return
+
+        self.destroy()
+        if self.on_save_callback:
+            self.on_save_callback()
+
+    def _open_raw(self):
+        if not CONFIG_FILE.is_file():
+            payload = {
+                "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+                "authorized_user_ids": [12345678],
+                "executor": "claude_code",
+            }
+            CONFIG_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.startfile(str(CONFIG_FILE))
+
+
+# ==============================================================================
 # Fleet Manager (In-Process Engine)
 # ==============================================================================
 class FleetManager:
@@ -128,7 +386,7 @@ class FleetManager:
 
         token, allowed_ids = self._load_credentials()
         if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
-            self.log("[CONFIG] No valid Bot Token found! Please edit pocketfleet.json first.")
+            self.log("[CONFIG] No valid Bot Token found! Wizard prompt triggered.")
             return False
 
         self.log(f"[DAEMON] Initializing Telegram Dispatch Loop (Worker: {executor})...")
@@ -228,8 +486,6 @@ class PocketFleetControlApp:
         self._setup_tray()
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
 
-        self._ensure_config_exists()
-
         self.append_log("🚀 PocketFleet Control Panel initialized. Ready to command.")
 
         # Start drain log loop on main thread
@@ -260,7 +516,6 @@ class PocketFleetControlApp:
 
     def _refresh_status(self) -> None:
         try:
-            # 1. Daemon
             is_d = self.mgr.is_daemon_running()
             self._update_row(
                 self.row_daemon,
@@ -268,7 +523,6 @@ class PocketFleetControlApp:
                 detail="Active (Polling Telegram)" if is_d else "Stopped",
             )
 
-            # 2. Cockpit
             is_c = self.mgr.is_cockpit_running()
             self._update_row(
                 self.row_cockpit,
@@ -276,7 +530,6 @@ class PocketFleetControlApp:
                 detail="Listening on http://127.0.0.1:8765" if is_c else "Offline",
             )
 
-            # 3. Agent
             self._update_row(self.row_agent, is_running=True, detail="Ready (Claude Code / Aider)")
 
             if self.tray_icon:
@@ -328,8 +581,8 @@ class PocketFleetControlApp:
             name="1. Telegram Bridge Daemon",
             on_start=self._action_start_daemon,
             on_stop=lambda: threading.Thread(target=self.mgr.stop_daemon, daemon=True).start(),
-            aux_text="Edit Config",
-            aux_cmd=self._open_config,
+            aux_text="Setup Wizard",
+            aux_cmd=self.open_setup_wizard,
         )
 
         # Row 2: Local Web Cockpit
@@ -399,7 +652,7 @@ class PocketFleetControlApp:
             activeforeground="#ffffff",
             font=self.font_regular,
             relief=tk.FLAT,
-            width=10,
+            width=11,
             cursor="hand2",
             command=aux_cmd,
         )
@@ -504,21 +757,12 @@ class PocketFleetControlApp:
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
 
-    def _ensure_config_exists(self) -> None:
-        if not CONFIG_FILE.is_file():
-            template = {
-                "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
-                "authorized_user_ids": [12345678],
-                "executor": "claude_code"
-            }
-            try:
-                CONFIG_FILE.write_text(json.dumps(template, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+    def open_setup_wizard(self) -> None:
+        ConfigWizardDialog(self.root, on_save_callback=self._on_wizard_saved)
 
-    def _open_config(self) -> None:
-        self._ensure_config_exists()
-        os.startfile(str(CONFIG_FILE))
+    def _on_wizard_saved(self) -> None:
+        self.append_log("[CONFIG] Credentials updated via Wizard. Starting Telegram Bridge Daemon...")
+        threading.Thread(target=self.mgr.start_daemon, daemon=True).start()
 
     def _action_open_browser(self) -> None:
         if not self.mgr.is_cockpit_running():
@@ -530,14 +774,8 @@ class PocketFleetControlApp:
         def _task():
             ok = self.mgr.start_daemon()
             if not ok:
-                self.root.after(0, lambda: messagebox.showinfo(
-                    "Telegram Bot Token Required",
-                    "Please configure your Telegram Bot Token in pocketfleet.json first (the file will now open).\n\n"
-                    "1. Get your Bot Token from @BotFather\n"
-                    "2. Paste it into pocketfleet.json and save\n"
-                    "3. Click Start again."
-                ))
-                self.root.after(200, self._open_config)
+                # Open wizard dialog smoothly on the main UI thread
+                self.root.after(0, self.open_setup_wizard)
         threading.Thread(target=_task, daemon=True).start()
 
     def action_start_all(self) -> None:
@@ -561,6 +799,7 @@ class PocketFleetControlApp:
         menu = pystray.Menu(
             pystray.MenuItem("🚀 Open PocketFleet Control Panel", self.show_from_tray, default=True),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("⚡ Setup Wizard", self.open_setup_wizard),
             pystray.MenuItem("🌐 Open Web Cockpit (Port 8765)", self._action_open_browser),
             pystray.MenuItem("⚡ Start All Services", self.action_start_all),
             pystray.MenuItem("🛑 Stop All Services", self.action_stop_all),
