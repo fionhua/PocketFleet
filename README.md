@@ -29,14 +29,38 @@
 
 ---
 
-## 🚀 Quick Start (Coming Soon)
+## 🚀 Quick Start
+
+### 1. Installation
 
 ```bash
-# Clone and run directly
-git clone https://github.com/PocketFleet/PocketFleet.git
+# Clone the repository
+git clone https://github.com/fionhua/PocketFleet.git
 cd PocketFleet
-python -m pocketfleet.launcher
+
+# Install in editable mode (Zero external core dependencies)
+pip install -e .
 ```
+
+### 2. 60-Second Setup Wizard
+
+Run the interactive setup wizard to pair your Telegram Bot and lock your Chat ID:
+
+```bash
+pocketfleet --init
+```
+
+1. Enter your Telegram Bot Token (from `@BotFather`).
+2. Send `/start` to your bot from your phone to automatically bind your private Chat ID.
+3. PocketFleet verifies that `claude` (Claude Code) or `aider` CLI is installed.
+
+### 3. Launch Daemon
+
+```bash
+pocketfleet
+```
+
+Now you're free! Send a message from your phone anywhere, and let your local machine do the coding.
 
 ---
 
