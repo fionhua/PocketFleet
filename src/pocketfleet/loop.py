@@ -20,8 +20,12 @@ from typing import Any, Dict, List, Optional, Set
 from .cockpit import telemetry
 from .core import InboundMessage, OutboundMessage, Task, TaskStatus, WorkerType
 from .executors.aider import AiderExecutor
+from .executors.antigravity import AntigravityExecutor
 from .executors.base import BaseExecutor
 from .executors.claude_code import ClaudeCodeExecutor
+from .executors.codex import CodexExecutor
+from .executors.simulation import SimulationExecutor
+from .executors.triad import FleetTriadExecutor
 from .state import StateStore
 from .transport.base import BaseTransport
 
@@ -33,7 +37,7 @@ class DispatchLoop:
         self,
         transport: BaseTransport,
         workspace_cwd: Optional[str] = None,
-        default_worker: WorkerType = WorkerType.CLAUDE_CODE,
+        default_worker: WorkerType = WorkerType.FLEET_TRIAD,
         allowed_chat_ids: Optional[Set[int]] = None,
         state_store: Optional[StateStore] = None,
     ) -> None:
@@ -46,9 +50,14 @@ class DispatchLoop:
 
         # Registered executors
         self.executors: Dict[WorkerType, BaseExecutor] = {
+            WorkerType.FLEET_TRIAD: FleetTriadExecutor(),
+            WorkerType.SIMULATION: SimulationExecutor(),
+            WorkerType.CODEX: CodexExecutor(),
+            WorkerType.ANTIGRAVITY: AntigravityExecutor(),
             WorkerType.CLAUDE_CODE: ClaudeCodeExecutor(),
             WorkerType.AIDER: AiderExecutor(),
         }
+
 
         # Decoupled Work Queue (P0-1 Fix)
         # Holds: tuple[Task, BaseExecutor, InboundMessage]
@@ -71,18 +80,29 @@ class DispatchLoop:
             return self.executors[requested]
 
         # Fallback to any available
-        for w_type in [self.default_worker, WorkerType.CLAUDE_CODE, WorkerType.AIDER]:
+        for w_type in [self.default_worker, WorkerType.FLEET_TRIAD, WorkerType.SIMULATION, WorkerType.CODEX, WorkerType.ANTIGRAVITY, WorkerType.CLAUDE_CODE, WorkerType.AIDER]:
             if w_type in self.executors and self.executors[w_type].is_available():
                 return self.executors[w_type]
         return None
 
     def parse_command(self, text: str) -> tuple[WorkerType, str]:
         text_clean = text.strip()
+        if text_clean.startswith("/fleet") or text_clean.startswith("/triad"):
+            p_len = 6 if text_clean.startswith("/fleet") else 6
+            return WorkerType.FLEET_TRIAD, text_clean[p_len:].strip()
         if text_clean.startswith("/claude"):
             return WorkerType.CLAUDE_CODE, text_clean[7:].strip()
         if text_clean.startswith("/aider"):
             return WorkerType.AIDER, text_clean[6:].strip()
+        if text_clean.startswith("/codex"):
+            return WorkerType.CODEX, text_clean[6:].strip()
+        if text_clean.startswith("/agy") or text_clean.startswith("/antigravity"):
+            prefix_len = 4 if text_clean.startswith("/agy") else 12
+            return WorkerType.ANTIGRAVITY, text_clean[prefix_len:].strip()
+        if text_clean.startswith("/sim"):
+            return WorkerType.SIMULATION, text_clean[4:].strip()
         return self.default_worker, text_clean
+
 
     def _send_immediate_or_outbox(
         self,
@@ -177,16 +197,54 @@ class DispatchLoop:
             self._send_immediate_or_outbox(msg.chat_id, status_text, reply_to_message_id=msg.message_id)
             return None
 
+        if text.startswith("/mode"):
+            parts = text.split()
+            if len(parts) > 1:
+                target = parts[1].lower().strip()
+                mode_map = {
+                    "fleet": WorkerType.FLEET_TRIAD,
+                    "triad": WorkerType.FLEET_TRIAD,
+                    "sim": WorkerType.SIMULATION,
+                    "simulation": WorkerType.SIMULATION,
+                    "codex": WorkerType.CODEX,
+                    "agy": WorkerType.ANTIGRAVITY,
+                    "antigravity": WorkerType.ANTIGRAVITY,
+                    "claude": WorkerType.CLAUDE_CODE,
+                    "aider": WorkerType.AIDER,
+                }
+                if target in mode_map:
+                    self.default_worker = mode_map[target]
+                    resp = (
+                        f"🎛️ *Fleet Engine Switched to: `{self.default_worker.value}`*\n"
+                        f"• Active Mode: *{self.default_worker.value.upper()}*\n"
+                        "Send any requirement to see it execute!"
+                    )
+                else:
+                    resp = f"❓ Unknown mode `{target}`. Available: `fleet`, `codex`, `agy`, `sim`, `claude`, `aider`."
+            else:
+                resp = (
+                    f"🎛️ *Current Default Fleet Engine*: `{self.default_worker.value}`\n"
+                    "• `/mode fleet` — 🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA Swarm)\n"
+                    "• `/mode codex` — 🤖 Local OpenAI Codex Engine\n"
+                    "• `/mode agy` — 🌈 Local Google Antigravity\n"
+                    "• `/mode sim` — ⚡ Fast Simulation / Echo"
+                )
+            self._send_immediate_or_outbox(msg.chat_id, resp, reply_to_message_id=msg.message_id)
+            return None
+
         if text in ("/help", "/start"):
             help_text = (
                 "🚀 *PocketFleet Commands*\n"
-                "• Send your prompt directly to dispatch to default worker.\n"
-                "• `/claude <prompt>` — Dispatch explicitly to Claude Code\n"
-                "• `/aider <prompt>` — Dispatch explicitly to Aider\n"
-                "• `/status` — View real-time daemon & task progress (Instant)"
+                "• Send your prompt directly to dispatch to active engine.\n"
+                "• `/mode fleet` — Switch to 🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA)\n"
+                "• `/mode codex` — Switch to 🤖 Local OpenAI Codex\n"
+                "• `/mode agy` — Switch to 🌈 Local Google Antigravity\n"
+                "• `/mode sim` — Switch to ⚡ Fast Simulation / Echo\n"
+                "• `/status` — View real-time daemon & task progress"
             )
             self._send_immediate_or_outbox(msg.chat_id, help_text, reply_to_message_id=msg.message_id)
             return None
+
 
         # --- Deduplication Check via Persistent SQLite (P0-3 Fix) ---
         if self.state_store.is_message_processed(msg.message_id):
@@ -274,7 +332,16 @@ class DispatchLoop:
 
             start_time = time.time()
             try:
-                code, stdout, stderr = executor.execute(prompt, cwd=self.workspace_cwd)
+                if hasattr(executor, "execute_with_phases"):
+                    def _stream_phase(p_text: str):
+                        self._send_immediate_or_outbox(
+                            chat_id=msg.chat_id,
+                            text=p_text,
+                            reply_to_message_id=msg.message_id,
+                        )
+                    code, stdout, stderr = executor.execute_with_phases(prompt, cwd=self.workspace_cwd, on_phase=_stream_phase)
+                else:
+                    code, stdout, stderr = executor.execute(prompt, cwd=self.workspace_cwd)
             except Exception as run_err:
                 code = 1
                 stdout = ""
@@ -289,11 +356,15 @@ class DispatchLoop:
             if code == 0:
                 task.mark_completed(stdout, exit_code=0)
                 self.state_store.record_message_finish(msg.message_id, "COMPLETED", 0)
-                res_preview = stdout[-1500:] if len(stdout) > 1500 else stdout
-                reply_text = (
-                    f"✅ *Task Completed* [{executor.name}]\n"
-                    f"```text\n{res_preview}\n```"
-                )
+                if executor.name == "fleet_triad":
+                    reply_text = stdout
+                else:
+                    res_preview = stdout[-1500:] if len(stdout) > 1500 else stdout
+                    reply_text = (
+                        f"✅ *Task Completed* [{executor.name}]\n"
+                        f"```text\n{res_preview}\n```"
+                    )
+
                 telemetry.record_task(
                     prompt=prompt,
                     worker=executor.name,

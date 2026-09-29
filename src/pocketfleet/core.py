@@ -19,9 +19,14 @@ class TaskStatus(str, Enum):
 
 
 class WorkerType(str, Enum):
+    FLEET_TRIAD = "fleet_triad"
+    SIMULATION = "simulation"
+    CODEX = "codex"
+    ANTIGRAVITY = "antigravity"
     CLAUDE_CODE = "claude_code"
     AIDER = "aider"
     AUTO = "auto"
+
 
 
 @dataclass

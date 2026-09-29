@@ -28,9 +28,10 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import font as tkfont, messagebox
+from tkinter import font as tkfont, messagebox, ttk
 
 from PIL import Image, ImageDraw
+
 import pystray
 
 from pocketfleet.cockpit import CockpitServer, telemetry
@@ -88,8 +89,9 @@ class ConfigWizardDialog(tk.Toplevel):
         self.on_save_callback = on_save_callback
 
         self.title("Telegram Bot Setup Wizard — PocketFleet")
-        self.geometry("560x520")
+        self.geometry("580x660")
         self.resizable(False, False)
+
         self.configure(bg="#0b0f19")
         self.transient(parent)
         self.grab_set()
@@ -100,8 +102,8 @@ class ConfigWizardDialog(tk.Toplevel):
         ph = parent.winfo_height()
         px = parent.winfo_rootx()
         py = parent.winfo_rooty()
-        cx = max(0, px + (pw - 560) // 2)
-        cy = max(0, py + (ph - 520) // 2)
+        cx = max(0, px + (pw - 580) // 2)
+        cy = max(0, py + (ph - 620) // 2)
         self.geometry(f"+{cx}+{cy}")
 
         self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
@@ -125,7 +127,7 @@ class ConfigWizardDialog(tk.Toplevel):
         ).pack(anchor="w")
         tk.Label(
             header,
-            text="Configure your credentials to command coding agents directly from Telegram.",
+            text="Configure credentials & choose AI coding executor (Simulation, Codex, Antigravity, Claude).",
             fg="#94a3b8",
             bg="#0f172a",
             font=self.font_sub,
@@ -193,14 +195,69 @@ class ConfigWizardDialog(tk.Toplevel):
         self.entry_userid.pack(fill=tk.X, pady=(0, 14))
 
         # Field 3: Target AI Worker
-        tk.Label(content, text="3. Default AI Coding Executor:", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(anchor="w", pady=(0, 4))
-        self.worker_var = tk.StringVar(value="claude_code")
+        tk.Label(content, text="3. AI Coding Executor Engine & Swarm Mode:", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(anchor="w", pady=(0, 4))
+        self.worker_var = tk.StringVar(value="fleet_triad")
         f3_frame = tk.Frame(content, bg="#1e293b", padx=12, pady=8)
         f3_frame.pack(fill=tk.X, pady=(0, 16))
 
-        rb1 = tk.Radiobutton(
+        rb_triad = tk.Radiobutton(
             f3_frame,
-            text="Claude Code (Recommended)",
+            text="🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA Live Swarm — Recommended)",
+            variable=self.worker_var,
+            value="fleet_triad",
+            bg="#1e293b",
+            fg="#38bdf8",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#38bdf8",
+            font=self.font_bold,
+        )
+        rb_triad.pack(anchor="w")
+
+        rb_sim = tk.Radiobutton(
+            f3_frame,
+            text="⚡ Fast Simulation / Echo Mode (Zero Accounts Needed)",
+            variable=self.worker_var,
+            value="simulation",
+            bg="#1e293b",
+            fg="#10b981",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            activeforeground="#10b981",
+            font=self.font_sub,
+        )
+        rb_sim.pack(anchor="w")
+
+
+        rb_codex = tk.Radiobutton(
+            f3_frame,
+            text="OpenAI Codex (VS Code Engine)",
+            variable=self.worker_var,
+            value="codex",
+            bg="#1e293b",
+            fg="#f1f5f9",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            font=self.font_sub,
+        )
+        rb_codex.pack(anchor="w")
+
+        rb_agy = tk.Radiobutton(
+            f3_frame,
+            text="Google Antigravity (agentapi / agy Engine)",
+            variable=self.worker_var,
+            value="antigravity",
+            bg="#1e293b",
+            fg="#f1f5f9",
+            selectcolor="#0f172a",
+            activebackground="#1e293b",
+            font=self.font_sub,
+        )
+        rb_agy.pack(anchor="w")
+
+        rb_claude = tk.Radiobutton(
+            f3_frame,
+            text="Claude Code CLI (Anthropic)",
             variable=self.worker_var,
             value="claude_code",
             bg="#1e293b",
@@ -209,11 +266,11 @@ class ConfigWizardDialog(tk.Toplevel):
             activebackground="#1e293b",
             font=self.font_sub,
         )
-        rb1.pack(anchor="w")
+        rb_claude.pack(anchor="w")
 
-        rb2 = tk.Radiobutton(
+        rb_aider = tk.Radiobutton(
             f3_frame,
-            text="Aider (Multi-Model Git Agent)",
+            text="Aider CLI (Multi-Model Git Agent)",
             variable=self.worker_var,
             value="aider",
             bg="#1e293b",
@@ -222,10 +279,30 @@ class ConfigWizardDialog(tk.Toplevel):
             activebackground="#1e293b",
             font=self.font_sub,
         )
-        rb2.pack(anchor="w")
+        rb_aider.pack(anchor="w")
+
+        # Pro Tip Card: WarRoom HQ Setup
+        tip_card = tk.Frame(content, bg="#0f172a", bd=1, relief=tk.SOLID, padx=12, pady=8)
+        tip_card.pack(fill=tk.X, pady=(4, 8))
+        tk.Label(
+            tip_card,
+            text="💡 Pro Tip: Telegram Group WarRoom Experience",
+            fg="#38bdf8",
+            bg="#0f172a",
+            font=self.font_bold,
+        ).pack(anchor="w")
+        tk.Label(
+            tip_card,
+            text="Create a Telegram Group (e.g., 'Fleet HQ'), add your bot as Admin.\nAssign roles: Alpha sets criteria & verifies, Beta builds code live!",
+            fg="#94a3b8",
+            bg="#0f172a",
+            font=self.font_sub,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(2, 0))
 
         # Bottom Actions
         actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+
         actions.pack(fill=tk.X, side=tk.BOTTOM)
 
         btn_save = tk.Button(
@@ -283,8 +360,8 @@ class ConfigWizardDialog(tk.Toplevel):
                 uids = data.get("authorized_user_ids", [])
                 if uids and uids != [12345678]:
                     self.entry_userid.insert(0, ", ".join(map(str, uids)))
-                exec_type = data.get("executor", "claude_code")
-                if exec_type in ("claude_code", "aider"):
+                exec_type = data.get("executor", "simulation")
+                if exec_type in ("claude_code", "aider", "codex", "antigravity", "simulation"):
                     self.worker_var.set(exec_type)
             except Exception:
                 pass
@@ -329,7 +406,7 @@ class ConfigWizardDialog(tk.Toplevel):
             payload = {
                 "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
                 "authorized_user_ids": [12345678],
-                "executor": "claude_code",
+                "executor": "simulation",
             }
             CONFIG_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         os.startfile(str(CONFIG_FILE))
@@ -379,24 +456,25 @@ class FleetManager:
             self.cockpit_server = None
             self.log("[COCKPIT] Web Cockpit stopped.")
 
-    def start_daemon(self, executor: str = "claude_code") -> bool:
+    def start_daemon(self, executor: str | None = None) -> bool:
         if self.is_daemon_running():
             self.log("[WARN] Telegram Daemon is already active.")
             return True
 
-        token, allowed_ids = self._load_credentials()
+        token, allowed_ids, cfg_executor = self._load_credentials()
         if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
             self.log("[CONFIG] No valid Bot Token found! Wizard prompt triggered.")
             return False
 
-        self.log(f"[DAEMON] Initializing Telegram Dispatch Loop (Worker: {executor})...")
+        active_executor = executor or cfg_executor or "fleet_triad"
+        self.log(f"[DAEMON] Initializing Telegram Dispatch Loop (Engine: {active_executor})...")
         try:
             state_store = StateStore()
             transport = TelegramTransport(bot_token=token, state_store=state_store)
             self.dispatch_loop = DispatchLoop(
                 transport=transport,
                 workspace_cwd=str(REPO_ROOT),
-                default_worker=WorkerType(executor),
+                default_worker=WorkerType(active_executor),
                 allowed_chat_ids=allowed_ids,
                 state_store=state_store,
             )
@@ -413,11 +491,30 @@ class FleetManager:
 
             self.loop_thread = threading.Thread(target=_run, daemon=True)
             self.loop_thread.start()
-            self.log("[DAEMON] Telegram Bridge Daemon running. Listening for tasks...")
+            self.log(f"[DAEMON] Telegram Bridge Daemon running with '{active_executor}'. Listening...")
             return True
         except Exception as e:
             self.log(f"[ERROR] Failed to start daemon: {e}")
             return False
+
+    def switch_executor(self, executor_type: str) -> None:
+        try:
+            wt = WorkerType(executor_type)
+            if self.dispatch_loop:
+                self.dispatch_loop.default_worker = wt
+                self.log(f"[ENGINE] Active daemon engine dynamically switched to: '{wt.value}'")
+            else:
+                self.log(f"[ENGINE] Default configured engine set to: '{wt.value}'")
+
+            if CONFIG_FILE.is_file():
+                try:
+                    data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                    data["executor"] = wt.value
+                    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+        except Exception as e:
+            self.log(f"[ERROR] Failed to switch engine: {e}")
 
     def stop_daemon(self) -> None:
         if not self.is_daemon_running():
@@ -430,26 +527,28 @@ class FleetManager:
         telemetry.telegram_connected = False
         self.log("[DAEMON] Daemon stopped.")
 
-    def _load_credentials(self) -> tuple[str | None, set[int] | None]:
+    def _load_credentials(self) -> tuple[str | None, set[int] | None, str | None]:
         if CONFIG_FILE.is_file():
             try:
                 data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
                 tok = data.get("bot_token")
                 ids = data.get("authorized_user_ids")
+                exec_type = data.get("executor", "fleet_triad")
                 set_ids = set(ids) if ids else None
-                return tok, set_ids
+                return tok, set_ids, exec_type
             except Exception:
                 pass
 
         saved = FleetConfig.load()
         if saved and saved.bot_token:
-            return saved.bot_token, {saved.allowed_chat_id} if saved.allowed_chat_id else None
+            return saved.bot_token, {saved.allowed_chat_id} if saved.allowed_chat_id else None, getattr(saved, "default_worker", "fleet_triad")
 
         env_tok = os.environ.get("POCKETFLEET_BOT_TOKEN")
         if env_tok:
-            return env_tok, None
+            return env_tok, None, "fleet_triad"
 
-        return None, None
+        return None, None, None
+
 
 
 # ==============================================================================
@@ -459,8 +558,9 @@ class PocketFleetControlApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("PocketFleet Control Panel (Solo Hacker Edition)")
-        self.root.geometry("820x680")
-        self.root.minsize(760, 600)
+        self.root.geometry("860x720")
+        self.root.minsize(800, 640)
+
         self.root.configure(bg="#0b0f19")
 
         # Thread-safe log queue
@@ -480,8 +580,10 @@ class PocketFleetControlApp:
 
         self._build_header()
         self._build_table()
+        self._build_engine_selector()
         self._build_toolbar()
         self._build_log_console()
+
 
         self._setup_tray()
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
@@ -530,7 +632,10 @@ class PocketFleetControlApp:
                 detail="Listening on http://127.0.0.1:8765" if is_c else "Offline",
             )
 
-            self._update_row(self.row_agent, is_running=True, detail="Ready (Claude Code / Aider)")
+            _, _, cur_exec = self.mgr._load_credentials()
+            display_exec = (cur_exec or "fleet_triad").replace("_", " ").title()
+            self._update_row(self.row_agent, is_running=True, detail=f"Active Engine: {display_exec}")
+
 
             if self.tray_icon:
                 color = "green" if (is_d and is_c) else ("cyan" if (is_d or is_c) else "yellow")
@@ -668,7 +773,68 @@ class PocketFleetControlApp:
             "state": "unknown",
         }
 
+    def _build_engine_selector(self) -> None:
+        selector_card = tk.Frame(self.root, bg="#1e293b", bd=1, relief=tk.SOLID)
+        selector_card.pack(fill=tk.X, padx=16, pady=(0, 10))
+
+        inner = tk.Frame(selector_card, bg="#1e293b", padx=12, pady=10)
+        inner.pack(fill=tk.X)
+
+        lbl = tk.Label(
+            inner,
+            text="⚡ Default AI Engine / Swarm Mode:",
+            fg="#38bdf8",
+            bg="#1e293b",
+            font=self.font_bold,
+        )
+        lbl.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.engine_display_map = {
+            "🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA Live Swarm)": "fleet_triad",
+            "⚡ Fast Simulation / Echo Mode (Zero Accounts)": "simulation",
+            "🤖 OpenAI Codex (VS Code Engine)": "codex",
+            "🌈 Google Antigravity (agentapi.BAT)": "antigravity",
+            "🔮 Claude Code CLI (Anthropic)": "claude_code",
+            "🛠 Aider CLI (Multi-Model Git Agent)": "aider",
+        }
+        self.engine_val_to_display = {v: k for k, v in self.engine_display_map.items()}
+
+        _, _, saved_exec = self.mgr._load_credentials()
+        display_default = self.engine_val_to_display.get(saved_exec, list(self.engine_display_map.keys())[0])
+
+        self.engine_combo_var = tk.StringVar(value=display_default)
+        self.engine_dropdown = ttk.Combobox(
+            inner,
+            textvariable=self.engine_combo_var,
+            values=list(self.engine_display_map.keys()),
+            state="readonly",
+            font=self.font_regular,
+        )
+        self.engine_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.engine_dropdown.bind("<<ComboboxSelected>>", self._on_engine_selected)
+
+        btn_apply = tk.Button(
+            inner,
+            text="Switch Mode",
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=12,
+            cursor="hand2",
+            command=self._on_engine_selected,
+        )
+        btn_apply.pack(side=tk.RIGHT)
+
+    def _on_engine_selected(self, event=None) -> None:
+        selected_display = self.engine_combo_var.get()
+        target_val = self.engine_display_map.get(selected_display, "fleet_triad")
+        self.mgr.switch_executor(target_val)
+
     def _build_toolbar(self) -> None:
+
         toolbar = tk.Frame(self.root, bg="#0b0f19")
         toolbar.pack(fill=tk.X, padx=16, pady=4)
 
