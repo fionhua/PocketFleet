@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PocketFleet — Stop babysitting your CLI. Ship code from Telegram.</title>
+  <meta name="description" content="The lightweight Telegram remote cockpit for Claude Code & Aider. Dispatch coding tasks from your phone, let your local machine do the work.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-mode">
+  <!-- Nav -->
+  <header class="navbar">
+    <div class="nav-container">
+      <a href="#" class="brand-logo">
+        <span class="logo-icon">🚀</span>
+        <span class="logo-text">Pocket<span>Fleet</span></span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#demo">Live Simulator</a>
+        <a href="#storyboard">15s Story</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://github.com/PocketFleet/PocketFleet" target="_blank" class="github-link">
+          <svg class="gh-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a href="#pricing" class="btn btn-primary btn-sm">Get License</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="glow-orb glow-top"></div>
+    <div class="hero-container">
+      <div class="badge-pill">
+        <span class="badge-dot"></span>
+        <span>Telegram Remote Cockpit for Claude Code & Aider</span>
+      </div>
+      <h1 class="hero-title">
+        Stop babysitting your CLI.<br>
+        <span class="gradient-text">Ship code from Telegram.</span>
+      </h1>
+      <p class="hero-subtitle">
+        You are at the coffee shop or walking your dog. Fire one Telegram message on your phone.
+        Your home PC or self-hosted VPS auto-fixes the bug, runs tests, and pushes a PR.
+      </p>
+      <div class="hero-cta-group">
+        <a href="#pricing" class="btn btn-primary btn-lg pulse-glow">
+          Get Instant Access ($19.99 Lifetime)
+        </a>
+        <a href="#demo" class="btn btn-outline btn-lg">
+          ▶ Try Interactive Simulator
+        </a>
+      </div>
+      <div class="hero-micro-meta">
+        <span>⚡ Zero relay servers</span>
+        <span>•</span>
+        <span>🔒 100% Private on your metal</span>
+        <span>•</span>
+        <span>📦 Zero core dependencies</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live Dual Interactive Simulator -->
+  <section id="demo" class="demo-section">
+    <div class="section-header">
+      <span class="section-tag">REAL-TIME SIMULATOR</span>
+      <h2>Experience The Asynchronous Power</h2>
+      <p>Click any prompt below to dispatch a simulated command from your phone to your remote terminal.</p>
+    </div>
+
+    <div class="simulator-wrapper">
+      <!-- Phone Telegram Mockup -->
+      <div class="sim-phone">
+        <div class="phone-notch"></div>
+        <div class="tg-header">
+          <div class="tg-avatar">🤖</div>
+          <div class="tg-info">
+            <div class="tg-name">PocketFleet Bot <span class="bot-badge">BOT</span></div>
+            <div class="tg-status">online • private session</div>
+          </div>
+        </div>
+        <div class="tg-chat-body" id="tgChatBody">
+          <div class="chat-msg bot-msg">
+            <div class="msg-content">
+              🚀 <strong>PocketFleet Online</strong><br>
+              Workspace: <code>/app/backend-api</code><br>
+              Worker: <strong>Claude Code</strong><br>
+              Send any prompt to dispatch.
+            </div>
+            <div class="msg-time">12:40</div>
+          </div>
+        </div>
+        <div class="tg-presets">
+          <button class="preset-btn" onclick="sendSimPrompt('fix issue #42: JWT expiry error')">
+            🐛 Fix Issue #42 (JWT Expire)
+          </button>
+          <button class="preset-btn" onclick="sendSimPrompt('add healthcheck endpoint /healthz')">
+            ✨ Add /healthz Endpoint
+          </button>
+          <button class="preset-btn" onclick="sendSimPrompt('optimize slow SQL query in analytics.py')">
+            ⚡ Optimize Analytics Query
+          </button>
+        </div>
+        <div class="tg-input-bar">
+          <input type="text" id="tgInput" placeholder="Type prompt or pick preset..." readonly>
+          <button class="tg-send-btn" id="tgSendBtn">➤</button>
+        </div>
+      </div>
+
+      <!-- Remote Terminal Mockup -->
+      <div class="sim-terminal">
+        <div class="terminal-bar">
+          <div class="term-dots">
+            <span class="dot dot-red"></span>
+            <span class="dot dot-yellow"></span>
+            <span class="dot dot-green"></span>
+          </div>
+          <div class="term-title">user@vps-frankfurt: ~/projects/backend-api</div>
+          <div class="term-status-pill">DAEMON ACTIVE</div>
+        </div>
+        <div class="terminal-body" id="termBody">
+          <div class="term-line prefix">[PocketFleet-Daemon] Connected to Telegram transport.</div>
+          <div class="term-line prefix">[PocketFleet-Daemon] Echo-Proof DAG gate active. Waiting for tasks...</div>
+          <div class="term-line prompt-line" id="termCursorLine">
+            <span class="term-prompt">vps:~$</span> <span class="cursor">_</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Three Killer Features -->
+  <section id="features" class="features-section">
+    <div class="section-header">
+      <span class="section-tag">ENGINEERED FOR INDIE HACKERS</span>
+      <h2>Three Non-Negotiable Advantages</h2>
+      <p>Why solo developers choose PocketFleet over complex cloud agent suites.</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="card-icon-glow">🔒</div>
+        <h3>100% Local & Private</h3>
+        <span class="feature-highlight">Zero Data Leakage</span>
+        <p>
+          Your proprietary codebase, env files, and API keys stay on your own hardware or VPS.
+          No third-party SaaS proxy intercepts your code. Zero central infrastructure sniffing your prompts.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="card-icon-glow">⚡</div>
+        <h3>True Fire-and-Forget</h3>
+        <span class="feature-highlight">Asynchronous Freedom</span>
+        <p>
+          Review PRs from the coffee shop, not your desk. Fire a bug fix while commuting.
+          PocketFleet drives Claude Code/Aider through code editing, test verification, and git commit, then alerts you with a clean diff summary.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="card-icon-glow">📦</div>
+        <h3>Zero Bloat, Zero Lock-In</h3>
+        <span class="feature-highlight">Native CLI Wrapper</span>
+        <p>
+          No heavy Docker compose setups. No intrusive browser automation or proprietary IDE lock-in.
+          PocketFleet acts as a drop-in execution bridge wrapping natively around your favorite terminal tools.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15s Storyboard Showcase -->
+  <section id="storyboard" class="storyboard-section">
+    <div class="section-header">
+      <span class="section-tag">STORYBOARD PREVIEW</span>
+      <h2>15 Seconds of Developer Liberation</h2>
+      <p>Designed by Starship Growth Strategist 心机姝 for TikTok, Reels & X.</p>
+    </div>
+
+    <div class="story-grid">
+      <div class="story-card">
+        <div class="story-badge">0-2s • THE HOOK</div>
+        <div class="story-scene">🏖️ Beach / Cafe</div>
+        <h4>Tired of coding at desk?</h4>
+        <p>You're holding a cold brew watching the ocean. A red GitHub Issue alert pops up on your phone.</p>
+      </div>
+      <div class="story-card">
+        <div class="story-badge">2-6s • ONE TAP</div>
+        <div class="story-scene">📱 Telegram Single Hand</div>
+        <h4>Just send a Telegram message</h4>
+        <p>One-handed tap on TG: <code>/fix #42 auth token</code>. Send paper plane. Put phone back down.</p>
+      </div>
+      <div class="story-card">
+        <div class="story-badge">6-11s • AUTONOMY</div>
+        <div class="story-scene">💻 Remote VPS Terminal</div>
+        <h4>VPS auto-fixes & tests</h4>
+        <p>Fast-cut terminal scrolling: Claude Code identifies bug, patches 3 files, runs 14 tests, pushes git PR.</p>
+      </div>
+      <div class="story-card">
+        <div class="story-badge">11-15s • PAYOFF</div>
+        <div class="story-scene">🚀 Code On Your Terms</div>
+        <h4>PocketFleet: Code Anywhere</h4>
+        <p>TG pings back: <code>✅ PR #43 ready to merge</code>. You smile, sip coffee, and enjoy your afternoon.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison Table -->
+  <section class="comparison-section">
+    <div class="section-header">
+      <span class="section-tag">WHY IT MATTERS</span>
+      <h2>Cloud Agent SaaS vs PocketFleet</h2>
+    </div>
+    <div class="table-container">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Architecture Dimension</th>
+            <th>Generic Cloud Web Agents</th>
+            <th class="highlight-col">PocketFleet 🚀</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Code Privacy</td>
+            <td>Code uploaded to 3rd-party servers</td>
+            <td class="highlight-col"><strong>100% on your own metal</strong></td>
+          </tr>
+          <tr>
+            <td>Pricing Model</td>
+            <td>$20–$50 / month recurring subscription</td>
+            <td class="highlight-col"><strong>$19.99 Lifetime Access</strong></td>
+          </tr>
+          <tr>
+            <td>Mobile Trigger</td>
+            <td>Clunky web UI requiring constant eye-contact</td>
+            <td class="highlight-col"><strong>Native Telegram chat UI</strong></td>
+          </tr>
+          <tr>
+            <td>Tooling Freedom</td>
+            <td>Locked into proprietary models</td>
+            <td class="highlight-col"><strong>Claude Code & Aider CLI Native</strong></td>
+          </tr>
+          <tr>
+            <td>Loop Safety</td>
+            <td>Risk of infinite bot ping-pong</td>
+            <td class="highlight-col"><strong>DAG Echo-Proof Gate</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section id="pricing" class="pricing-section">
+    <div class="section-header">
+      <span class="section-tag">TRANSPARENT VALUE</span>
+      <h2>Simple, Lifetime Pricing</h2>
+      <p>No recurring subscriptions. Pay once, use forever on your own machines.</p>
+    </div>
+
+    <div class="pricing-cards-container">
+      <div class="pricing-card featured-card">
+        <div class="popular-tag">MOST POPULAR • LIFETIME</div>
+        <h3 class="tier-name">Solo Hacker License</h3>
+        <div class="price-block">
+          <span class="currency">$</span>
+          <span class="amount">19.99</span>
+          <span class="period">/ one-time</span>
+        </div>
+        <p class="tier-desc">Perfect for independent developers, open-source maintainers, and boutique agency founders.</p>
+        <ul class="tier-benefits">
+          <li>✔ Unlimited Telegram task dispatching</li>
+          <li>✔ Both Claude Code & Aider executors included</li>
+          <li>✔ Run on unlimited personal machines / VPS</li>
+          <li>✔ Chat ID Security Whitelist protection</li>
+          <li>✔ Echo-Proof DAG Loop engine</li>
+          <li>✔ Lifetime minor updates & bug fixes</li>
+        </ul>
+        <a href="https://lemonsqueezy.com" target="_blank" class="btn btn-primary btn-block btn-lg" id="buyButton">
+          Buy Now via Lemon Squeezy
+        </a>
+        <div class="security-guarantee">🔒 14-Day Money-Back Guarantee • Instant Delivery</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-container">
+      <div class="footer-left">
+        <div class="brand-logo">🚀 PocketFleet</div>
+        <p class="footer-tagline">Stop babysitting your CLI. Ship code from Telegram.</p>
+      </div>
+      <div class="footer-right">
+        <p>© 2026 PocketFleet. Crafted with defensive excellence by AI Starship Fleet.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

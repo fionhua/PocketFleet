@@ -26,10 +26,12 @@ class DispatchLoop:
         transport: BaseTransport,
         workspace_cwd: Optional[str] = None,
         default_worker: WorkerType = WorkerType.CLAUDE_CODE,
+        allowed_chat_ids: Optional[set[int]] = None,
     ) -> None:
         self.transport = transport
         self.workspace_cwd = workspace_cwd
         self.default_worker = default_worker
+        self.allowed_chat_ids = allowed_chat_ids
         self.running = False
         
         # Registered executors
@@ -72,6 +74,11 @@ class DispatchLoop:
         # Never process messages originating from bots
         if msg.is_bot:
             logger.debug("Ignored bot message ID %s from %s", msg.message_id, msg.sender_name)
+            return None
+
+        # --- [IRON GATE 3: Security Whitelist Check] ---
+        if self.allowed_chat_ids and msg.chat_id not in self.allowed_chat_ids:
+            logger.warning("Blocked message ID %s from unauthorized chat ID %s", msg.message_id, msg.chat_id)
             return None
 
         # De-duplicate

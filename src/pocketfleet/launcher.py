@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .core import WorkerType
 from .loop import DispatchLoop
+from .onboard import FleetConfig, run_interactive_onboarding
 from .transport.telegram import TelegramTransport
 
 MUTEX_NAME = "Local\\PocketFleet_Singleton_Mutex"
@@ -59,10 +60,17 @@ def print_banner(workspace: str, workers: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="PocketFleet — Telegram to Coding Agent Bridge")
+    parser.add_argument("--init", action="store_true", help="Run interactive setup wizard to configure Bot Token & Chat ID")
     parser.add_argument("--token", type=str, default=None, help="Telegram Bot Token (or env POCKETFLEET_BOT_TOKEN)")
     parser.add_argument("--cwd", type=str, default=None, help="Workspace root path (default current dir)")
-    parser.add_argument("--worker", type=str, default="claude_code", choices=["claude_code", "aider", "auto"])
+    parser.add_argument("--worker", type=str, default="auto", choices=["claude_code", "aider", "auto"])
     args = parser.parse_args(argv)
+
+    if args.init:
+        cfg = run_interactive_onboarding(args.cwd)
+        if not cfg:
+            sys.exit(1)
+        print("Starting PocketFleet with newly generated config...")
 
     # 1. Singleton guard
     guard = SingleInstanceGuard()
@@ -71,21 +79,43 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(0)
 
     try:
-        token = args.token or os.environ.get("POCKETFLEET_BOT_TOKEN")
+        # Load config from file or environment
+        saved_cfg = FleetConfig.load()
+        token = args.token or os.environ.get("POCKETFLEET_BOT_TOKEN") or (saved_cfg.bot_token if saved_cfg else None)
+        
         if not token:
-            print("[!] Missing Bot Token. Pass --token <TOKEN> or set POCKETFLEET_BOT_TOKEN.", file=sys.stderr)
-            sys.exit(1)
+            print("[!] No Bot Token found.", file=sys.stderr)
+            if sys.stdin.isatty():
+                print("    Launching setup wizard...\n")
+                cfg = run_interactive_onboarding(args.cwd)
+                if not cfg:
+                    sys.exit(1)
+                token = cfg.bot_token
+                saved_cfg = cfg
+            else:
+                print("    Please run `pocketfleet --init` or pass `--token <TOKEN>`.", file=sys.stderr)
+                sys.exit(1)
 
-        workspace = str(Path(args.cwd).resolve()) if args.cwd else os.getcwd()
+        allowed_chat_ids = {saved_cfg.allowed_chat_id} if (saved_cfg and saved_cfg.allowed_chat_id) else None
+        workspace = str(Path(args.cwd).resolve()) if args.cwd else (
+            saved_cfg.workspace_cwd if (saved_cfg and saved_cfg.workspace_cwd) else os.getcwd()
+        )
+        worker_str = args.worker if args.worker != "auto" else (
+            saved_cfg.default_worker if (saved_cfg and saved_cfg.default_worker != "auto") else "claude_code"
+        )
+
         transport = TelegramTransport(bot_token=token)
         loop = DispatchLoop(
             transport=transport,
             workspace_cwd=workspace,
-            default_worker=WorkerType(args.worker),
+            default_worker=WorkerType(worker_str),
+            allowed_chat_ids=allowed_chat_ids,
         )
 
         available_workers = [w.value for w in loop.get_available_workers()]
         print_banner(workspace, available_workers)
+        if allowed_chat_ids:
+            print(f" 🔒 Security Whitelist: Chat ID {list(allowed_chat_ids)[0]} locked\n")
 
         loop.run_forever(poll_interval=1.0)
     finally:
