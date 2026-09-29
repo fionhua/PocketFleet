@@ -2,6 +2,7 @@
 > **"Stop babysitting your CLI. Ship code from Telegram."**  
 > *The lightweight Telegram remote cockpit for Claude Code & Aider.*
 
+[![GitHub Release](https://img.shields.io/github/v/release/fionhua/PocketFleet?color=brightgreen)](https://github.com/fionhua/PocketFleet/releases)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Zero Dependency](https://img.shields.io/badge/Core%20Dependencies-ZERO-brightgreen.svg)](#)
