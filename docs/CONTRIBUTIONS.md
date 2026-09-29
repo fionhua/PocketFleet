@@ -23,6 +23,7 @@
 |---|---|---|---|
 | 1 | 2026-09-29 | **海外出海战役全面立项与总纲奠基**：<br>1. 承接指挥官海外战役全权委托，确立产品英文名 `PocketFleet`；<br>2. 架构穿刺：锁定 Telegram 唯一渠道 + Claude Code / Aider 顶流双轮 + 防回声三铁闸；<br>3. 组建突击小队：分工排布心机姝（心理分镜）与地球 Sandbox（母语极客英文）；<br>4. 起草并签署发布《PocketFleet_海外战役总纲_v1.0.md》，确立元规则 60/40 与自负盈亏合伙人法则。 | 指挥官 09-29 授印，总纲 v1.0 正式生效 |
 | 2 | 2026-09-29 | **Phase 1 技术底座全面闭环与独立建仓**：<br>1. 奠基独立海外工程 `d:\workSpace\PocketFleet`（19 个文件，1130 行代码，Git root commit `b1fa781`）；<br>2. 落地零第三方依赖的 `TelegramTransport`（防丢包长短轮询、水位标记、自动纠错回退）；<br>3. 落地海外顶流双执行器：`ClaudeCodeExecutor`（Anthropic 原生 CLI）与 `AiderExecutor`（开源全模型 CLI）；<br>4. 落地防回声单向 DAG 调度循环 `DispatchLoop`（彻底隔离 Bot 互啄，单向直达人类）；<br>5. 落地单实例内核互斥守卫 `SingleInstanceGuard` 与控制台入口 `launcher.py`；<br>6. 交付 11/11 项自动化测试，100% 全绿（运行耗时 0.17 秒）。 | 11/11 tests 全绿，root commit `b1fa781`，总纲 Phase 1 验收标准达成 |
+| 3 | 2026-09-29 | **Phase 2 开发者体验 (DX)、安全白名单、交互式实机演示与商业化全套就绪**：<br>1. 交付 60 秒交互式安装向导 `pocketfleet/onboard.py` 与 `--init` 机制（自动验证 Token、自动配对手机 `/start`、自动环境体检）；<br>2. 落地 Chat ID 强制安全白名单拦截锁（非白名单请求直接阻断，杜绝外部陌生人恶意发单）；<br>3. 交付 14/14 项自动化单测全绿；<br>4. 交付极客暗黑风商业化 Landing Page（集成心机姝 15s 分镜、地球Sandbox三大杀手特性、双屏实时交互模拟器、Lemon Squeezy 定价卡片）；<br>5. 交付 GitHub Actions CI/CD 多平台矩阵、MIT 开源 License 与 PyPI 零依赖打包流水线（`dist/` 产物仅 16 KB）。 | 14/14 tests 全绿，实机浏览器巡检无损通过，Git commit `8ffa45d` |
 
 ---
 
