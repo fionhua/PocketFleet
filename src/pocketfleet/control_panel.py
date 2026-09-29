@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🛸 PocketFleet Control Panel (Solo Hacker Edition)
+PocketFleet Control Panel (Solo Hacker Edition)
 XAMPP-Style Desktop Tray Controller for PocketFleet
 
 Features:
-- Multi-service status monitoring (Telegram Bridge Daemon, AI Executor, Local Web Cockpit)
-- Millisecond-level alive probing & process tree supervision
-- 1-Click Start All / Stop All
-- Windows System Tray resident ("Tony" Icon) with right-click menu & notifications
+- In-process Web Cockpit server (Port 8765) with 100% reliable zero-delay startup
+- In-process DispatchLoop supervisor with Telegram connectivity
+- Thread-safe queue architecture avoiding Tkinter mainloop collision
+- Multi-service status monitoring with live status lights (Green/Red)
+- Windows System Tray resident with right-click menu & notifications
 - Real-time embedded console log window
-- Web Cockpit browser launcher
+- Direct browser launch & config file editor
 """
 
-import ctypes
 import json
+import logging
+import multiprocessing
 import os
+import queue
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -30,52 +32,22 @@ from tkinter import font as tkfont, messagebox
 from PIL import Image, ImageDraw
 import pystray
 
+from pocketfleet.cockpit import CockpitServer, telemetry
+from pocketfleet.core import WorkerType
+from pocketfleet.loop import DispatchLoop
+from pocketfleet.onboard import FleetConfig
+from pocketfleet.state import StateStore
+from pocketfleet.transport.telegram import TelegramTransport
+
 # ==============================================================================
 # Environment & Paths
 # ==============================================================================
 if getattr(sys, "frozen", False):
     REPO_ROOT = Path(sys.executable).resolve().parent
-    PYTHON_EXE = sys.executable
 else:
     REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-    PYTHON_EXE = sys.executable
 
-SYSTEM_PYTHON = r"C:\Python312\python.exe" if Path(r"C:\Python312\python.exe").is_file() else PYTHON_EXE
 CONFIG_FILE = REPO_ROOT / "pocketfleet.json"
-PID_FILE_DAEMON = REPO_ROOT / ".pocketfleet_daemon.pid"
-PID_FILE_COCKPIT = REPO_ROOT / ".pocketfleet_cockpit.pid"
-
-
-# ==============================================================================
-# Process & Win32 Helpers
-# ==============================================================================
-def is_pid_alive(pid: int | None) -> bool:
-    if not pid or pid <= 0:
-        return False
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not h_proc:
-        return False
-    try:
-        exit_code = ctypes.c_ulong()
-        if ctypes.windll.kernel32.GetExitCodeProcess(h_proc, ctypes.byref(exit_code)):
-            return exit_code.value == 259  # STILL_ACTIVE
-        return False
-    finally:
-        ctypes.windll.kernel32.CloseHandle(h_proc)
-
-
-def kill_pid_tree(pid: int | None) -> None:
-    if not pid or pid <= 0:
-        return
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)],
-            capture_output=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except Exception:
-        pass
 
 
 def is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
@@ -99,7 +71,6 @@ def create_tray_image(color: str = "cyan") -> Image.Image:
     hex_color = color_map.get(color, "#06b6d4")
     img = Image.new("RGBA", (64, 64), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    # Draw rocket / starfleet badge shape
     draw.rounded_rectangle([4, 4, 60, 60], radius=16, fill="#0f172a", outline=hex_color, width=3)
     draw.polygon([(32, 12), (48, 48), (32, 40), (16, 48)], fill=hex_color)
     draw.ellipse([28, 24, 36, 32], fill="#ffffff")
@@ -107,109 +78,120 @@ def create_tray_image(color: str = "cyan") -> Image.Image:
 
 
 # ==============================================================================
-# Process Manager
+# Fleet Manager (In-Process Engine)
 # ==============================================================================
 class FleetManager:
     def __init__(self, log_cb):
         self.log = log_cb
-        self.daemon_proc = None
-        self.cockpit_proc = None
+        self.cockpit_server: CockpitServer | None = None
+        self.dispatch_loop: DispatchLoop | None = None
+        self.loop_thread: threading.Thread | None = None
+        self.cockpit_port = 8765
 
-    def get_daemon_pid(self) -> int | None:
-        if self.daemon_proc and self.daemon_proc.poll() is None:
-            return self.daemon_proc.pid
-        if PID_FILE_DAEMON.is_file():
-            try:
-                pid = int(PID_FILE_DAEMON.read_text().strip())
-                if is_pid_alive(pid):
-                    return pid
-            except Exception:
-                pass
-        return None
+    def is_daemon_running(self) -> bool:
+        return bool(self.dispatch_loop and getattr(self.dispatch_loop, "running", False))
 
-    def get_cockpit_pid(self) -> int | None:
-        if self.cockpit_proc and self.cockpit_proc.poll() is None:
-            return self.cockpit_proc.pid
-        if PID_FILE_COCKPIT.is_file():
-            try:
-                pid = int(PID_FILE_COCKPIT.read_text().strip())
-                if is_pid_alive(pid):
-                    return pid
-            except Exception:
-                pass
-        return None
+    def is_cockpit_running(self) -> bool:
+        return is_port_listening(self.cockpit_port)
 
-    def start_daemon(self, executor: str = "claude_code") -> None:
-        pid = self.get_daemon_pid()
-        if pid:
-            self.log(f"[WARN] PocketFleet Daemon is already running (PID: {pid})")
-            return
-        
-        self.log(f"[DAEMON] Launching PocketFleet Bridge Daemon (Executor: {executor})...")
-        cmd = [SYSTEM_PYTHON, "-m", "pocketfleet.launcher", "run", "--worker", executor]
-        try:
-            p = subprocess.Popen(
-                cmd,
-                cwd=str(REPO_ROOT),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            self.daemon_proc = p
-            PID_FILE_DAEMON.write_text(str(p.pid))
-            self.log(f"[DAEMON] Started successfully (PID: {p.pid})")
-        except Exception as e:
-            self.log(f"[ERROR] Failed to start daemon: {e}")
-
-    def stop_daemon(self) -> None:
-        pid = self.get_daemon_pid()
-        if not pid:
-            self.log("[DAEMON] Daemon is not running.")
-            return
-        self.log(f"[DAEMON] Stopping daemon (PID: {pid})...")
-        kill_pid_tree(pid)
-        if PID_FILE_DAEMON.is_file():
-            try:
-                PID_FILE_DAEMON.unlink()
-            except Exception:
-                pass
-        self.daemon_proc = None
-        self.log("[DAEMON] Daemon stopped.")
-
-    def start_cockpit(self, port: int = 8765) -> None:
-        if is_port_listening(port):
+    def start_cockpit(self, port: int = 8765, open_browser: bool = False) -> None:
+        self.cockpit_port = port
+        if self.is_cockpit_running():
             self.log(f"[COCKPIT] Web Cockpit already listening on port {port}")
-            webbrowser.open(f"http://127.0.0.1:{port}")
+            if open_browser:
+                webbrowser.open(f"http://127.0.0.1:{port}")
             return
-        
-        self.log(f"[COCKPIT] Launching Web Cockpit on port {port}...")
-        cmd = [SYSTEM_PYTHON, "-m", "pocketfleet.launcher", "--ui", "--port", str(port)]
+
+        self.log(f"[COCKPIT] Starting Web Cockpit on port {port}...")
         try:
-            p = subprocess.Popen(
-                cmd,
-                cwd=str(REPO_ROOT),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            self.cockpit_proc = p
-            PID_FILE_COCKPIT.write_text(str(p.pid))
-            self.log(f"[COCKPIT] Started on port {port} (PID: {p.pid})")
-            time.sleep(0.8)
-            webbrowser.open(f"http://127.0.0.1:{port}")
+            telemetry.workspace = str(REPO_ROOT)
+            self.cockpit_server = CockpitServer(port=port)
+            self.cockpit_server.start(auto_open=open_browser)
+            self.log(f"[COCKPIT] Web Cockpit active at http://127.0.0.1:{port}")
         except Exception as e:
-            self.log(f"[ERROR] Failed to start cockpit: {e}")
+            self.log(f"[ERROR] Failed to start Web Cockpit: {e}")
 
     def stop_cockpit(self) -> None:
-        pid = self.get_cockpit_pid()
-        if not pid:
-            self.log("[COCKPIT] Web Cockpit is not running.")
-            return
-        self.log(f"[COCKPIT] Stopping Web Cockpit (PID: {pid})...")
-        kill_pid_tree(pid)
-        if PID_FILE_COCKPIT.is_file():
+        if self.cockpit_server:
+            self.log("[COCKPIT] Stopping Web Cockpit...")
             try:
-                PID_FILE_COCKPIT.unlink()
+                self.cockpit_server.stop()
             except Exception:
                 pass
-        self.cockpit_proc = None
-        self.log("[COCKPIT] Cockpit stopped.")
+            self.cockpit_server = None
+            self.log("[COCKPIT] Web Cockpit stopped.")
+
+    def start_daemon(self, executor: str = "claude_code") -> bool:
+        if self.is_daemon_running():
+            self.log("[WARN] Telegram Daemon is already active.")
+            return True
+
+        token, allowed_ids = self._load_credentials()
+        if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
+            self.log("[CONFIG] No valid Bot Token found! Please edit pocketfleet.json first.")
+            return False
+
+        self.log(f"[DAEMON] Initializing Telegram Dispatch Loop (Worker: {executor})...")
+        try:
+            state_store = StateStore()
+            transport = TelegramTransport(bot_token=token, state_store=state_store)
+            self.dispatch_loop = DispatchLoop(
+                transport=transport,
+                workspace_cwd=str(REPO_ROOT),
+                default_worker=WorkerType(executor),
+                allowed_chat_ids=allowed_ids,
+                state_store=state_store,
+            )
+
+            telemetry.allowed_chat_ids = list(allowed_ids) if allowed_ids else []
+            telemetry.available_workers = [w.value for w in self.dispatch_loop.get_available_workers()]
+            telemetry.telegram_connected = True
+
+            def _run():
+                try:
+                    self.dispatch_loop.run_forever(poll_interval=1.0)
+                except Exception as ex:
+                    self.log(f"[DAEMON] Loop error: {ex}")
+
+            self.loop_thread = threading.Thread(target=_run, daemon=True)
+            self.loop_thread.start()
+            self.log("[DAEMON] Telegram Bridge Daemon running. Listening for tasks...")
+            return True
+        except Exception as e:
+            self.log(f"[ERROR] Failed to start daemon: {e}")
+            return False
+
+    def stop_daemon(self) -> None:
+        if not self.is_daemon_running():
+            self.log("[DAEMON] Daemon is not running.")
+            return
+        self.log("[DAEMON] Stopping Telegram Bridge Daemon...")
+        if self.dispatch_loop:
+            self.dispatch_loop.stop()
+            self.dispatch_loop = None
+        telemetry.telegram_connected = False
+        self.log("[DAEMON] Daemon stopped.")
+
+    def _load_credentials(self) -> tuple[str | None, set[int] | None]:
+        if CONFIG_FILE.is_file():
+            try:
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                tok = data.get("bot_token")
+                ids = data.get("authorized_user_ids")
+                set_ids = set(ids) if ids else None
+                return tok, set_ids
+            except Exception:
+                pass
+
+        saved = FleetConfig.load()
+        if saved and saved.bot_token:
+            return saved.bot_token, {saved.allowed_chat_id} if saved.allowed_chat_id else None
+
+        env_tok = os.environ.get("POCKETFLEET_BOT_TOKEN")
+        if env_tok:
+            return env_tok, None
+
+        return None, None
 
 
 # ==============================================================================
@@ -222,6 +204,9 @@ class PocketFleetControlApp:
         self.root.geometry("820x680")
         self.root.minsize(760, 600)
         self.root.configure(bg="#0b0f19")
+
+        # Thread-safe log queue
+        self.log_queue = queue.Queue()
 
         # Fonts
         self.font_title = tkfont.Font(family="Segoe UI", size=15, weight="bold")
@@ -241,29 +226,67 @@ class PocketFleetControlApp:
         self._build_log_console()
 
         self._setup_tray()
-
-        # Handle window close (minimize to tray instead of destroy)
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
 
-        # Polling thread for status updates
-        self.poll_thread = threading.Thread(target=self._status_poll_loop, daemon=True)
-        self.poll_thread.start()
+        self._ensure_config_exists()
 
         self.append_log("🚀 PocketFleet Control Panel initialized. Ready to command.")
 
+        # Start drain log loop on main thread
+        self.root.after(100, self._drain_log_queue)
+
+        # Start periodic status refresh on main thread
+        self.root.after(500, self._refresh_status)
+
+        # Auto-start Web Cockpit after mainloop starts
+        self.root.after(600, lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, open_browser=False), daemon=True).start())
+
     def append_log(self, text: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
-        msg = f"[{ts}] {text}\n"
+        self.log_queue.put(f"[{ts}] {text}\n")
 
-        def _insert():
+    def _drain_log_queue(self) -> None:
+        while not self.log_queue.empty():
             try:
+                msg = self.log_queue.get_nowait()
                 self.log_text.config(state=tk.NORMAL)
                 self.log_text.insert(tk.END, msg)
                 self.log_text.see(tk.END)
                 self.log_text.config(state=tk.DISABLED)
             except Exception:
-                pass
-        self.root.after(0, _insert)
+                break
+        if not self.is_quitting:
+            self.root.after(100, self._drain_log_queue)
+
+    def _refresh_status(self) -> None:
+        try:
+            # 1. Daemon
+            is_d = self.mgr.is_daemon_running()
+            self._update_row(
+                self.row_daemon,
+                is_running=is_d,
+                detail="Active (Polling Telegram)" if is_d else "Stopped",
+            )
+
+            # 2. Cockpit
+            is_c = self.mgr.is_cockpit_running()
+            self._update_row(
+                self.row_cockpit,
+                is_running=is_c,
+                detail="Listening on http://127.0.0.1:8765" if is_c else "Offline",
+            )
+
+            # 3. Agent
+            self._update_row(self.row_agent, is_running=True, detail="Ready (Claude Code / Aider)")
+
+            if self.tray_icon:
+                color = "green" if (is_d and is_c) else ("cyan" if (is_d or is_c) else "yellow")
+                self.tray_icon.icon = create_tray_image(color)
+        except Exception:
+            pass
+
+        if not self.is_quitting:
+            self.root.after(1000, self._refresh_status)
 
     def _build_header(self) -> None:
         header = tk.Frame(self.root, bg="#0f172a", height=70)
@@ -303,7 +326,7 @@ class PocketFleetControlApp:
         self.row_daemon = self._create_service_row(
             table_card,
             name="1. Telegram Bridge Daemon",
-            on_start=lambda: threading.Thread(target=self.mgr.start_daemon, daemon=True).start(),
+            on_start=self._action_start_daemon,
             on_stop=lambda: threading.Thread(target=self.mgr.stop_daemon, daemon=True).start(),
             aux_text="Edit Config",
             aux_cmd=self._open_config,
@@ -313,10 +336,10 @@ class PocketFleetControlApp:
         self.row_cockpit = self._create_service_row(
             table_card,
             name="2. Local Web Cockpit (UI)",
-            on_start=lambda: threading.Thread(target=self.mgr.start_cockpit, daemon=True).start(),
+            on_start=lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, True), daemon=True).start(),
             on_stop=lambda: threading.Thread(target=self.mgr.stop_cockpit, daemon=True).start(),
             aux_text="Open Browser",
-            aux_cmd=lambda: webbrowser.open("http://127.0.0.1:8765"),
+            aux_cmd=self._action_open_browser,
         )
 
         # Row 3: Coding Agent Target
@@ -481,24 +504,48 @@ class PocketFleetControlApp:
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
 
-    def _open_config(self) -> None:
+    def _ensure_config_exists(self) -> None:
         if not CONFIG_FILE.is_file():
-            # Create template
             template = {
                 "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
                 "authorized_user_ids": [12345678],
                 "executor": "claude_code"
             }
-            CONFIG_FILE.write_text(json.dumps(template, indent=2))
+            try:
+                CONFIG_FILE.write_text(json.dumps(template, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+    def _open_config(self) -> None:
+        self._ensure_config_exists()
         os.startfile(str(CONFIG_FILE))
+
+    def _action_open_browser(self) -> None:
+        if not self.mgr.is_cockpit_running():
+            self.mgr.start_cockpit(8765, open_browser=True)
+        else:
+            webbrowser.open("http://127.0.0.1:8765")
+
+    def _action_start_daemon(self) -> None:
+        def _task():
+            ok = self.mgr.start_daemon()
+            if not ok:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Telegram Bot Token Required",
+                    "Please configure your Telegram Bot Token in pocketfleet.json first (the file will now open).\n\n"
+                    "1. Get your Bot Token from @BotFather\n"
+                    "2. Paste it into pocketfleet.json and save\n"
+                    "3. Click Start again."
+                ))
+                self.root.after(200, self._open_config)
+        threading.Thread(target=_task, daemon=True).start()
 
     def action_start_all(self) -> None:
         self.append_log("Starting all PocketFleet services...")
         def _run():
-            self.mgr.start_daemon()
-            time.sleep(0.5)
-            self.mgr.start_cockpit()
-            self.append_log("All services started.")
+            self.mgr.start_cockpit(8765, open_browser=False)
+            time.sleep(0.3)
+            self._action_start_daemon()
         threading.Thread(target=_run, daemon=True).start()
 
     def action_stop_all(self) -> None:
@@ -514,7 +561,7 @@ class PocketFleetControlApp:
         menu = pystray.Menu(
             pystray.MenuItem("🚀 Open PocketFleet Control Panel", self.show_from_tray, default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🌐 Open Web Cockpit (Port 8765)", lambda: webbrowser.open("http://127.0.0.1:8765")),
+            pystray.MenuItem("🌐 Open Web Cockpit (Port 8765)", self._action_open_browser),
             pystray.MenuItem("⚡ Start All Services", self.action_start_all),
             pystray.MenuItem("🛑 Stop All Services", self.action_stop_all),
             pystray.Menu.SEPARATOR,
@@ -546,59 +593,35 @@ class PocketFleetControlApp:
 
     def quit_app(self, icon=None, item=None) -> None:
         self.is_quitting = True
+        self.mgr.stop_daemon()
+        self.mgr.stop_cockpit()
         if self.tray_icon:
             self.tray_icon.stop()
         self.root.after(0, self.root.destroy)
 
-    # ---------------- Polling Loop ----------------
-    def _status_poll_loop(self) -> None:
-        while not self.is_quitting:
-            try:
-                # 1. Daemon
-                d_pid = self.mgr.get_daemon_pid()
-                self._update_row(self.row_daemon, is_running=bool(d_pid), detail=f"Active (PID: {d_pid})" if d_pid else "Stopped")
-
-                # 2. Cockpit
-                c_pid = self.mgr.get_cockpit_pid()
-                c_port = 8765
-                is_c_active = is_port_listening(c_port)
-                self._update_row(self.row_cockpit, is_running=is_c_active, detail=f"Listening on :8765" if is_c_active else "Offline")
-
-                # 3. Agent
-                self._update_row(self.row_agent, is_running=True, detail="Ready (Claude Code / Aider)")
-
-                # Update tray icon color
-                if self.tray_icon:
-                    color = "green" if (d_pid or is_c_active) else "cyan"
-                    self.tray_icon.icon = create_tray_image(color)
-            except Exception:
-                pass
-            time.sleep(1.0)
-
     def _update_row(self, row: dict, is_running: bool, detail: str) -> None:
-        def _ui():
-            row["detail"].config(text=detail)
-            fill_color = "#10b981" if is_running else "#ef4444"
-            row["canvas"].itemconfig(row["light"], fill=fill_color)
-            if row.get("button") and row.get("on_start"):
-                if is_running:
-                    row["button"].config(
-                        text="Stop",
-                        bg="#ef4444",
-                        activebackground="#dc2626",
-                        command=row["on_stop"],
-                    )
-                else:
-                    row["button"].config(
-                        text="Start",
-                        bg="#10b981",
-                        activebackground="#059669",
-                        command=row["on_start"],
-                    )
-        self.root.after(0, _ui)
+        row["detail"].config(text=detail)
+        fill_color = "#10b981" if is_running else "#ef4444"
+        row["canvas"].itemconfig(row["light"], fill=fill_color)
+        if row.get("button") and row.get("on_start"):
+            if is_running:
+                row["button"].config(
+                    text="Stop",
+                    bg="#ef4444",
+                    activebackground="#dc2626",
+                    command=row["on_stop"],
+                )
+            else:
+                row["button"].config(
+                    text="Start",
+                    bg="#10b981",
+                    activebackground="#059669",
+                    command=row["on_start"],
+                )
 
 
 def main():
+    multiprocessing.freeze_support()
     root = tk.Tk()
     app = PocketFleetControlApp(root)
     root.mainloop()
