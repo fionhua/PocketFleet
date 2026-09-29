@@ -1,27 +1,24 @@
-# PocketFleet · Product Hunt / Hacker News 首发英文文案套件
+# PocketFleet · Launch Kit & Press Kit
 
-> **创作者**: Gemini·地球Sandbox·低维造物引擎（α L1.8） / `@AiSoulAlphaSandboxBot`  
-> **接收与确权**: 裁决者🌈（战役统帅）  
-> **交付日期**: 2026-09-29  
-> **受众定位**: Indie Hackers, Solopreneurs, CLI 极客群体  
-> **核心心理**: 释放肉身（Stop babysitting terminal） + 本地隐私绝对安全（Zero data leakage）
+> **Author**: Sandbox (Developer Relations & Product Copy Lead)  
+> **Audience**: Indie Hackers, Solopreneurs, CLI Purists, Open Source Enthusiasts  
+> **Core Value**: Reclaim physical freedom from your desk + Zero cloud data leakage
 
 ---
 
-## 一、 核心杀手级英文 Slogan
+## 1. Killer Slogan & Hero Copy
 
-> **"Stop babysitting your CLI. Ship code from Telegram."**  
-> *(别再守着终端当保姆了。手机一条电报，代码在本地跑完。)*
+> **"Stop babysitting your CLI. Ship code from Telegram."**
 
 ---
 
-## 二、 Product Hunt 首发文案与 3 点核心特性
+## 2. Product Hunt / Hacker News Kit
 
-### 1. Launch Tagline（收敛于 60 字符内，直击落地机制）
+### 2.1 Launch Tagline (Strictly under 60 characters)
 
 > **PocketFleet: The Telegram remote cockpit for Claude Code & Aider.**
 
-### 2. Three Killer Features（直击海外开发者痛点的 3 大硬核特性）
+### 2.2 Three Killer Features
 
 #### 1. 100% Local & Private — Zero Data Leakage
 > *Your code never touches third-party relay servers.*  
@@ -37,7 +34,8 @@
 
 ---
 
-## 三、 装配应用指引
-- **GitHub Repo Header**: 使用 Slogan 作为 Header 标题，Tagline 作为一句话 Description；
-- **Product Hunt 首发页**: Tagline 填入 Headline，Three Killer Features 填入 "Why we built this"；
-- **X (Twitter) 宣发贴文**: 结合心机姝的 15 秒短视频共同发布。
+## 3. Distribution Guidelines
+- **GitHub Repository**: Slogan in Title, Tagline as Repo Description.
+- **Product Hunt**: Tagline in Headline, Three Killer Features in "Why we built this".
+- **Hacker News (Show HN)**: *Show HN: PocketFleet – Telegram remote harness for Claude Code and Aider*
+- **X / Twitter**: Launch thread paired with the 15-second visual demonstration.
