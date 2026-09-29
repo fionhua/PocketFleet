@@ -236,7 +236,7 @@ html_content = """<!DOCTYPE html>
             <div class="step-title"><span class="step-num">1</span> 1-Click Launch Desktop Control Panel (Tray Resident)</div>
             <p>You can manage PocketFleet with our standalone desktop app or terminal:</p>
             <ul style="margin-left: 20px; margin-top: 8px; color: var(--text-sub);">
-                <li><b>Windows:</b> Simply double-click <code>PocketFleet-Control-Panel.exe</code> or <code>Launch-Cockpit.bat</code>! It features a XAMPP-style GUI that minimizes to the Windows system tray ("Tony icon").</li>
+                <li><b>Windows:</b> Simply double-click <code>PocketFleet-Control-Panel.exe</code> or <code>Launch-Cockpit.bat</code>! It features a XAMPP-style GUI that minimizes to the Windows system tray.</li>
                 <li><b>macOS / Linux:</b> Run <code>chmod +x launch-cockpit.sh && ./launch-cockpit.sh</code></li>
             </ul>
             <p style="margin-top: 12px;">Or via terminal:</p>

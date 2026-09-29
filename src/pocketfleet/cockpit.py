@@ -1,4 +1,4 @@
-"""PocketFleet Local Web Cockpit (通信中枢控制台)
+"""PocketFleet Local Web Cockpit (Communication Hub)
 
 A lightweight, zero-dependency, local-only web dashboard for inspecting
 real-time Telegram tasks, worker statuses, and system diagnostics.

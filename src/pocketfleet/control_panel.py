@@ -430,7 +430,7 @@ class PocketFleetControlApp:
 
         btn_tray = tk.Button(
             toolbar,
-            text="⬇ Minimize to Tray (缩入托盘)",
+            text="⬇ Minimize to Tray",
             bg="#38bdf8",
             fg="#0f172a",
             activebackground="#0284c7",
