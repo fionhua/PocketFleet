@@ -1,0 +1,25 @@
+# Credentials and secrets - NEVER COMMIT
+.env
+*.secret
+*.token
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# OS files
+.DS_Store
+Thumbs.db

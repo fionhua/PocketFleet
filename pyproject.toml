@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocketfleet"
+version = "0.1.0"
+description = "PocketFleet — Your 24/7 AI Engineering Squad in Your Pocket (Telegram to Local Coding Agent Bridge)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []  # Zero core third-party dependencies: robust, lightweight, crash-proof
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+tray = ["pystray>=0.19.5", "pillow>=10.0.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
