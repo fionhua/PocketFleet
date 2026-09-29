@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PocketFleet Visual Preview</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      background: #07090e;
+      padding: 24px 30px;
+      margin: 0;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .preview-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .preview-tag {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: #00f0ff;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      display: inline-block;
+    }
+    .preview-title {
+      font-size: 1.85rem;
+      font-weight: 700;
+      color: #fff;
+      margin: 0 0 4px 0;
+    }
+    .preview-sub {
+      color: #8a99ad;
+      font-size: 0.95rem;
+      margin: 0;
+    }
+    .simulator-wrapper {
+      max-width: 1120px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 24px;
+    }
+    .sim-phone {
+      height: 520px;
+    }
+    .sim-terminal {
+      height: 520px;
+    }
+    .tg-chat-body {
+      overflow-y: hidden !important;
+      scrollbar-width: none;
+    }
+    .tg-chat-body::-webkit-scrollbar {
+      display: none;
+    }
+    .terminal-body {
+      padding: 20px;
+      font-size: 0.88rem;
+      line-height: 1.6;
+      overflow-y: hidden !important;
+      scrollbar-width: none;
+    }
+    .terminal-body::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+</head>
+<body class="dark-mode">
+  <div class="preview-header">
+    <span class="preview-tag">⚡ ECHO-PROOF DAG ASYNCHRONOUS ENGINE</span>
+    <h2 class="preview-title">Mobile Telegram &harr; Remote VPS CLI</h2>
+    <p class="preview-sub">Review PRs from the coffee shop while Claude Code & Aider ship code on your metal.</p>
+  </div>
+
+  <div class="simulator-wrapper">
+    <!-- Phone Mockup -->
+    <div class="sim-phone">
+      <div class="phone-notch"></div>
+      <div class="tg-header">
+        <div class="tg-avatar">🤖</div>
+        <div class="tg-info">
+          <div class="tg-name">PocketFleet Bot <span class="bot-badge">BOT</span></div>
+          <div class="tg-status">online &bull; private session</div>
+        </div>
+      </div>
+      <div class="tg-chat-body">
+        <div class="chat-msg bot-msg">
+          <div class="msg-content">
+            🚀 <strong>PocketFleet Online</strong><br>
+            Workspace: <code>/app/backend-api</code><br>
+            Worker: <strong>Claude Code CLI</strong>
+          </div>
+          <div class="msg-time">12:40</div>
+        </div>
+        <div class="chat-msg user-msg">
+          <div class="msg-content">fix issue #42: JWT expiry error</div>
+          <div class="msg-time">12:40</div>
+        </div>
+        <div class="chat-msg bot-msg">
+          <div class="msg-content">
+            ⚡ <strong>Task Dispatched</strong> &bull; Claude Code<br>
+            Tracking: Issue #42
+          </div>
+          <div class="msg-time">12:40</div>
+        </div>
+        <div class="chat-msg bot-msg">
+          <div class="msg-content">
+            ✅ <strong>Issue #42 Resolved!</strong><br>
+            &bull; File: <code>src/auth/jwt.py</code><br>
+            &bull; Tests: 12/12 passed (0.4s)<br>
+            &bull; Commit: <code>a7f89b2</code> pushed<br>
+            &bull; <strong style="color: #00f0ff;">Review PR #43 ready</strong>
+          </div>
+          <div class="msg-time">12:41</div>
+        </div>
+      </div>
+      <div class="tg-input-bar">
+        <input type="text" placeholder="Type prompt to dispatch..." value="fix issue #42: JWT expiry error" readonly>
+        <button class="tg-send-btn">➤</button>
+      </div>
+    </div>
+
+    <!-- Terminal Mockup -->
+    <div class="sim-terminal">
+      <div class="terminal-bar">
+        <div class="term-dots">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+        </div>
+        <div class="term-title">user@vps-frankfurt: ~/projects/backend-api</div>
+        <div class="term-status-pill">DAEMON ACTIVE</div>
+      </div>
+      <div class="terminal-body">
+        <div class="term-line prefix">[PocketFleet-Daemon] Connected to Telegram transport.</div>
+        <div class="term-line prefix">[PocketFleet-Daemon] Echo-Proof DAG gate active. Whitelist verified.</div>
+        <div class="term-line inbound">&gt;&gt; [Inbound Telegram] "fix issue #42: JWT expiry error" (ChatID: #8921)</div>
+        <div class="term-line worker">&gt;&gt; [Worker: Claude Code] Waking agent subprocess in /app/backend-api...</div>
+        <div class="term-line log">&gt; claude 'fix issue #42: JWT expiry error'</div>
+        <div class="term-line log">&bull; Inspecting token validation logic in src/auth/jwt.py: line 84</div>
+        <div class="term-line log">&bull; Added grace period buffer and refreshed signature timestamp</div>
+        <div class="term-line log">&bull; Running test suite: pytest tests/test_auth.py</div>
+        <div class="term-line success">&bull; Results: 12/12 tests passed successfully (0.42s)</div>
+        <div class="term-line log">&bull; Creating git commit: fix(auth): handle expired token (#42)</div>
+        <div class="term-line log">&bull; Pushed to branch: origin/fix/auth-jwt-42</div>
+        <div class="term-line outbound">&gt;&gt; [Outbound Telegram] Notification delivered to developer. (0.8s)</div>
+        <div class="term-line prompt-line">
+          <span class="term-prompt">vps:~$</span> <span class="cursor">_</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

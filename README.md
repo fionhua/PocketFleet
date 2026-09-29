@@ -91,13 +91,32 @@ The wizard will:
 3. Verify that `claude` (Claude Code) or `aider` CLI is installed and ready.
 4. Save your configuration to `pocketfleet.json`.
 
-### Step 3: Start the Daemon
+### Step 3: Start the Daemon & Web Cockpit
 
 ```bash
+# Option A: Start daemon in terminal
 pocketfleet
+
+# Option B: Start daemon with visual Web Cockpit dashboard in browser
+pocketfleet --ui
 ```
 
 That's it! Open Telegram on your phone and start shipping code.
+
+---
+
+## 🌐 Local Web Cockpit (Communication & Telemetry Hub)
+
+Need a birds-eye visual view while sitting at your desk? PocketFleet bundles a zero-dependency local web dashboard running purely on Python's standard library:
+
+```bash
+pocketfleet --ui
+```
+
+- **📡 Live Telemetry Bus**: Inspect incoming Telegram tasks, active worker states, running timers, exit codes, and output logs.
+- **🤖 Agent Health HUD**: Instant real-time indicators for Claude Code CLI and Aider pair programmer readiness.
+- **⚡ Local Testing Dispatcher**: Trigger local agent tasks directly from the browser without reaching for your phone.
+- **🔒 100% Air-Gapped & Safe**: Binds exclusively to `127.0.0.1:8765`, zero public ports exposed.
 
 ---
 

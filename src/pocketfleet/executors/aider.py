@@ -5,10 +5,11 @@ Wrapper for the popular open-source pair programmer `aider`.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from typing import Tuple
 
-from .base import BaseExecutor, check_executable
+from .base import BaseExecutor, check_executable, run_safe_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -26,22 +27,9 @@ class AiderExecutor(BaseExecutor):
         if not self.is_available():
             return 127, "", f"Executable '{self.binary_path}' not found in PATH."
 
-        # Non-interactive invocation for Aider:
-        # --message: execute instructions
-        # --yes: auto-confirm questions
-        # --no-auto-commits: don't commit unless requested
         cmd = [self.binary_path, "--message", prompt, "--yes"]
+        env = dict(os.environ)
+        env["CI"] = "1"
+        env["NONINTERACTIVE"] = "1"
 
-        try:
-            res = subprocess.run(
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_sec,
-            )
-            return res.returncode, res.stdout, res.stderr
-        except subprocess.TimeoutExpired:
-            return -1, "", f"Task timed out after {timeout_sec} seconds."
-        except OSError as exc:
-            return 1, "", f"Execution failed: {exc}"
+        return run_safe_process_tree(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)

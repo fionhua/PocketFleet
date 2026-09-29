@@ -12,16 +12,23 @@ import urllib.request
 from typing import Sequence
 
 from ..core import InboundMessage, OutboundMessage
+from ..state import StateStore
 from .base import BaseTransport
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramTransport(BaseTransport):
-    def __init__(self, bot_token: str, api_base_url: str = "https://api.telegram.org") -> None:
+    def __init__(
+        self,
+        bot_token: str,
+        api_base_url: str = "https://api.telegram.org",
+        state_store: Optional[StateStore] = None,
+    ) -> None:
         self.bot_token = bot_token.strip()
         self.api_url = f"{api_base_url}/bot{self.bot_token}"
-        self.last_update_id: int | None = None
+        self.state_store = state_store
+        self.last_update_id: int | None = self.state_store.get_watermark() if self.state_store else None
 
     def poll_messages(self, timeout_sec: int = 10) -> Sequence[InboundMessage]:
         params = {"timeout": timeout_sec}
@@ -50,6 +57,8 @@ class TelegramTransport(BaseTransport):
             upd_id = upd.get("update_id")
             if upd_id is not None:
                 self.last_update_id = max(self.last_update_id or 0, upd_id)
+                if self.state_store:
+                    self.state_store.set_watermark(self.last_update_id)
 
             msg_obj = upd.get("message") or upd.get("channel_post")
             if not msg_obj:
@@ -95,11 +104,17 @@ class TelegramTransport(BaseTransport):
                 if resp.status == 200:
                     res_json = json.loads(resp.read().decode("utf-8"))
                     return bool(res_json.get("ok"))
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            logger.error("Failed to send Telegram message: %s", exc)
-            # Markdown parse error fallback: retry in plain text
-            if "can't parse entities" in str(exc).lower():
-                payload["parse_mode"] = ""
+        except urllib.error.HTTPError as exc:
+            err_body = ""
+            try:
+                err_body = exc.read().decode("utf-8")
+            except Exception:
+                pass
+            logger.error("Failed to send Telegram message: HTTP %s - %s", exc.code, err_body)
+            # Automatic fallback: if parse_mode caused Bad Request, strip formatting and retry as plain text
+            if exc.code == 400 and payload.get("parse_mode"):
+                logger.info("Retrying Telegram message delivery without parse_mode (plain-text fallback)...")
+                payload.pop("parse_mode", None)
                 try:
                     data = json.dumps(payload).encode("utf-8")
                     req = urllib.request.Request(
@@ -107,7 +122,10 @@ class TelegramTransport(BaseTransport):
                     )
                     with urllib.request.urlopen(req, timeout=10) as resp:
                         return resp.status == 200
-                except Exception:
-                    pass
+                except Exception as retry_exc:
+                    logger.error("Plain-text fallback failed: %s", retry_exc)
+            return False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            logger.error("Failed to send Telegram message: %s", exc)
             return False
         return False

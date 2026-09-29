@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pocketfleet"
-version = "0.1.0"
+version = "0.2.0"
 description = "PocketFleet — Your 24/7 AI Engineering Squad in Your Pocket (Telegram to Local Coding Agent Bridge)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []  # Zero core third-party dependencies: robust, lightweight, crash-proof
+
+[project.scripts]
+pocketfleet = "pocketfleet.launcher:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
