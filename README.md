@@ -1,6 +1,6 @@
 # PocketFleet 🚀
-> **Your 24/7 AI Engineering Squad in Your Pocket.**  
-> Dispatch tasks from Telegram on your phone → Let Claude Code & Aider do the heavy lifting on your machine → Get PRs and diffs back in seconds.
+> **"Stop babysitting your CLI. Ship code from Telegram."**  
+> *The lightweight Telegram remote cockpit for Claude Code & Aider.*
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -8,15 +8,16 @@
 
 ---
 
-## ⚡ Why PocketFleet?
+## ⚡ Three Killer Features
 
-You are walking your dog, commuting, or grabbing coffee, and an urgent bug report or a flash of inspiration hits you.  
-Instead of rushing back to your desk:
-1. Open **Telegram** on your phone.
-2. Send: `/fix auth token expired on branch dev`
-3. **PocketFleet** (running quietly on your home PC or cloud VPS) wakes up **Claude Code** or **Aider**, searches your codebase, fixes the bug, runs tests, and sends back the git diff or PR link.
+1. **100% Local & Private — Zero Data Leakage**  
+   *Your code never touches third-party relay servers.* PocketFleet operates strictly as a lightweight harness on your own hardware or self-hosted VPS. Your proprietary codebase, local environment variables, and API keys stay entirely on your own metal.
 
-**Your code NEVER leaves your machine. No cloud storage. Pure local-first dispatch.**
+2. **True Fire-and-Forget Asynchronous Dispatch**  
+   *Review PRs from the coffee shop, not your desk.* Fire a quick bug fix or feature request from Telegram while you're away. PocketFleet drives Claude Code / Aider through code editing, test execution, and git commits, then pings you back with a crisp diff summary and a ready-to-merge PR.
+
+3. **Zero Bloat, Zero Workflow Rewrites**  
+   *No heavy Docker stacks, no intrusive IDE lock-in.* PocketFleet acts as a drop-in execution bridge that natively wraps around your existing CLI tools. Keep using your favorite terminal setups, aliases, shell configs, and git repositories without changing a single line of your workflow.
 
 ---
 
