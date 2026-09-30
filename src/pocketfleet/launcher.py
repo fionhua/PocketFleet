@@ -12,6 +12,7 @@ import threading
 from pathlib import Path
 
 from .cockpit import CockpitServer, telemetry
+from .config_env import load_env_file
 from .core import WorkerType
 from .loop import DispatchLoop
 from .onboard import FleetConfig, run_interactive_onboarding
@@ -48,28 +49,51 @@ class SingleInstanceGuard:
             self.mutex_handle = None
 
 
+def safe_print(*args, **kwargs) -> None:
+    """Print helper preventing UnicodeEncodeError on Windows GBK / non-UTF-8 consoles."""
+    file = kwargs.get("file", sys.stdout)
+    sep = kwargs.get("sep", " ")
+    end = kwargs.get("end", "\n")
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        encoding = getattr(file, "encoding", "utf-8") or "utf-8"
+        msg = sep.join(str(a) for a in args)
+        safe_msg = msg.encode(encoding, errors="replace").decode(encoding)
+        if file is not None and hasattr(file, "write"):
+            file.write(safe_msg + end)
+            if hasattr(file, "flush"):
+                file.flush()
+
+
 def print_banner(workspace: str, workers: list[str], cockpit_port: int | None = 8765) -> None:
-    print("\n" + "=" * 58)
-    print(" 🚀  PocketFleet — Your AI Engineering Squad in Your Pocket")
-    print("=" * 58)
-    print(f" 📂 Workspace   : {workspace}")
-    print(f" 🤖 Workers     : {', '.join(workers) if workers else 'None detected'}")
+    safe_print("\n" + "=" * 58)
+    safe_print(" 🚀  PocketFleet — Your AI Engineering Squad in Your Pocket")
+    safe_print("=" * 58)
+    safe_print(f" 📂 Workspace   : {workspace}")
+    safe_print(f" 🤖 Workers     : {', '.join(workers) if workers else 'None detected'}")
     if cockpit_port:
-        print(f" 🌐 Web Cockpit : http://127.0.0.1:{cockpit_port}")
-    print(" ⚡ Channel     : Telegram Bot (Listening...)")
-    print(" 🛡️ Architecture: Echo-Proof Single-direction DAG")
-    print("=" * 58)
-    print(" Press Ctrl+C to stop.\n")
+        safe_print(f" 🌐 Web Cockpit : http://127.0.0.1:{cockpit_port}")
+    safe_print(" ⚡ Channel     : Telegram Bot (Listening...)")
+    safe_print(" 🛡️ Architecture: Echo-Proof Single-direction DAG")
+    safe_print("=" * 58)
+    safe_print(" Press Ctrl+C to stop.\n")
 
 
 def main(argv: list[str] | None = None) -> None:
+    load_env_file(Path.cwd() / ".env")
     parser = argparse.ArgumentParser(description="PocketFleet — Telegram to Coding Agent Bridge")
     parser.add_argument("--init", action="store_true", help="Run interactive setup wizard to configure Bot Token & Chat ID")
     parser.add_argument("--ui", action="store_true", help="Launch Local Web Cockpit Dashboard in browser")
     parser.add_argument("--port", type=int, default=8765, help="Web Cockpit port (default: 8765)")
     parser.add_argument("--token", type=str, default=None, help="Telegram Bot Token (or env POCKETFLEET_BOT_TOKEN)")
     parser.add_argument("--cwd", type=str, default=None, help="Workspace root path (default current dir)")
-    parser.add_argument("--worker", type=str, default="auto", choices=["claude_code", "aider", "auto"])
+    parser.add_argument(
+        "--worker",
+        type=str,
+        default="auto",
+        choices=["fleet_triad", "codex", "antigravity", "claude_code", "aider", "simulation", "auto"],
+    )
     args = parser.parse_args(argv)
 
     if args.init:
@@ -86,8 +110,18 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         # Load config from file or environment
-        saved_cfg = FleetConfig.load()
-        token = args.token or os.environ.get("POCKETFLEET_BOT_TOKEN") or (saved_cfg.bot_token if saved_cfg else None)
+        cfg_path = (Path(args.cwd) / "pocketfleet.json") if args.cwd else None
+        try:
+            saved_cfg = FleetConfig.load(cfg_path)
+        except ValueError as exc:
+            print(f"[!] Configuration error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        if saved_cfg and saved_cfg.workspace_cwd:
+            load_env_file(Path(saved_cfg.workspace_cwd) / ".env")
+
+        env_var_name = saved_cfg.bot_token_env if (saved_cfg and saved_cfg.bot_token_env) else "POCKETFLEET_BOT_TOKEN"
+        token = args.token or os.environ.get(env_var_name) or os.environ.get("POCKETFLEET_BOT_TOKEN")
         
         if not token:
             print("[!] No Bot Token found.", file=sys.stderr)
@@ -96,7 +130,7 @@ def main(argv: list[str] | None = None) -> None:
                 cfg = run_interactive_onboarding(args.cwd)
                 if not cfg:
                     sys.exit(1)
-                token = cfg.bot_token
+                token = os.environ.get(cfg.bot_token_env)
                 saved_cfg = cfg
             else:
                 print("    Please run `pocketfleet --init` or pass `--token <TOKEN>`.", file=sys.stderr)
@@ -107,7 +141,7 @@ def main(argv: list[str] | None = None) -> None:
             saved_cfg.workspace_cwd if (saved_cfg and saved_cfg.workspace_cwd) else os.getcwd()
         )
         worker_str = args.worker if args.worker != "auto" else (
-            saved_cfg.default_worker if (saved_cfg and saved_cfg.default_worker != "auto") else "claude_code"
+            saved_cfg.default_worker if (saved_cfg and saved_cfg.default_worker != "auto") else "auto"
         )
 
         state_store = StateStore()
@@ -133,7 +167,7 @@ def main(argv: list[str] | None = None) -> None:
 
         print_banner(workspace, available_workers, cockpit_port=args.port)
         if allowed_chat_ids:
-            print(f" 🔒 Security Whitelist: Chat ID {list(allowed_chat_ids)[0]} locked\n")
+            safe_print(f" 🔒 Security Whitelist: Chat ID {list(allowed_chat_ids)[0]} locked\n")
 
         loop.run_forever(poll_interval=1.0)
     finally:

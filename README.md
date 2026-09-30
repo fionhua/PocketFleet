@@ -143,7 +143,7 @@ To keep PocketFleet running in the background across reboots on Ubuntu, Debian, 
    Type=simple
    User=youruser
    WorkingDirectory=/home/youruser/projects/your-repo
-   Environment="POCKETFLEET_BOT_TOKEN=123456789:ABCDefGhIJKlmNoPQRsTUVwxyZ"
+   Environment="POCKETFLEET_BOT_TOKEN=<BOT_TOKEN>"
    ExecStart=/home/youruser/.local/bin/pocketfleet --cwd /home/youruser/projects/your-repo
    Restart=always
    RestartSec=5

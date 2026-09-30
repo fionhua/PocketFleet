@@ -1,7 +1,4 @@
-"""OpenAI Codex CLI Executor
-
-Integrates with VS Code OpenAI Codex extension or native codex binary.
-"""
+"""Independent OpenAI Codex CLI worker."""
 from __future__ import annotations
 
 import logging
@@ -44,6 +41,16 @@ class CodexExecutor(BaseExecutor):
         if not self.is_available():
             return 127, "", f"Codex binary '{self.binary_path}' not found."
 
-        cmd = [self.binary_path, "exec", "--prompt", prompt]
+        cmd = [
+            self.binary_path,
+            "exec",
+            "--skip-git-repo-check",
+            "--color",
+            "never",
+            "--sandbox",
+            "workspace-write",
+            "--approve-for-me",
+            prompt,
+        ]
         env = dict(os.environ)
         return run_safe_process_tree(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)

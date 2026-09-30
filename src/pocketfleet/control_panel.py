@@ -35,8 +35,20 @@ from PIL import Image, ImageDraw
 import pystray
 
 from pocketfleet.cockpit import CockpitServer, telemetry
-from pocketfleet.core import WorkerType
+from pocketfleet.config_env import load_env_file
+from pocketfleet.core import (
+    WorkerType,
+    RoleAssignment,
+    SeatRole,
+    SeatConfig,
+    FleetSeatsConfig,
+    ALLOWED_CHAT_ENGINES,
+    ALLOWED_CODE_ENGINES,
+    get_default_seats_config,
+    validate_seats_config,
+)
 from pocketfleet.loop import DispatchLoop
+
 from pocketfleet.onboard import FleetConfig
 from pocketfleet.state import StateStore
 from pocketfleet.transport.telegram import TelegramTransport
@@ -50,6 +62,7 @@ else:
     REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 CONFIG_FILE = REPO_ROOT / "pocketfleet.json"
+load_env_file(REPO_ROOT / ".env")
 
 
 def is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
@@ -80,21 +93,26 @@ def create_tray_image(color: str = "cyan") -> Image.Image:
 
 
 # ==============================================================================
-# Configuration Wizard Dialog (Interactive Onboarding Modal)
+# Three Seats Configuration Dialog (Triad Seats Setup)
 # ==============================================================================
-class ConfigWizardDialog(tk.Toplevel):
-    def __init__(self, parent, on_save_callback):
+class ThreeSeatsConfigDialog(tk.Toplevel):
+    def __init__(self, parent, fleet_mgr, on_save_callback=None):
         super().__init__(parent)
         self.parent = parent
+        self.mgr = fleet_mgr
         self.on_save_callback = on_save_callback
 
-        self.title("Telegram Bot Setup Wizard — PocketFleet")
-        self.geometry("580x660")
+        self.title("Fleet Triad Seats Configuration (三席位战队独立编排) — PocketFleet")
+        self.geometry("680x750")
         self.resizable(False, False)
-
         self.configure(bg="#0b0f19")
         self.transient(parent)
         self.grab_set()
+
+        self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
+        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
+        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        self.font_mono = tkfont.Font(family="Consolas", size=9)
 
         # Center on parent
         self.update_idletasks()
@@ -102,212 +120,131 @@ class ConfigWizardDialog(tk.Toplevel):
         ph = parent.winfo_height()
         px = parent.winfo_rootx()
         py = parent.winfo_rooty()
-        cx = max(0, px + (pw - 580) // 2)
-        cy = max(0, py + (ph - 620) // 2)
+        cx = max(0, px + (pw - 680) // 2)
+        cy = max(0, py + (ph - 750) // 2)
         self.geometry(f"+{cx}+{cy}")
 
-        self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
-        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
-        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
-        self.font_mono = tkfont.Font(family="Consolas", size=10)
-
+        self.widgets = {}
         self._build_ui()
-        self._load_existing_values()
+        self._load_values()
 
     def _build_ui(self):
         # Header banner
-        header = tk.Frame(self, bg="#0f172a", padx=20, pady=14)
+        header = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
         header.pack(fill=tk.X)
         tk.Label(
             header,
-            text="⚡ Telegram Bot Setup Wizard (60-Second Fast Track)",
+            text="👥 Fleet Triad Seats Configuration (三席位独立编排)",
             fg="#38bdf8",
             bg="#0f172a",
             font=self.font_title,
         ).pack(anchor="w")
         tk.Label(
             header,
-            text="Configure credentials & choose AI coding executor (Simulation, Codex, Antigravity, Claude).",
+            text="三席位：对话AI (推演对账) + 施工指挥 (验收统筹) + 主力程序员 (核心编码) | 严禁明文Token",
             fg="#94a3b8",
             bg="#0f172a",
             font=self.font_sub,
         ).pack(anchor="w", pady=(2, 0))
 
-        content = tk.Frame(self, bg="#0b0f19", padx=24, pady=16)
+        content = tk.Frame(self, bg="#0b0f19", padx=20, pady=12)
         content.pack(fill=tk.BOTH, expand=True)
 
-        # Field 1: Bot Token
-        f1_hdr = tk.Frame(content, bg="#0b0f19")
-        f1_hdr.pack(fill=tk.X, pady=(0, 4))
-        tk.Label(f1_hdr, text="1. Telegram Bot Token (* Required):", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(side=tk.LEFT)
-        btn_botfather = tk.Button(
-            f1_hdr,
-            text="Get Token from @BotFather ↗",
+        # 3 Seat Sections
+        seat_defs = [
+            ("chat", "💬 席位 1: 对话AI (Chat AI — 推演与宏观对账)", "#38bdf8", list(ALLOWED_CHAT_ENGINES)),
+            ("lead", "🎖️ 席位 2: 施工指挥 (Lead — 架构守门与改卷验收)", "#10b981", list(ALLOWED_CODE_ENGINES)),
+            ("builder", "🛠️ 席位 3: 主力程序员 (Builder — 核心施工与算法定桩)", "#f59e0b", list(ALLOWED_CODE_ENGINES)),
+        ]
+
+        for role_key, title, color, engine_choices in seat_defs:
+            card = tk.LabelFrame(
+                content,
+                text=f" {title} ",
+                fg=color,
+                bg="#1e293b",
+                font=self.font_bold,
+                padx=12,
+                pady=8,
+                relief=tk.GROOVE,
+            )
+            card.pack(fill=tk.X, pady=(0, 10))
+
+            # Row 1: Name & Engine
+            r1 = tk.Frame(card, bg="#1e293b")
+            r1.pack(fill=tk.X, pady=2)
+
+            tk.Label(r1, text="席位代号:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
+            entry_name = tk.Entry(r1, bg="#0f172a", fg="#f8fafc", insertbackground="#f8fafc", font=self.font_mono, width=18, relief=tk.FLAT, bd=4)
+            entry_name.pack(side=tk.LEFT, padx=(0, 16))
+
+            tk.Label(r1, text="执行引擎:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
+            combo_eng = ttk.Combobox(r1, values=engine_choices, state="readonly", width=16)
+            combo_eng.pack(side=tk.LEFT)
+
+            # Row 2: Token Env Var & Username
+            r2 = tk.Frame(card, bg="#1e293b")
+            r2.pack(fill=tk.X, pady=2)
+
+            tk.Label(r2, text="Token变量:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
+            entry_env = tk.Entry(r2, bg="#0f172a", fg="#38bdf8", insertbackground="#38bdf8", font=self.font_mono, width=22, relief=tk.FLAT, bd=4)
+            entry_env.pack(side=tk.LEFT, padx=(0, 8))
+
+            tk.Label(r2, text="Bot用户名:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=9, anchor="w").pack(side=tk.LEFT)
+            entry_user = tk.Entry(r2, bg="#0f172a", fg="#94a3b8", insertbackground="#94a3b8", font=self.font_mono, width=18, relief=tk.FLAT, bd=4)
+            entry_user.pack(side=tk.LEFT)
+
+            # Row 3: Description & Command
+            r3 = tk.Frame(card, bg="#1e293b")
+            r3.pack(fill=tk.X, pady=2)
+
+            tk.Label(r3, text="职责描述:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
+            entry_desc = tk.Entry(r3, bg="#0f172a", fg="#cbd5e1", insertbackground="#cbd5e1", font=self.font_sub, relief=tk.FLAT, bd=4)
+            entry_desc.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+            tk.Label(r3, text="启动指令:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=8, anchor="w").pack(side=tk.LEFT)
+            entry_cmd = tk.Entry(r3, bg="#0f172a", fg="#a7f3d0", insertbackground="#a7f3d0", font=self.font_mono, width=12, relief=tk.FLAT, bd=4)
+            entry_cmd.pack(side=tk.LEFT)
+
+            self.widgets[role_key] = {
+                "name": entry_name,
+                "engine": combo_eng,
+                "env": entry_env,
+                "user": entry_user,
+                "desc": entry_desc,
+                "cmd": entry_cmd,
+            }
+
+        # Extra options
+        opt_frame = tk.Frame(content, bg="#0b0f19")
+        opt_frame.pack(fill=tk.X, pady=(4, 0))
+
+        tk.Label(opt_frame, text="最近消息条数 (context_window):", fg="#94a3b8", bg="#0b0f19", font=self.font_sub).pack(side=tk.LEFT)
+        self.entry_cw = tk.Entry(opt_frame, bg="#1e293b", fg="#f8fafc", font=self.font_mono, width=6, relief=tk.FLAT, bd=4)
+        self.entry_cw.insert(0, "20")
+        self.entry_cw.pack(side=tk.LEFT, padx=(4, 20))
+
+        self.var_nositu = tk.BooleanVar(value=True)
+        cb_nositu = tk.Checkbutton(
+            opt_frame,
+            text="不启用司柝中继",
+            variable=self.var_nositu,
+            bg="#0b0f19",
             fg="#38bdf8",
-            bg="#1e293b",
-            activebackground="#334155",
-            font=self.font_sub,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=6,
-            command=lambda: webbrowser.open("https://t.me/BotFather"),
-        )
-        btn_botfather.pack(side=tk.RIGHT)
-
-        self.entry_token = tk.Entry(
-            content,
-            bg="#1e293b",
-            fg="#38bdf8",
-            insertbackground="#38bdf8",
-            font=self.font_mono,
-            relief=tk.FLAT,
-            bd=6,
-        )
-        self.entry_token.pack(fill=tk.X, pady=(0, 14))
-
-        # Field 2: Authorized Chat / User ID
-        f2_hdr = tk.Frame(content, bg="#0b0f19")
-        f2_hdr.pack(fill=tk.X, pady=(0, 4))
-        tk.Label(f2_hdr, text="2. Authorized User ID (Security Lock):", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(side=tk.LEFT)
-        btn_userid = tk.Button(
-            f2_hdr,
-            text="Find My ID via @userinfobot ↗",
-            fg="#38bdf8",
-            bg="#1e293b",
-            activebackground="#334155",
-            font=self.font_sub,
-            relief=tk.FLAT,
-            cursor="hand2",
-            padx=6,
-            command=lambda: webbrowser.open("https://t.me/userinfobot"),
-        )
-        btn_userid.pack(side=tk.RIGHT)
-
-        self.entry_userid = tk.Entry(
-            content,
-            bg="#1e293b",
-            fg="#f8fafc",
-            insertbackground="#f8fafc",
-            font=self.font_mono,
-            relief=tk.FLAT,
-            bd=6,
-        )
-        self.entry_userid.pack(fill=tk.X, pady=(0, 14))
-
-        # Field 3: Target AI Worker
-        tk.Label(content, text="3. AI Coding Executor Engine & Swarm Mode:", fg="#f1f5f9", bg="#0b0f19", font=self.font_bold).pack(anchor="w", pady=(0, 4))
-        self.worker_var = tk.StringVar(value="fleet_triad")
-        f3_frame = tk.Frame(content, bg="#1e293b", padx=12, pady=8)
-        f3_frame.pack(fill=tk.X, pady=(0, 16))
-
-        rb_triad = tk.Radiobutton(
-            f3_frame,
-            text="🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA Live Swarm — Recommended)",
-            variable=self.worker_var,
-            value="fleet_triad",
-            bg="#1e293b",
-            fg="#38bdf8",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
+            selectcolor="#1e293b",
+            activebackground="#0b0f19",
             activeforeground="#38bdf8",
-            font=self.font_bold,
-        )
-        rb_triad.pack(anchor="w")
-
-        rb_sim = tk.Radiobutton(
-            f3_frame,
-            text="⚡ Fast Simulation / Echo Mode (Zero Accounts Needed)",
-            variable=self.worker_var,
-            value="simulation",
-            bg="#1e293b",
-            fg="#10b981",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
-            activeforeground="#10b981",
             font=self.font_sub,
         )
-        rb_sim.pack(anchor="w")
-
-
-        rb_codex = tk.Radiobutton(
-            f3_frame,
-            text="OpenAI Codex (VS Code Engine)",
-            variable=self.worker_var,
-            value="codex",
-            bg="#1e293b",
-            fg="#f1f5f9",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
-            font=self.font_sub,
-        )
-        rb_codex.pack(anchor="w")
-
-        rb_agy = tk.Radiobutton(
-            f3_frame,
-            text="Google Antigravity (agentapi / agy Engine)",
-            variable=self.worker_var,
-            value="antigravity",
-            bg="#1e293b",
-            fg="#f1f5f9",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
-            font=self.font_sub,
-        )
-        rb_agy.pack(anchor="w")
-
-        rb_claude = tk.Radiobutton(
-            f3_frame,
-            text="Claude Code CLI (Anthropic)",
-            variable=self.worker_var,
-            value="claude_code",
-            bg="#1e293b",
-            fg="#f1f5f9",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
-            font=self.font_sub,
-        )
-        rb_claude.pack(anchor="w")
-
-        rb_aider = tk.Radiobutton(
-            f3_frame,
-            text="Aider CLI (Multi-Model Git Agent)",
-            variable=self.worker_var,
-            value="aider",
-            bg="#1e293b",
-            fg="#f1f5f9",
-            selectcolor="#0f172a",
-            activebackground="#1e293b",
-            font=self.font_sub,
-        )
-        rb_aider.pack(anchor="w")
-
-        # Pro Tip Card: WarRoom HQ Setup
-        tip_card = tk.Frame(content, bg="#0f172a", bd=1, relief=tk.SOLID, padx=12, pady=8)
-        tip_card.pack(fill=tk.X, pady=(4, 8))
-        tk.Label(
-            tip_card,
-            text="💡 Pro Tip: Telegram Group WarRoom Experience",
-            fg="#38bdf8",
-            bg="#0f172a",
-            font=self.font_bold,
-        ).pack(anchor="w")
-        tk.Label(
-            tip_card,
-            text="Create a Telegram Group (e.g., 'Fleet HQ'), add your bot as Admin.\nAssign roles: Alpha sets criteria & verifies, Beta builds code live!",
-            fg="#94a3b8",
-            bg="#0f172a",
-            font=self.font_sub,
-            justify=tk.LEFT,
-        ).pack(anchor="w", pady=(2, 0))
+        cb_nositu.pack(side=tk.LEFT)
 
         # Bottom Actions
         actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
-
         actions.pack(fill=tk.X, side=tk.BOTTOM)
 
         btn_save = tk.Button(
             actions,
-            text="🚀 Save & Start Fleet Daemon",
+            text="💾 保存配置 (Save)",
             bg="#10b981",
             fg="#ffffff",
             activebackground="#059669",
@@ -317,16 +254,31 @@ class ConfigWizardDialog(tk.Toplevel):
             padx=16,
             pady=6,
             cursor="hand2",
-            command=self._save_and_start,
+            command=self._save_seats,
         )
         btn_save.pack(side=tk.RIGHT, padx=(8, 0))
 
-        btn_cancel = tk.Button(
+        btn_reset = tk.Button(
             actions,
-            text="Cancel",
+            text="🔄 恢复默认编组 (Reset)",
             bg="#334155",
             fg="#cbd5e1",
             activebackground="#475569",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=self._reset_defaults,
+        )
+        btn_reset.pack(side=tk.RIGHT, padx=(8, 0))
+
+        btn_cancel = tk.Button(
+            actions,
+            text="取消 (Cancel)",
+            bg="#1e293b",
+            fg="#94a3b8",
+            activebackground="#334155",
             font=self.font_sub,
             relief=tk.FLAT,
             padx=12,
@@ -336,80 +288,108 @@ class ConfigWizardDialog(tk.Toplevel):
         )
         btn_cancel.pack(side=tk.RIGHT)
 
-        btn_raw = tk.Button(
-            actions,
-            text="Open RAW JSON",
-            bg="#0f172a",
-            fg="#64748b",
-            activebackground="#1e293b",
-            activeforeground="#94a3b8",
-            font=self.font_sub,
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self._open_raw,
-        )
-        btn_raw.pack(side=tk.LEFT)
+    def _load_values(self):
+        cfg = self.mgr.load_seats_config()
+        self._populate_fields(cfg)
 
-    def _load_existing_values(self):
-        if CONFIG_FILE.is_file():
-            try:
-                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                tok = data.get("bot_token", "")
-                if tok and tok != "YOUR_TELEGRAM_BOT_TOKEN":
-                    self.entry_token.insert(0, tok)
-                uids = data.get("authorized_user_ids", [])
-                if uids and uids != [12345678]:
-                    self.entry_userid.insert(0, ", ".join(map(str, uids)))
-                exec_type = data.get("executor", "simulation")
-                if exec_type in ("claude_code", "aider", "codex", "antigravity", "simulation"):
-                    self.worker_var.set(exec_type)
-            except Exception:
-                pass
+    def _populate_fields(self, cfg: FleetSeatsConfig):
+        self.entry_cw.delete(0, tk.END)
+        self.entry_cw.insert(0, str(cfg.context_window))
+        self.var_nositu.set(cfg.no_situ)
 
-    def _save_and_start(self):
-        token = self.entry_token.get().strip()
-        if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
-            messagebox.showwarning(
-                "Bot Token Required",
-                "Please enter a valid Telegram Bot Token from @BotFather.",
-                parent=self,
-            )
-            self.entry_token.focus_set()
+        for role_key, w in self.widgets.items():
+            seat = cfg.seats.get(role_key)
+            if not seat:
+                continue
+            w["name"].delete(0, tk.END)
+            w["name"].insert(0, seat.name)
+            w["engine"].set(seat.engine)
+            w["env"].delete(0, tk.END)
+            w["env"].insert(0, seat.bot_token_env)
+            w["user"].delete(0, tk.END)
+            w["user"].insert(0, seat.bot_username)
+            w["desc"].delete(0, tk.END)
+            w["desc"].insert(0, seat.description)
+            w["cmd"].delete(0, tk.END)
+            w["cmd"].insert(0, seat.command)
+
+    def _reset_defaults(self):
+        default_cfg = get_default_seats_config()
+        self._populate_fields(default_cfg)
+
+    def _save_seats(self):
+        try:
+            cw_val = int(self.entry_cw.get().strip() or "20")
+            if cw_val <= 0:
+                raise ValueError("必须为正整数")
+        except ValueError:
+            messagebox.showerror("格式错误", "最近消息条数 (context_window) 必须为正整数 (如 20)。", parent=self)
             return
 
-        raw_uid = self.entry_userid.get().strip()
-        uids = []
-        if raw_uid:
-            for part in raw_uid.replace("，", ",").split(","):
-                part = part.strip()
-                if part.isdigit():
-                    uids.append(int(part))
+        seats_dict = {}
+        for role_key, w in self.widgets.items():
+            name = w["name"].get().strip()
+            engine = w["engine"].get().strip()
+            env_var = w["env"].get().strip()
+            user = w["user"].get().strip()
+            desc = w["desc"].get().strip()
+            cmd = w["cmd"].get().strip()
 
-        payload = {
-            "bot_token": token,
-            "authorized_user_ids": uids,
-            "executor": self.worker_var.get(),
-        }
+            # Plaintext token check (fail loud)
+            if ":" in env_var or " " in env_var:
+                messagebox.showerror(
+                    "安全违规 (Plain Token Detected)",
+                    f"【安全违规】席位 '{role_key}' 检测到明文 Token！\n\n"
+                    "配置层严禁写入任何明文 Token，只能填写环境变量名称（例如 TELEGRAM_BOT_JUDGE_TOKEN）。\n"
+                    "实际 Token 请写入本地 .env 文件。",
+                    parent=self,
+                )
+                w["env"].focus_set()
+                return
+
+            if not env_var:
+                messagebox.showerror("缺失配置", f"席位 '{role_key}' 必须指定环境变量名 (Token变量)！", parent=self)
+                w["env"].focus_set()
+                return
+
+            if not user:
+                messagebox.showerror("缺失配置", f"席位 '{role_key}' 必须指定 Bot 用户名！", parent=self)
+                w["user"].focus_set()
+                return
+
+            seat_cfg = SeatConfig(
+                role=role_key,
+                name=name,
+                engine=engine,
+                bot_token_env=env_var,
+                bot_username=user,
+                description=desc,
+                command=cmd,
+                read_watermark=0,
+            )
+            seats_dict[role_key] = seat_cfg
+
+        new_fleet_cfg = FleetSeatsConfig(
+            seats=seats_dict,
+            context_window=cw_val,
+            no_situ=self.var_nositu.get(),
+        )
 
         try:
-            CONFIG_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            validate_seats_config(new_fleet_cfg)
+        except ValueError as err:
+            messagebox.showerror("校验失败", f"配置校验未通过:\n{err}", parent=self)
+            return
+
+        try:
+            self.mgr.save_seats_config(new_fleet_cfg)
         except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to write pocketfleet.json: {e}", parent=self)
+            messagebox.showerror("保存失败", f"无法写入配置文件:\n{e}", parent=self)
             return
 
         self.destroy()
         if self.on_save_callback:
             self.on_save_callback()
-
-    def _open_raw(self):
-        if not CONFIG_FILE.is_file():
-            payload = {
-                "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
-                "authorized_user_ids": [12345678],
-                "executor": "simulation",
-            }
-            CONFIG_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        os.startfile(str(CONFIG_FILE))
 
 
 # ==============================================================================
@@ -456,18 +436,93 @@ class FleetManager:
             self.cockpit_server = None
             self.log("[COCKPIT] Web Cockpit stopped.")
 
+    def load_fleet_config(self) -> dict:
+        default_cfg = {
+            "authorized_user_ids": [6801810539],
+            "role_assignment": {"lead": "antigravity", "builder": "codex"},
+            "bots": {
+                "antigravity": {
+                    "name": "Google Antigravity agent",
+                    "executor": "antigravity"
+                },
+                "codex": {
+                    "name": "OpenAI Codex worker",
+                    "executor": "codex"
+                }
+            }
+        }
+        if CONFIG_FILE.is_file():
+            try:
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                if "bots" not in data:
+                    data["bots"] = default_cfg["bots"]
+                for agent in data.get("bots", {}).values():
+                    if isinstance(agent, dict):
+                        agent.pop("token", None)
+                if "role_assignment" not in data:
+                    data["role_assignment"] = default_cfg["role_assignment"]
+                return data
+            except Exception:
+                pass
+        return default_cfg
+
+    def load_seats_config(self) -> FleetSeatsConfig:
+        if not CONFIG_FILE.is_file():
+            return get_default_seats_config()
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise ValueError(f"配置文件 {CONFIG_FILE.name} 损坏 (JSON解析失败): {e}") from e
+
+        if "seats" not in data:
+            raise ValueError(f"配置文件 {CONFIG_FILE.name} 缺少 'seats' 三席位定义，配置非法！")
+
+        return FleetSeatsConfig.from_dict(data)
+
+    def save_seats_config(self, seats_cfg: FleetSeatsConfig) -> None:
+        validate_seats_config(seats_cfg)
+        payload = {}
+        if CONFIG_FILE.is_file():
+            try:
+                payload = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+        payload.update(seats_cfg.to_dict())
+        CONFIG_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        self.log(f"💾 [CONFIG] Three seats configuration updated in {CONFIG_FILE.name}")
+
+    def save_fleet_config(self, cfg: dict) -> None:
+        try:
+            for agent in cfg.get("bots", {}).values():
+                if isinstance(agent, dict):
+                    agent.pop("token", None)
+            CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            self.log(f"[CONFIG] Failed to save config: {e}")
+
+    def switch_roles(self, lead: str, builder: str) -> None:
+        cfg = self.load_fleet_config()
+        cfg["role_assignment"] = {"lead": lead, "builder": builder}
+        self.save_fleet_config(cfg)
+        if self.dispatch_loop:
+            self.dispatch_loop.set_role_assignment(RoleAssignment(lead=lead, builder=builder))
+        self.log(f"👥 [ROLE] Swapped WarRoom: 【任务负责人】{lead.title()} ↔ 【主力程序员】{builder.title()}")
+
     def start_daemon(self, executor: str | None = None) -> bool:
         if self.is_daemon_running():
             self.log("[WARN] Telegram Daemon is already active.")
             return True
 
-        token, allowed_ids, cfg_executor = self._load_credentials()
+        cfg = self.load_fleet_config()
+        roles = cfg.get("role_assignment", {"lead": "antigravity", "builder": "codex"})
+        token, allowed_ids, configured_executor = self._load_credentials()
+
         if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
             self.log("[CONFIG] No valid Bot Token found! Wizard prompt triggered.")
             return False
 
-        active_executor = executor or cfg_executor or "fleet_triad"
-        self.log(f"[DAEMON] Initializing Telegram Dispatch Loop (Engine: {active_executor})...")
+        active_executor = executor or configured_executor or cfg.get("executor") or "fleet_triad"
+        self.log("[DAEMON] Initializing evidence-backed dispatch loop...")
         try:
             state_store = StateStore()
             transport = TelegramTransport(bot_token=token, state_store=state_store)
@@ -477,6 +532,8 @@ class FleetManager:
                 default_worker=WorkerType(active_executor),
                 allowed_chat_ids=allowed_ids,
                 state_store=state_store,
+                bots_config=cfg.get("bots", {}),
+                role_assignment=RoleAssignment(lead=roles.get("lead", "antigravity"), builder=roles.get("builder", "codex")),
             )
 
             telemetry.allowed_chat_ids = list(allowed_ids) if allowed_ids else []
@@ -496,6 +553,7 @@ class FleetManager:
         except Exception as e:
             self.log(f"[ERROR] Failed to start daemon: {e}")
             return False
+
 
     def switch_executor(self, executor_type: str) -> None:
         try:
@@ -528,26 +586,13 @@ class FleetManager:
         self.log("[DAEMON] Daemon stopped.")
 
     def _load_credentials(self) -> tuple[str | None, set[int] | None, str | None]:
-        if CONFIG_FILE.is_file():
-            try:
-                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                tok = data.get("bot_token")
-                ids = data.get("authorized_user_ids")
-                exec_type = data.get("executor", "fleet_triad")
-                set_ids = set(ids) if ids else None
-                return tok, set_ids, exec_type
-            except Exception:
-                pass
-
-        saved = FleetConfig.load()
-        if saved and saved.bot_token:
-            return saved.bot_token, {saved.allowed_chat_id} if saved.allowed_chat_id else None, getattr(saved, "default_worker", "fleet_triad")
-
-        env_tok = os.environ.get("POCKETFLEET_BOT_TOKEN")
-        if env_tok:
-            return env_tok, None, "fleet_triad"
-
-        return None, None, None
+        seats_cfg = self.load_seats_config()
+        lead_seat = seats_cfg.seats.get("lead")
+        token_env = lead_seat.bot_token_env if lead_seat else "TELEGRAM_BOT_JUDGE_TOKEN"
+        tok = os.environ.get(token_env) or os.environ.get("POCKETFLEET_BOT_TOKEN")
+        ids = set(seats_cfg.authorized_user_ids) if seats_cfg.authorized_user_ids else None
+        exec_type = lead_seat.engine if lead_seat else "fleet_triad"
+        return tok, ids, exec_type
 
 
 
@@ -578,9 +623,20 @@ class PocketFleetControlApp:
         self.is_quitting = False
         self.tray_icon = None
 
+        # Verify configuration integrity on startup (fail-loud if invalid/corrupt)
+        try:
+            self.mgr.load_seats_config()
+        except Exception as e:
+            messagebox.showerror(
+                "配置文件严重错误 (Config Error)",
+                f"【无法启动 PocketFleet】\n\n{e}\n\n请修复 {CONFIG_FILE.name} 或删除后重新启动自动生成默认配置。",
+            )
+            self.root.destroy()
+            return
+
         self._build_header()
         self._build_table()
-        self._build_engine_selector()
+        self._build_three_seats_panel()
         self._build_toolbar()
         self._build_log_console()
 
@@ -596,7 +652,7 @@ class PocketFleetControlApp:
         # Start periodic status refresh on main thread
         self.root.after(500, self._refresh_status)
 
-        # Auto-start Web Cockpit after mainloop starts
+        # Auto-start Web Cockpit after mainloop starts (zero-poll, web UI only)
         self.root.after(600, lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, open_browser=False), daemon=True).start())
 
     def append_log(self, text: str) -> None:
@@ -632,9 +688,18 @@ class PocketFleetControlApp:
                 detail="Listening on http://127.0.0.1:8765" if is_c else "Offline",
             )
 
-            _, _, cur_exec = self.mgr._load_credentials()
-            display_exec = (cur_exec or "fleet_triad").replace("_", " ").title()
-            self._update_row(self.row_agent, is_running=True, detail=f"Active Engine: {display_exec}")
+            seats_cfg = self.mgr.load_seats_config()
+            lead_s = seats_cfg.seats.get("lead")
+            builder_s = seats_cfg.seats.get("builder")
+            chat_s = seats_cfg.seats.get("chat")
+            l_info = f"{lead_s.name} ({lead_s.engine})" if lead_s else "Lead"
+            b_info = f"{builder_s.name} ({builder_s.engine})" if builder_s else "Builder"
+            c_info = f"{chat_s.name} ({chat_s.engine})" if chat_s else "Chat"
+            self._update_row(
+                self.row_agent,
+                is_running=True,
+                detail=f"Triad: {l_info} ↔ {b_info} ↔ {c_info}",
+            )
 
 
             if self.tray_icon:
@@ -686,8 +751,8 @@ class PocketFleetControlApp:
             name="1. Telegram Bridge Daemon",
             on_start=self._action_start_daemon,
             on_stop=lambda: threading.Thread(target=self.mgr.stop_daemon, daemon=True).start(),
-            aux_text="Setup Wizard",
-            aux_cmd=self.open_setup_wizard,
+            aux_text="Configure Seats",
+            aux_cmd=self.open_three_seats_dialog,
         )
 
         # Row 2: Local Web Cockpit
@@ -773,65 +838,118 @@ class PocketFleetControlApp:
             "state": "unknown",
         }
 
-    def _build_engine_selector(self) -> None:
-        selector_card = tk.Frame(self.root, bg="#1e293b", bd=1, relief=tk.SOLID)
-        selector_card.pack(fill=tk.X, padx=16, pady=(0, 10))
+    def _build_three_seats_panel(self) -> None:
+        card = tk.Frame(self.root, bg="#1e293b", bd=1, relief=tk.SOLID)
+        card.pack(fill=tk.X, padx=16, pady=(0, 10))
 
-        inner = tk.Frame(selector_card, bg="#1e293b", padx=12, pady=10)
-        inner.pack(fill=tk.X)
+        hdr = tk.Frame(card, bg="#1e293b", padx=12, pady=6)
+        hdr.pack(fill=tk.X)
 
-        lbl = tk.Label(
-            inner,
-            text="⚡ Default AI Engine / Swarm Mode:",
+        tk.Label(
+            hdr,
+            text="👥 Fleet Triad Seats (三席位战队独立编排):",
             fg="#38bdf8",
             bg="#1e293b",
             font=self.font_bold,
-        )
-        lbl.pack(side=tk.LEFT, padx=(0, 10))
+        ).pack(side=tk.LEFT)
 
-        self.engine_display_map = {
-            "🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA Live Swarm)": "fleet_triad",
-            "⚡ Fast Simulation / Echo Mode (Zero Accounts)": "simulation",
-            "🤖 OpenAI Codex (VS Code Engine)": "codex",
-            "🌈 Google Antigravity (agentapi.BAT)": "antigravity",
-            "🔮 Claude Code CLI (Anthropic)": "claude_code",
-            "🛠 Aider CLI (Multi-Model Git Agent)": "aider",
-        }
-        self.engine_val_to_display = {v: k for k, v in self.engine_display_map.items()}
-
-        _, _, saved_exec = self.mgr._load_credentials()
-        display_default = self.engine_val_to_display.get(saved_exec, list(self.engine_display_map.keys())[0])
-
-        self.engine_combo_var = tk.StringVar(value=display_default)
-        self.engine_dropdown = ttk.Combobox(
-            inner,
-            textvariable=self.engine_combo_var,
-            values=list(self.engine_display_map.keys()),
-            state="readonly",
-            font=self.font_regular,
-        )
-        self.engine_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-        self.engine_dropdown.bind("<<ComboboxSelected>>", self._on_engine_selected)
-
-        btn_apply = tk.Button(
-            inner,
-            text="Switch Mode",
+        btn_cfg = tk.Button(
+            hdr,
+            text="⚙️ 配置三席位 (Configure Seats)",
             bg="#0284c7",
             fg="#ffffff",
             activebackground="#0369a1",
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
-            padx=12,
+            padx=10,
             cursor="hand2",
-            command=self._on_engine_selected,
+            command=self.open_three_seats_dialog,
         )
-        btn_apply.pack(side=tk.RIGHT)
+        btn_cfg.pack(side=tk.RIGHT)
 
-    def _on_engine_selected(self, event=None) -> None:
-        selected_display = self.engine_combo_var.get()
-        target_val = self.engine_display_map.get(selected_display, "fleet_triad")
-        self.mgr.switch_executor(target_val)
+        # Container for the 3 seat cards
+        self.seats_container = tk.Frame(card, bg="#0f172a", padx=10, pady=8)
+        self.seats_container.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self.seats_container.columnconfigure(0, weight=1)
+        self.seats_container.columnconfigure(1, weight=1)
+        self.seats_container.columnconfigure(2, weight=1)
+
+        self._render_seat_cards()
+
+    def _render_seat_cards(self) -> None:
+        for widget in self.seats_container.winfo_children():
+            widget.destroy()
+
+        seats_cfg = self.mgr.load_seats_config()
+        seat_roles = [
+            ("chat", "💬 席位 1: 对话AI (Chat)", "#38bdf8"),
+            ("lead", "🎖️ 席位 2: 施工指挥 (Lead)", "#10b981"),
+            ("builder", "🛠️ 席位 3: 主力程序员 (Builder)", "#f59e0b"),
+        ]
+
+        for col, (role_key, role_label, accent_color) in enumerate(seat_roles):
+            seat = seats_cfg.seats.get(role_key)
+            card_sub = tk.Frame(self.seats_container, bg="#1e293b", bd=1, relief=tk.RIDGE, padx=10, pady=8)
+            card_sub.grid(row=0, column=col, sticky="nsew", padx=4)
+
+            tk.Label(
+                card_sub,
+                text=role_label,
+                fg=accent_color,
+                bg="#1e293b",
+                font=self.font_bold,
+                anchor="w",
+            ).pack(fill=tk.X)
+
+            name_text = seat.name if seat else "未配置"
+            eng_text = (seat.engine.upper() if seat else "UNKNOWN")
+            token_env = seat.bot_token_env if seat else ""
+            desc = seat.description if seat else ""
+
+            tk.Label(
+                card_sub,
+                text=f"代号: {name_text}",
+                fg="#f8fafc",
+                bg="#1e293b",
+                font=self.font_bold,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(4, 0))
+
+            tk.Label(
+                card_sub,
+                text=f"引擎: {eng_text}",
+                fg="#38bdf8",
+                bg="#1e293b",
+                font=self.font_sub,
+                anchor="w",
+            ).pack(fill=tk.X)
+
+            tk.Label(
+                card_sub,
+                text=f"Token变量: {token_env}",
+                fg="#94a3b8",
+                bg="#1e293b",
+                font=self.font_mono,
+                anchor="w",
+            ).pack(fill=tk.X)
+
+            if desc:
+                tk.Label(
+                    card_sub,
+                    text=f"职责: {desc}",
+                    fg="#64748b",
+                    bg="#1e293b",
+                    font=self.font_sub,
+                    anchor="w",
+                ).pack(fill=tk.X, pady=(2, 0))
+
+    def open_three_seats_dialog(self) -> None:
+        ThreeSeatsConfigDialog(self.root, fleet_mgr=self.mgr, on_save_callback=self._on_seats_saved)
+
+    def _on_seats_saved(self) -> None:
+        self.append_log("👥 [SEATS] Fleet Triad seats configuration updated and verified.")
+        self._render_seat_cards()
 
     def _build_toolbar(self) -> None:
 
@@ -924,11 +1042,7 @@ class PocketFleetControlApp:
         self.log_text.config(state=tk.DISABLED)
 
     def open_setup_wizard(self) -> None:
-        ConfigWizardDialog(self.root, on_save_callback=self._on_wizard_saved)
-
-    def _on_wizard_saved(self) -> None:
-        self.append_log("[CONFIG] Credentials updated via Wizard. Starting Telegram Bridge Daemon...")
-        threading.Thread(target=self.mgr.start_daemon, daemon=True).start()
+        self.open_three_seats_dialog()
 
     def _action_open_browser(self) -> None:
         if not self.mgr.is_cockpit_running():
@@ -965,7 +1079,7 @@ class PocketFleetControlApp:
         menu = pystray.Menu(
             pystray.MenuItem("🚀 Open PocketFleet Control Panel", self.show_from_tray, default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("⚡ Setup Wizard", self.open_setup_wizard),
+            pystray.MenuItem("👥 Configure Seats (三席位编排)", self.open_three_seats_dialog),
             pystray.MenuItem("🌐 Open Web Cockpit (Port 8765)", self._action_open_browser),
             pystray.MenuItem("⚡ Start All Services", self.action_start_all),
             pystray.MenuItem("🛑 Stop All Services", self.action_stop_all),

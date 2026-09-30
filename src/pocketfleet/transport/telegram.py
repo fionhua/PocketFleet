@@ -88,6 +88,7 @@ class TelegramTransport(BaseTransport):
             "text": message.text,
             "parse_mode": message.parse_mode,
         }
+
         if message.reply_to_message_id:
             payload["reply_to_message_id"] = message.reply_to_message_id
 
@@ -108,6 +109,18 @@ class TelegramTransport(BaseTransport):
             err_body = ""
             try:
                 err_body = exc.read().decode("utf-8")
+                err_data = json.loads(err_body)
+                # Auto-heal Telegram Supergroup Migration (P0 Defense)
+                migrated_id = err_data.get("parameters", {}).get("migrate_to_chat_id")
+                if migrated_id:
+                    logger.info("Auto-migrating Telegram chat ID %s -> %s", payload["chat_id"], migrated_id)
+                    payload["chat_id"] = migrated_id
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        return resp.status == 200
             except Exception:
                 pass
             logger.error("Failed to send Telegram message: HTTP %s - %s", exc.code, err_body)

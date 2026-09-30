@@ -22,10 +22,9 @@ class SimulationExecutor(BaseExecutor):
     def execute(self, prompt: str, cwd: str | None = None, timeout_sec: int = 300) -> Tuple[int, str, str]:
         time.sleep(1.0)  # Brief simulated computation
         output = (
-            f"⚡ [PocketFleet Simulation Engine]\n"
-            f"✔ Task Received: {prompt}\n"
-            f"✔ Workspace: {cwd or 'Current Workspace'}\n"
-            f"✔ Synthesized solution and validated changes.\n"
-            f"✔ Status: All 22 tests passing. Ready for deployment!"
+            "[SIMULATION - NO AGENT WAS CALLED]\n"
+            f"Task preview: {prompt}\n"
+            f"Workspace preview: {cwd or 'Current Workspace'}\n"
+            "No files were changed. No commands or tests were run."
         )
         return 0, output, ""

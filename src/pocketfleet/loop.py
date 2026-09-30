@@ -40,24 +40,32 @@ class DispatchLoop:
         default_worker: WorkerType = WorkerType.FLEET_TRIAD,
         allowed_chat_ids: Optional[Set[int]] = None,
         state_store: Optional[StateStore] = None,
+        bots_config: Optional[dict] = None,
+        role_assignment: Optional[Any] = None,
     ) -> None:
         self.transport = transport
         self.workspace_cwd = workspace_cwd
         self.default_worker = default_worker
         self.allowed_chat_ids = allowed_chat_ids
         self.state_store = state_store or StateStore()
+        self.bots_config = bots_config or {}
+        self.role_assignment = role_assignment
         self.running = False
 
         # Registered executors
+        codex = CodexExecutor()
+        antigravity = AntigravityExecutor()
+        claude = ClaudeCodeExecutor()
+        aider = AiderExecutor()
         self.executors: Dict[WorkerType, BaseExecutor] = {
             WorkerType.FLEET_TRIAD: FleetTriadExecutor(),
             WorkerType.SIMULATION: SimulationExecutor(),
-            WorkerType.CODEX: CodexExecutor(),
-            WorkerType.ANTIGRAVITY: AntigravityExecutor(),
-            WorkerType.CLAUDE_CODE: ClaudeCodeExecutor(),
-            WorkerType.AIDER: AiderExecutor(),
+            WorkerType.CODEX: codex,
+            WorkerType.ANTIGRAVITY: antigravity,
+            WorkerType.CLAUDE_CODE: claude,
+            WorkerType.AIDER: aider,
         }
-
+        self._configure_triad()
 
         # Decoupled Work Queue (P0-1 Fix)
         # Holds: tuple[Task, BaseExecutor, InboundMessage]
@@ -75,12 +83,52 @@ class DispatchLoop:
                 available.append(w_type)
         return available
 
-    def select_worker(self, requested: WorkerType) -> Optional[BaseExecutor]:
-        if requested in self.executors and self.executors[requested].is_available():
-            return self.executors[requested]
+    def _role_key(self, role: str) -> WorkerType | None:
+        try:
+            worker = WorkerType(role)
+        except ValueError:
+            return None
+        if worker in (WorkerType.FLEET_TRIAD, WorkerType.SIMULATION, WorkerType.AUTO):
+            return None
+        return worker
 
-        # Fallback to any available
-        for w_type in [self.default_worker, WorkerType.FLEET_TRIAD, WorkerType.SIMULATION, WorkerType.CODEX, WorkerType.ANTIGRAVITY, WorkerType.CLAUDE_CODE, WorkerType.AIDER]:
+    def get_role_bindings(self) -> tuple[BaseExecutor | None, BaseExecutor | None, str, str]:
+        """Resolve the two configured roles to real executor instances and labels."""
+        lead_key = getattr(self.role_assignment, "lead", "antigravity") if self.role_assignment else "antigravity"
+        builder_key = getattr(self.role_assignment, "builder", "codex") if self.role_assignment else "codex"
+        lead_worker = self._role_key(lead_key)
+        builder_worker = self._role_key(builder_key)
+        lead_executor = self.executors.get(lead_worker) if lead_worker else None
+        builder_executor = self.executors.get(builder_worker) if builder_worker else None
+        agents = self.bots_config or {}
+        default_names = {
+            "antigravity": "Google Antigravity agent",
+            "codex": "OpenAI Codex worker",
+            "claude_code": "Claude Code",
+            "aider": "Aider",
+        }
+        lead_name = agents.get(lead_key, {}).get("name") or default_names.get(lead_key, lead_key.title())
+        builder_name = agents.get(builder_key, {}).get("name") or default_names.get(builder_key, builder_key.title())
+        return lead_executor, builder_executor, lead_name, builder_name
+
+    def _configure_triad(self) -> None:
+        triad = self.executors.get(WorkerType.FLEET_TRIAD)
+        if not isinstance(triad, FleetTriadExecutor):
+            return
+        lead, builder, lead_name, builder_name = self.get_role_bindings()
+        triad.configure(lead, builder, lead_name, builder_name)
+
+    def set_role_assignment(self, role_assignment: Any) -> None:
+        self.role_assignment = role_assignment
+        self._configure_triad()
+
+    def select_worker(self, requested: WorkerType) -> Optional[BaseExecutor]:
+        if requested != WorkerType.AUTO:
+            executor = self.executors.get(requested)
+            return executor if executor and executor.is_available() else None
+
+        # AUTO may choose another real executor, but never simulation.
+        for w_type in [WorkerType.FLEET_TRIAD, WorkerType.CODEX, WorkerType.ANTIGRAVITY, WorkerType.CLAUDE_CODE, WorkerType.AIDER]:
             if w_type in self.executors and self.executors[w_type].is_available():
                 return self.executors[w_type]
         return None
@@ -119,6 +167,7 @@ class DispatchLoop:
             parse_mode=parse_mode,
         )
         ok = False
+
         try:
             ok = self.transport.send_message(msg)
         except Exception as exc:
@@ -162,13 +211,20 @@ class DispatchLoop:
             return None
 
         # --- [IRON GATE 3: Security Whitelist Check] ---
-        if self.allowed_chat_ids and msg.chat_id not in self.allowed_chat_ids:
-            logger.warning("Blocked message ID %s from unauthorized chat ID %s", msg.message_id, msg.chat_id)
-            return None
+        # Allow if either the chat itself is authorized OR the sender is an authorized commander
+        if self.allowed_chat_ids:
+            is_authorized = (msg.chat_id in self.allowed_chat_ids) or (msg.sender_id in self.allowed_chat_ids)
+            if not is_authorized:
+                logger.warning("Blocked message ID %s from unauthorized chat ID %s (sender %s)", msg.message_id, msg.chat_id, msg.sender_id)
+                return None
 
         text = msg.text.strip()
+        # Clean bot mention in groups, e.g. /status@MyBot or @MyBot prompt
+        import re
+        text = re.sub(r"@[a-zA-Z0-9_]+bot\b", "", text, flags=re.IGNORECASE).strip()
         if not text:
             return None
+
 
         # --- Instant Non-Blocking System Commands (P0-1 Fix) ---
         if text == "/status":
@@ -213,21 +269,26 @@ class DispatchLoop:
                     "aider": WorkerType.AIDER,
                 }
                 if target in mode_map:
-                    self.default_worker = mode_map[target]
-                    resp = (
-                        f"🎛️ *Fleet Engine Switched to: `{self.default_worker.value}`*\n"
-                        f"• Active Mode: *{self.default_worker.value.upper()}*\n"
-                        "Send any requirement to see it execute!"
-                    )
+                    selected = mode_map[target]
+                    executor = self.executors.get(selected)
+                    if executor and executor.is_available():
+                        self.default_worker = selected
+                        resp = (
+                            f"🎛️ *Fleet Engine Switched to: `{self.default_worker.value}`*\n"
+                            f"• Active Mode: *{self.default_worker.value.upper()}*\n"
+                            "Send any requirement to execute it."
+                        )
+                    else:
+                        resp = f"❌ Engine `{selected.value}` is not available. Mode was not changed."
                 else:
                     resp = f"❓ Unknown mode `{target}`. Available: `fleet`, `codex`, `agy`, `sim`, `claude`, `aider`."
             else:
                 resp = (
                     f"🎛️ *Current Default Fleet Engine*: `{self.default_worker.value}`\n"
-                    "• `/mode fleet` — 🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA Swarm)\n"
+                    "• `/mode fleet` — two real agents: plan, build, verify\n"
                     "• `/mode codex` — 🤖 Local OpenAI Codex Engine\n"
                     "• `/mode agy` — 🌈 Local Google Antigravity\n"
-                    "• `/mode sim` — ⚡ Fast Simulation / Echo"
+                    "• `/mode sim` — preview only; no agent or tests"
                 )
             self._send_immediate_or_outbox(msg.chat_id, resp, reply_to_message_id=msg.message_id)
             return None
@@ -236,10 +297,10 @@ class DispatchLoop:
             help_text = (
                 "🚀 *PocketFleet Commands*\n"
                 "• Send your prompt directly to dispatch to active engine.\n"
-                "• `/mode fleet` — Switch to 🌟 Fleet Triad (2 Coders + 1 Architect + 1 QA)\n"
+                "• `/mode fleet` — two real agents: plan, build, verify\n"
                 "• `/mode codex` — Switch to 🤖 Local OpenAI Codex\n"
                 "• `/mode agy` — Switch to 🌈 Local Google Antigravity\n"
-                "• `/mode sim` — Switch to ⚡ Fast Simulation / Echo\n"
+                "• `/mode sim` — preview only; no agent or tests\n"
                 "• `/status` — View real-time daemon & task progress"
             )
             self._send_immediate_or_outbox(msg.chat_id, help_text, reply_to_message_id=msg.message_id)
@@ -266,8 +327,9 @@ class DispatchLoop:
         executor = self.select_worker(worker_type)
         if not executor:
             err_msg = (
-                f"❌ *Worker Unavailable*: No suitable coding agent found for `{worker_type.value}`. "
-                "Ensure `claude` or `aider` CLI is installed and in system PATH."
+                f"❌ *Worker Unavailable*: `{worker_type.value}` is not ready. "
+                "PocketFleet did not substitute a simulator or another identity. "
+                "Check `/status` and configure the requested real executor."
             )
             self._send_immediate_or_outbox(msg.chat_id, err_msg, reply_to_message_id=msg.message_id)
             task.mark_failed(err_msg, exit_code=127)
@@ -331,15 +393,19 @@ class DispatchLoop:
             logger.info("Executing task %s with worker %s", task.task_id, executor.name)
 
             start_time = time.time()
+            _lead_executor, _builder_executor, lead_name, builder_name = self.get_role_bindings()
             try:
                 if hasattr(executor, "execute_with_phases"):
-                    def _stream_phase(p_text: str):
+                    def _stream_phase(p_text: str, role: str = "lead"):
                         self._send_immediate_or_outbox(
                             chat_id=msg.chat_id,
                             text=p_text,
                             reply_to_message_id=msg.message_id,
                         )
-                    code, stdout, stderr = executor.execute_with_phases(prompt, cwd=self.workspace_cwd, on_phase=_stream_phase)
+                    code, stdout, stderr = executor.execute_with_phases(
+                        prompt, cwd=self.workspace_cwd, on_phase=_stream_phase,
+                        lead_name=f"任务负责人 · {lead_name}", builder_name=f"主力程序员 · {builder_name}"
+                    )
                 else:
                     code, stdout, stderr = executor.execute(prompt, cwd=self.workspace_cwd)
             except Exception as run_err:
@@ -394,6 +460,7 @@ class DispatchLoop:
                 text=reply_text,
                 reply_to_message_id=msg.message_id,
             )
+
             self.work_queue.task_done()
 
         logger.info("PocketFleet Worker Execution Thread terminated.")
