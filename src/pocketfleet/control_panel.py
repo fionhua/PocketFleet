@@ -1576,7 +1576,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         cmd = get_default_command_for_engine(eng) if eng else ""
         w["cmd_var"].set(cmd)
         if eng == "antigravity":
-            w["btn_track"].pack(side=tk.LEFT, padx=(8, 0))
+            if "lbl_bot_badge" in w and w["lbl_bot_badge"].winfo_exists():
+                w["btn_track"].pack(side=tk.LEFT, padx=(8, 0), before=w["lbl_bot_badge"])
+            else:
+                w["btn_track"].pack(side=tk.LEFT, padx=(8, 0))
         else:
             w["btn_track"].pack_forget()
         self._select_seat(role_key)
@@ -1938,7 +1941,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
             # Dynamic track config button
             if seat.engine.lower() == "antigravity":
-                w["btn_track"].pack(side=tk.LEFT, padx=(8, 0))
+                if "lbl_bot_badge" in w and w["lbl_bot_badge"].winfo_exists():
+                    w["btn_track"].pack(side=tk.LEFT, padx=(8, 0), before=w["lbl_bot_badge"])
+                else:
+                    w["btn_track"].pack(side=tk.LEFT, padx=(8, 0))
             else:
                 w["btn_track"].pack_forget()
 
@@ -2117,8 +2123,115 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
 
 # ==============================================================================
-# Antigravity Tracks Dialog (Track Manager & Official Import Guide)
+# Modern Floating Toast Notification
 # ==============================================================================
+def show_floating_toast(
+    parent: tk.Misc,
+    title: str,
+    message: str = "",
+    icon: str = "🎉",
+    duration_ms: int = 2800,
+    bg_color: str = "#0f172a",
+    border_color: str = "#10b981",
+):
+    """Display an upward-floating, non-blocking toast notification over the parent window."""
+    try:
+        root_win = parent.winfo_toplevel()
+    except Exception:
+        root_win = parent
+
+    toast = tk.Toplevel(root_win)
+    toast.wm_overrideredirect(True)
+    toast.configure(bg=border_color)
+    try:
+        toast.attributes("-topmost", True)
+    except Exception:
+        pass
+
+    inner = tk.Frame(toast, bg=bg_color, padx=18, pady=12)
+    inner.pack(padx=2, pady=2, fill=tk.BOTH, expand=True)
+
+    head = tk.Frame(inner, bg=bg_color)
+    head.pack(fill=tk.X)
+
+    tk.Label(
+        head,
+        text=f"{icon}  {title}",
+        fg=border_color,
+        bg=bg_color,
+        font=tkfont.Font(family="Segoe UI", size=11, weight="bold"),
+    ).pack(side=tk.LEFT)
+
+    if message:
+        tk.Label(
+            inner,
+            text=message,
+            fg="#cbd5e1",
+            bg=bg_color,
+            font=tkfont.Font(family="Segoe UI", size=9),
+            justify=tk.LEFT,
+            wraplength=460,
+        ).pack(fill=tk.X, pady=(6, 0))
+
+    toast.update_idletasks()
+    tw = max(380, toast.winfo_width())
+    th = toast.winfo_height()
+
+    try:
+        pw = root_win.winfo_width()
+        ph = root_win.winfo_height()
+        px = root_win.winfo_rootx()
+        py = root_win.winfo_rooty()
+    except Exception:
+        pw, ph, px, py = 860, 600, 200, 200
+
+    target_x = max(0, px + (pw - tw) // 2)
+    start_y = py + (ph // 2) + 25
+    final_y = py + (ph // 2) - 35
+
+    toast.geometry(f"{tw}x{th}+{target_x}+{start_y}")
+
+    steps = 14
+    dy = (final_y - start_y) / steps
+    cur_step = [0]
+    cur_y = [float(start_y)]
+
+    def _float_step():
+        if not toast.winfo_exists():
+            return
+        if cur_step[0] < steps:
+            cur_step[0] += 1
+            cur_y[0] += dy
+            toast.geometry(f"{tw}x{th}+{target_x}+{int(cur_y[0])}")
+            toast.after(16, _float_step)
+        else:
+            toast.geometry(f"{tw}x{th}+{target_x}+{final_y}")
+            toast.after(duration_ms, _fade_out)
+
+    def _fade_out():
+        if not toast.winfo_exists():
+            return
+        alpha = [1.0]
+
+        def _step():
+            if not toast.winfo_exists():
+                return
+            alpha[0] -= 0.12
+            if alpha[0] <= 0.05:
+                toast.destroy()
+            else:
+                try:
+                    toast.attributes("-alpha", alpha[0])
+                    toast.after(20, _step)
+                except Exception:
+                    toast.destroy()
+
+        _step()
+
+    toast.after(16, _float_step)
+    return toast
+
+
 # ==============================================================================
 # Antigravity Tracks Dialog (Dialogue-Centric Track Selector & Smart Binder)
 # ==============================================================================
@@ -2554,27 +2667,36 @@ class AntigravityTracksDialog(tk.Toplevel):
             snippet = clean_dialogue_snippet(cand.last_user_prompt or cand.last_model_response, 50)
             self.mgr.log(f"🧭 [TRACK] Antigravity lead conversation bound: {cand.conversation_id}")
 
+            parent_win = self.parent
+            if self.on_bind_callback:
+                try:
+                    self.on_bind_callback()
+                except Exception as cb_err:
+                    self.mgr.log(f"[TRACK] on_bind_callback error: {cb_err}")
+
+            # Close tracks window per Commander directive
+            self.destroy()
+
+            clean_snip = snippet[:36] + ("..." if len(snippet) > 36 else "")
+            cid_short = f"{cand.conversation_id[:8]}...{cand.conversation_id[-4:]}"
             if cand.source == "ide":
-                msg = (
-                    f"🎉 绑定成功！已为您无感同步当前 IDE 对话至执行环境：\n\n"
-                    f"“{snippet}”\n"
-                    f"(UUID: {cand.conversation_id})\n\n"
-                    f"✅ 已完成数据原子克隆并写入 .env。\n"
-                    f"在 Telegram 发送指令，执行引擎将直接在此 IDE 对话上下文中继续施工！"
+                toast_msg = (
+                    f"会话已同步至执行环境：\n“{clean_snip}”\n(UUID: {cid_short})\n\n"
+                    f"✅ 已完成数据原子克隆。在 Telegram 发送指令，裁决者将直接在此会话施工！"
                 )
             else:
-                msg = (
-                    f"🎉 绑定成功！已绑定 CLI 对话轨为施工续轨：\n\n"
-                    f"“{snippet}”\n"
-                    f"(UUID: {cand.conversation_id})\n\n"
-                    f"已无损写入项目 .env 文件。"
+                toast_msg = (
+                    f"已锁定 CLI 会话为施工续轨：\n“{clean_snip}”\n(UUID: {cid_short})\n\n"
+                    f"在 Telegram 发送指令，裁决者将直接在此轨道继续施工！"
                 )
 
-            messagebox.showinfo("绑定成功", msg, parent=self)
-            self._update_bound_label()
-            self.refresh_tracks()
-            if self.on_bind_callback:
-                self.on_bind_callback()
+            show_floating_toast(
+                parent=parent_win,
+                title="Antigravity 轨道绑定成功！",
+                message=toast_msg,
+                icon="🧭",
+                duration_ms=3200,
+            )
         except Exception as e:
             messagebox.showerror("绑定失败", f"无法绑定轨道:\n{e}", parent=self)
 
