@@ -266,6 +266,92 @@ class TestDispatchLoop(unittest.TestCase):
 
         pending_loop.stop()
 
+    def test_statestore_get_set_meta(self) -> None:
+        self.assertEqual(self.state_store.get_meta("custom_key", "default_val"), "default_val")
+        self.state_store.set_meta("custom_key", "12345.67")
+        self.assertEqual(self.state_store.get_meta("custom_key"), "12345.67")
+
+    def test_format_telegram_envelope_with_roster(self) -> None:
+        from pocketfleet.core import FleetSeatsConfig, SeatConfig
+        seats_cfg = FleetSeatsConfig(
+            seats={
+                "lead": SeatConfig(
+                    role="lead",
+                    name="裁决者",
+                    engine="antigravity",
+                    bot_token_env="TOKEN_A",
+                    bot_username="@AiSoulJudgeBot",
+                    description="施工指挥",
+                ),
+                "builder": SeatConfig(
+                    role="builder",
+                    name="泥蛇",
+                    engine="codex",
+                    bot_token_env="TOKEN_B",
+                    bot_username="@AiSoulMudSnakeBot",
+                    description="主力程序员",
+                ),
+            }
+        )
+        self.loop.seats_config = seats_cfg
+        env = self.loop._format_telegram_envelope(
+            prompt="帮我构建网关",
+            target_worker=WorkerType.CODEX,
+            sender_name="指挥官",
+            sender_id=777,
+            chat_title="AI星舰战队·战役室",
+        )
+        self.assertIn("【🛸 PocketFleet 战役室协同电报】", env)
+        self.assertIn("• 来源会话：AI星舰战队·战役室", env)
+        self.assertIn("• 发件指挥：指挥官 (ID: 777)", env)
+        self.assertIn("• 承接席位：泥蛇（引擎: codex）", env)
+        self.assertIn("• 战役室席位名录（可在回复中 @战友 触发协同）：", env)
+        self.assertIn("@AiSoulJudgeBot", env)
+        self.assertIn("@AiSoulMudSnakeBot", env)
+        self.assertIn("【指挥官外勤任务正文】\n帮我构建网关", env)
+
+    def test_mention_routing_to_designated_worker(self) -> None:
+        from pocketfleet.core import FleetSeatsConfig, SeatConfig
+        seats_cfg = FleetSeatsConfig(
+            seats={
+                "lead": SeatConfig(
+                    role="lead",
+                    name="裁决者",
+                    engine="antigravity",
+                    bot_token_env="TOKEN_A",
+                    bot_username="@AiSoulJudgeBot",
+                    description="施工指挥",
+                ),
+                "builder": SeatConfig(
+                    role="builder",
+                    name="泥蛇",
+                    engine="codex",
+                    bot_token_env="TOKEN_B",
+                    bot_username="@AiSoulMudSnakeBot",
+                    description="主力程序员",
+                ),
+            }
+        )
+        self.loop.seats_config = seats_cfg
+        # Default worker is claude_code, but user mentions @AiSoulMudSnakeBot
+        self.loop.default_worker = WorkerType.CLAUDE_CODE
+        msg = InboundMessage(
+            message_id=1050,
+            chat_id=111,
+            sender_id=123,
+            sender_name="Commander",
+            text="@AiSoulMudSnakeBot 帮我写单元测试",
+            is_bot=False,
+        )
+        task = self.loop.handle_message(msg)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.worker, WorkerType.CODEX)
+        self.assertEqual(task.raw_prompt, "帮我写单元测试")
+        self.assertEqual(task.display_prompt, "帮我写单元测试")
+        self.assertIn("【指挥官外勤任务正文】\n帮我写单元测试", task.prompt)
+        self.assertIn("@AiSoulJudgeBot", task.prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
+

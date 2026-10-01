@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from pocketfleet.antigravity_tracks import (
     DEFAULT_TRACK_MIN_BYTES,
@@ -17,14 +17,19 @@ from pocketfleet.antigravity_tracks import (
     TrackCandidate,
     bind_conversation_id_to_env,
     bind_track_candidate,
+    clean_dialogue_snippet,
     clone_ide_track_to_cli,
     detect_new_imported_track,
+    find_agentapi_binary,
+    get_active_ide_conversation_id,
     inspect_track_candidate,
     is_valid_uuid,
     notify_ide_handover,
+    notify_ide_launch,
     safe_snapshot_sqlite,
     scan_all_candidates,
     scan_candidates,
+    send_agentapi_message,
     snapshot_cli_track_ids,
     write_handover_dossier,
 )
@@ -498,9 +503,82 @@ class TestAntigravityHandoverAndSnapshot(unittest.TestCase):
         self.assertFalse(notified)
 
     def test_notify_ide_handover_soft_fail(self) -> None:
-        # When agentapi is not in test environment or mock fails, returns False without crashing
-        res = notify_ide_handover("test-cid", self.root / ".fleet_handover.md")
-        self.assertIsInstance(res, bool)
+        # When agentapi fails or is mocked, returns boolean without crashing
+        with patch("pocketfleet.antigravity_tracks.find_agentapi_binary", return_value=None):
+            res = notify_ide_handover("test-cid", self.root / ".fleet_handover.md")
+            self.assertFalse(res)
+
+    def test_clean_dialogue_snippet_strips_envelope(self) -> None:
+        raw = "【🛸 PocketFleet 战役室协同电报】\n• 来源会话：战役室\n【指挥官外勤任务正文】\n帮我实现自动化测试"
+        cleaned = clean_dialogue_snippet(raw)
+        self.assertEqual(cleaned, "帮我实现自动化测试")
+
+    def test_find_agentapi_binary_and_resolution(self) -> None:
+        with patch.dict(os.environ, {"POCKETFLEET_AGENTAPI_PATH": "/mock/bin/agentapi.bat"}):
+            with patch("os.path.isfile", return_value=True):
+                self.assertEqual(find_agentapi_binary(), "/mock/bin/agentapi.bat")
+
+        with patch.dict(os.environ, {"POCKETFLEET_IDE_CONVERSATION_ID": "11111111-2222-3333-4444-555555555555"}):
+            self.assertEqual(
+                get_active_ide_conversation_id(),
+                "11111111-2222-3333-4444-555555555555",
+            )
+
+    @patch("subprocess.run")
+    def test_send_agentapi_message_calls_cmd_with_recipient(self, mock_run) -> None:
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("pocketfleet.antigravity_tracks.find_agentapi_binary", return_value="agentapi.bat"):
+            with patch("pocketfleet.antigravity_tracks.get_active_ide_conversation_id", return_value="target-ide-uuid"):
+                ok = send_agentapi_message("hello ide", title="测试公文")
+                self.assertTrue(ok)
+                self.assertTrue(mock_run.called)
+                args = mock_run.call_args[0][0]
+                self.assertIn("send-message", args)
+                self.assertIn("target-ide-uuid", args)
+                self.assertIn("hello ide", args)
+
+    @patch("pocketfleet.antigravity_tracks.send_agentapi_message", return_value=True)
+    def test_notify_ide_launch_60min_throttling(self, mock_send) -> None:
+        ws = self.root / "workspace"
+        ws.mkdir(parents=True, exist_ok=True)
+        cid = "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
+
+        # 1. First call -> executes and succeeds
+        res1 = notify_ide_launch(
+            conversation_id=cid,
+            workspace_cwd=ws,
+            initial_prompt="【指挥官外勤任务正文】\n首次指令",
+            cli_root=self.root / "cli",
+            min_interval_sec=3600.0,
+            force=False,
+        )
+        self.assertTrue(res1)
+        self.assertEqual(mock_send.call_count, 1)
+
+        # 2. Immediate second call -> throttled (< 60 minutes)
+        res2 = notify_ide_launch(
+            conversation_id=cid,
+            workspace_cwd=ws,
+            initial_prompt="第二次指令",
+            cli_root=self.root / "cli",
+            min_interval_sec=3600.0,
+            force=False,
+        )
+        self.assertFalse(res2)
+        self.assertEqual(mock_send.call_count, 1)
+
+        # 3. Third call with force=True -> succeeds
+        res3 = notify_ide_launch(
+            conversation_id=cid,
+            workspace_cwd=ws,
+            initial_prompt="强制指令",
+            cli_root=self.root / "cli",
+            min_interval_sec=3600.0,
+            force=True,
+        )
+        self.assertTrue(res3)
+        self.assertEqual(mock_send.call_count, 2)
+
 
 
 if __name__ == "__main__":

@@ -177,7 +177,8 @@ class TestOnboard(unittest.TestCase):
             )
             task2 = loop.handle_message(auth_msg)
             self.assertIsNotNone(task2)
-            self.assertEqual(task2.prompt, "fix issue in core")
+            self.assertEqual(task2.display_prompt, "fix issue in core")
+            self.assertIn("fix issue in core", task2.prompt)
             loop.stop()
 
 

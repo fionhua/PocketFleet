@@ -277,6 +277,22 @@ class StateStore:
                 (str(update_id),),
             )
 
+    def get_meta(self, key: str, default: str = "") -> str:
+        """Retrieve a string metadata value by key from meta table."""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT value FROM meta WHERE key = ?", (key,))
+            row = cur.fetchone()
+            return str(row["value"]) if row else default
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Persist a string metadata key-value pair to meta table."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)),
+            )
+
     # --- Deduplication & Message State ---
 
     def is_message_processed(self, message_id: int, chat_id: Optional[int] = None) -> bool:

@@ -12,16 +12,21 @@ Hard constraints:
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
 import sqlite3
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Sequence, Set
+from typing import Any, Optional, Sequence, Set
+
+logger = logging.getLogger(__name__)
+
 
 _UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -118,6 +123,11 @@ def clean_dialogue_snippet(text: str, max_chars: int = 100) -> str:
     """Clean markdown and prompt scaffolding tags using comprehensive Antigravity regex."""
     if not text:
         return ""
+    # Extract inner user request if wrapped in envelope
+    if "【指挥官外勤任务正文】" in text:
+        text = text.split("【指挥官外勤任务正文】")[-1]
+    elif "【任务正文】" in text:
+        text = text.split("【任务正文】")[-1]
     # Extract user request inner text if wrapped
     m = _USER_REQUEST_RE.search(text)
     if m:
@@ -600,12 +610,94 @@ def write_handover_dossier(
     return handover_file
 
 
+def find_agentapi_binary() -> str | None:
+    """Locate the agentapi executable across environment, IDE directories, and PATH."""
+    override = os.environ.get("POCKETFLEET_AGENTAPI_PATH")
+    if override and os.path.isfile(override):
+        return override
+
+    ide_root = get_default_ide_root()
+    for candidate in [
+        ide_root / "bin" / "agentapi.bat",
+        ide_root / "bin" / "agentapi.cmd",
+        ide_root / "bin" / "agentapi.exe",
+        ide_root / "bin" / "agentapi",
+    ]:
+        if candidate.is_file():
+            return str(candidate)
+
+    for name in ["agentapi.bat", "agentapi.cmd", "agentapi.exe", "agentapi"]:
+        found = shutil.which(name)
+        if found:
+            return found
+
+    return None
+
+
+def get_active_ide_conversation_id(ide_root: Path | str | None = None) -> str | None:
+    """Resolve active IDE conversation ID, preferring env override then latest active IDE track."""
+    env_id = os.environ.get("POCKETFLEET_IDE_CONVERSATION_ID", "").strip()
+    if env_id and is_valid_uuid(env_id):
+        return env_id.lower()
+
+    ide_dir = Path(ide_root) if ide_root else get_default_ide_root()
+    cands = scan_candidates(ide_dir, source="ide", show_all=True)
+    if cands:
+        return cands[0].conversation_id.lower()
+    return None
+
+
+def send_agentapi_message(
+    content: str,
+    recipient_id: str | None = None,
+    title: str | None = None,
+    ide_root: Path | str | None = None,
+    timeout: float = 8.0,
+) -> bool:
+    """Send message to active Antigravity IDE conversation using official agentapi CLI."""
+    agentapi_cmd = find_agentapi_binary()
+    if not agentapi_cmd:
+        logger.debug("agentapi binary not found; skipping IDE notification.")
+        return False
+
+    target_id = recipient_id or get_active_ide_conversation_id(ide_root)
+    if not target_id:
+        logger.debug("No active IDE conversation ID could be resolved.")
+        return False
+
+    cmd = [agentapi_cmd, "send-message"]
+    if title:
+        cmd.append(f"--title={title}")
+    cmd.extend([target_id, content])
+
+    if os.name == "nt" and agentapi_cmd.lower().endswith((".bat", ".cmd")):
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        cmd = [comspec, "/c"] + cmd
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+        return proc.returncode == 0
+    except Exception as exc:
+        logger.debug("agentapi execution exception: %s", exc)
+        return False
+
+
 def notify_ide_handover(
     conversation_id: str,
     handover_file: Path | str,
     line_start: int = 1,
     line_end: int = 100,
     transcript_path: Path | str | None = None,
+    target_ide_id: str | None = None,
+    ide_root: Path | str | None = None,
 ) -> bool:
     """Send handover notification to active IDE session using agentapi send-message if available.
 
@@ -624,21 +716,12 @@ def notify_ide_handover(
     else:
         msg += "请查阅上述档案以同步外勤施工认知。\n"
 
-    agentapi_cmd = shutil.which("agentapi.cmd") or shutil.which("agentapi")
-    if not agentapi_cmd:
-        return False
-
-    try:
-        proc = subprocess.run(
-            [agentapi_cmd, "send-message", msg],
-            capture_output=True,
-            text=True,
-            timeout=5.0,
-            check=False,
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
+    return send_agentapi_message(
+        content=msg,
+        recipient_id=target_ide_id,
+        title="外勤交接通知",
+        ide_root=ide_root,
+    )
 
 
 def notify_ide_launch(
@@ -646,13 +729,39 @@ def notify_ide_launch(
     workspace_cwd: Path | str,
     initial_prompt: str = "",
     cli_root: Path | str | None = None,
+    target_ide_id: str | None = None,
+    min_interval_sec: float = 3600.0,
+    force: bool = False,
+    state_store: Any | None = None,
 ) -> bool:
     """Send launch-time handshake notification to active IDE session at CLI commencement.
 
-    Ensures that regardless of when or whether the mobile turn completes,
-    the active IDE session already has the transcript path and handover dossier
-    ready for seamless pickup without restarting.
+    Throttled by min_interval_sec (default 60 minutes / 3600s). If the interval has not
+    elapsed since the last launch notification, skips sending and returns False.
     """
+    now = time.time()
+    cli_dir = Path(cli_root) if cli_root else get_default_cli_root()
+    marker_file = cli_dir / ".last_ide_handshake_ts"
+
+    # Check 60-minute threshold
+    last_ts = 0.0
+    if state_store and hasattr(state_store, "get_meta"):
+        try:
+            val = state_store.get_meta("last_ide_handshake_ts", "0.0")
+            last_ts = float(val or 0.0)
+        except Exception:
+            last_ts = 0.0
+    elif marker_file.is_file():
+        try:
+            val = marker_file.read_text(encoding="utf-8").strip()
+            last_ts = float(val or 0.0)
+        except Exception:
+            last_ts = 0.0
+
+    if not force and last_ts > 0.0 and (now - last_ts) < min_interval_sec:
+        # Throttled: do not spam the IDE within 60 minutes
+        return False
+
     ws = Path(workspace_cwd)
     dossier_path = write_handover_dossier(
         workspace_cwd=ws,
@@ -661,8 +770,16 @@ def notify_ide_launch(
         note=f"外勤任务开工指令: {clean_dialogue_snippet(initial_prompt, max_chars=120)}",
     )
 
-    cli_dir = Path(cli_root) if cli_root else get_default_cli_root()
     transcript_file = cli_dir / "brain" / conversation_id.lower() / ".system_generated" / "logs" / "transcript.jsonl"
+    line_count = 0
+    if transcript_file.is_file():
+        try:
+            with open(transcript_file, "r", encoding="utf-8", errors="ignore") as f:
+                line_count = sum(1 for _ in f)
+        except Exception:
+            pass
+
+    prompt_snippet = clean_dialogue_snippet(initial_prompt, max_chars=120) or "外勤协同任务启动"
 
     msg = (
         f"【🛸 PocketFleet 外勤开工与协同接关通知】\n"
@@ -670,7 +787,8 @@ def notify_ide_launch(
         f"1. 工作区交接档案：{dossier_path.as_posix()}\n"
     )
     if transcript_file.is_file():
-        msg += f"2. 外勤实时黑匣子：{transcript_file.as_posix()}\n"
+        msg += f"2. 外勤实时黑匣子：{transcript_file.as_posix()} (当前约 {line_count} 行)\n"
+    msg += f"3. 本轮外勤指令：{prompt_snippet}\n"
 
     msg += (
         f"👉 指挥官随时可能回到 PC 电脑前查看进展或下达后续指令。\n"
@@ -678,21 +796,26 @@ def notify_ide_launch(
         f"直接调用 view_file 查阅上述黑匣子最新日志，即可实时对齐外勤认知并平滑接管！\n"
     )
 
-    agentapi_cmd = shutil.which("agentapi.cmd") or shutil.which("agentapi")
-    if not agentapi_cmd:
-        return False
+    sent = send_agentapi_message(
+        content=msg,
+        recipient_id=target_ide_id,
+        title="外勤开工与协同接关通知",
+    )
 
+    # Record timestamp on successful send or attempt
+    if state_store and hasattr(state_store, "set_meta"):
+        try:
+            state_store.set_meta("last_ide_handshake_ts", str(now))
+        except Exception:
+            pass
     try:
-        proc = subprocess.run(
-            [agentapi_cmd, "send-message", msg],
-            capture_output=True,
-            text=True,
-            timeout=5.0,
-            check=False,
-        )
-        return proc.returncode == 0
+        marker_file.parent.mkdir(parents=True, exist_ok=True)
+        marker_file.write_text(str(now), encoding="utf-8")
     except Exception:
-        return False
+        pass
+
+    return sent
+
 
 
 class AntigravityTrackController:

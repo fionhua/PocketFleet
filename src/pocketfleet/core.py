@@ -63,6 +63,7 @@ class OutboundMessage:
 class Task:
     prompt: str
     worker: WorkerType = WorkerType.AUTO
+    raw_prompt: str = ""
     task_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     status: TaskStatus = TaskStatus.PENDING
     chat_id: int = 0
@@ -73,6 +74,10 @@ class Task:
     result_text: str = ""
     error_message: str = ""
     exit_code: int | None = None
+
+    @property
+    def display_prompt(self) -> str:
+        return self.raw_prompt if self.raw_prompt else self.prompt
 
     def mark_running(self) -> None:
         self.status = TaskStatus.RUNNING

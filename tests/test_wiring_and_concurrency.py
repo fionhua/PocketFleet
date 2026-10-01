@@ -167,10 +167,10 @@ class TestWiringAndConcurrency(unittest.TestCase):
             self.assertEqual(e2.status, "completed")
 
             # Execution was strictly serial
-            self.assertEqual(controlled_exec.call_history, [
-                "TG Task 1: Initialize Fleet",
-                "Web Task 2: Build Subsystem",
-            ])
+            self.assertEqual(len(controlled_exec.call_history), 2)
+            self.assertIn("TG Task 1: Initialize Fleet", controlled_exec.call_history[0])
+            self.assertIn("【🛸 PocketFleet 战役室协同电报】", controlled_exec.call_history[0])
+            self.assertEqual(controlled_exec.call_history[1], "Web Task 2: Build Subsystem")
 
             # Test delivery deduplication: only delivered once
             loop.step()

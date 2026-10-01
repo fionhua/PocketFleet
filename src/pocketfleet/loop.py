@@ -15,10 +15,19 @@ import logging
 import queue
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from .cockpit import telemetry
-from .core import InboundMessage, OutboundMessage, Task, TaskStatus, WorkerType
+from .core import (
+    FleetSeatsConfig,
+    InboundMessage,
+    OutboundMessage,
+    Task,
+    TaskStatus,
+    WorkerType,
+    get_default_seats_config,
+)
 from .executors.aider import AiderExecutor
 from .executors.antigravity import AntigravityExecutor
 from .executors.base import BaseExecutor
@@ -46,6 +55,7 @@ class DispatchLoop:
         session_hub: Optional[SessionHub] = None,
         authorized_user_ids: Optional[Set[int]] = None,
         on_chat_bound: Optional[Any] = None,
+        seats_config: Optional[FleetSeatsConfig] = None,
     ) -> None:
         self.transport = transport
         self.workspace_cwd = workspace_cwd
@@ -59,6 +69,19 @@ class DispatchLoop:
         self.role_assignment = role_assignment
         self.running = False
         self._pending_tg_events: Dict[str, tuple[int, int, str, float]] = {}
+
+        if seats_config:
+            self.seats_config = seats_config
+        else:
+            try:
+                base = Path(self.workspace_cwd).resolve() if self.workspace_cwd else Path.cwd().resolve()
+                cfg_path = base / "pocketfleet.json"
+                if cfg_path.is_file():
+                    self.seats_config = FleetSeatsConfig.load_from_file(cfg_path)
+                else:
+                    self.seats_config = get_default_seats_config()
+            except Exception:
+                self.seats_config = get_default_seats_config()
 
         # Registered executors
         codex = CodexExecutor()
@@ -169,6 +192,72 @@ class DispatchLoop:
         if text_clean.startswith("/sim"):
             return WorkerType.SIMULATION, text_clean[4:].strip()
         return self.default_worker, text_clean
+
+    def _format_telegram_envelope(
+        self,
+        prompt: str,
+        target_worker: WorkerType,
+        sender_name: str = "",
+        sender_id: int = 0,
+        chat_title: str = "",
+    ) -> str:
+        """Wrap inbound Telegram prompt with in-band role envelope and live peer roster."""
+        if target_worker == WorkerType.SIMULATION:
+            return prompt
+
+        chat_label = chat_title.strip() if chat_title else "Telegram 协同战役室"
+        sender_label = sender_name.strip() if sender_name else "指挥官"
+        sender_id_str = f" (ID: {sender_id})" if sender_id else ""
+
+        target_seat_name = ""
+        target_role_key = ""
+        roster_lines = []
+
+        if self.seats_config and getattr(self.seats_config, "seats", None):
+            target_engine = target_worker.value.lower()
+            for r_key, seat in self.seats_config.seats.items():
+                s_engine = (seat.engine or "").lower().strip()
+                if (
+                    (target_worker == WorkerType.ANTIGRAVITY and (r_key == "lead" or s_engine == "antigravity"))
+                    or (target_worker == WorkerType.CODEX and (r_key == "builder" or s_engine == "codex"))
+                    or (s_engine == target_engine)
+                ):
+                    target_seat_name = seat.name
+                    target_role_key = r_key
+                    break
+
+            for r_key, seat in self.seats_config.seats.items():
+                handle = seat.bot_username.strip() if seat.bot_username else "未配置"
+                desc = f" ({seat.description})" if seat.description else f" ({seat.engine})"
+                is_current = (r_key == target_role_key)
+                prefix = "  👉 [当前承接]" if is_current else "  •"
+                roster_lines.append(f"{prefix} {seat.name}: {handle}{desc}")
+
+        if not target_seat_name:
+            target_seat_name = target_worker.value.upper()
+
+        if not roster_lines:
+            roster_lines = [
+                "  • 裁决者: @AiSoulJudgeBot (Google Antigravity / 施工指挥)",
+                "  • 泥蛇: @AiSoulMudSnakeBot (OpenAI Codex / 主力程序员)",
+            ]
+
+        roster_text = "\n".join(roster_lines)
+
+        return (
+            "【🛸 PocketFleet 战役室协同电报】\n"
+            f"• 来源会话：{chat_label}\n"
+            f"• 发件指挥：{sender_label}{sender_id_str}\n"
+            f"• 承接席位：{target_seat_name}（引擎: {target_worker.value}）\n"
+            "• 战役室席位名录（可在回复中 @战友 触发协同）：\n"
+            f"{roster_text}\n\n"
+            "【协同与输出公文守则】\n"
+            "1. 你的本轮输出将由系统直接通过 Telegram 战役室回传给指挥官与战友。\n"
+            "2. 请严格保持席位身份，直接切入核心施工或对账，言简意赅，避免与现实断裂的虚假客套。\n"
+            "3. 若需其他席位战友跟进，请在回复正文中明确提及对应战友的 Telegram Bot 句柄。\n\n"
+            "【指挥官外勤任务正文】\n"
+            f"{prompt}"
+        )
 
 
     def _send_immediate_or_outbox(
@@ -305,10 +394,27 @@ class DispatchLoop:
             )
             return None
 
-        text = msg.text.strip()
-        # Clean bot mention in groups, e.g. /status@MyBot or @MyBot prompt
+        raw_text = msg.text.strip()
+        # Detect bot mention before stripping to auto-route to designated seat
         import re
-        text = re.sub(r"@[a-zA-Z0-9_]+bot\b", "", text, flags=re.IGNORECASE).strip()
+        mentioned_worker: WorkerType | None = None
+        match_bot = re.search(r"@([a-zA-Z0-9_]+bot)\b", raw_text, flags=re.IGNORECASE)
+        if match_bot and self.seats_config and getattr(self.seats_config, "seats", None):
+            bot_tag = "@" + match_bot.group(1).lower()
+            for r_key, seat in self.seats_config.seats.items():
+                if seat.bot_username and seat.bot_username.lower() == bot_tag:
+                    s_eng = (seat.engine or "").lower().strip()
+                    if s_eng == "codex":
+                        mentioned_worker = WorkerType.CODEX
+                    elif s_eng in ("antigravity", "agy"):
+                        mentioned_worker = WorkerType.ANTIGRAVITY
+                    elif s_eng == "claude_code":
+                        mentioned_worker = WorkerType.CLAUDE_CODE
+                    elif s_eng == "aider":
+                        mentioned_worker = WorkerType.AIDER
+                    break
+
+        text = re.sub(r"@[a-zA-Z0-9_]+bot\b", "", raw_text, flags=re.IGNORECASE).strip()
         if not text:
             return None
 
@@ -426,11 +532,24 @@ class DispatchLoop:
 
         # Parse worker and prompt
         worker_type, prompt = self.parse_command(text)
+        if mentioned_worker is not None and worker_type == self.default_worker:
+            worker_type = mentioned_worker
+
         if not prompt:
             return None
 
+        raw_prompt = prompt
+        enveloped_prompt = self._format_telegram_envelope(
+            prompt=raw_prompt,
+            target_worker=worker_type,
+            sender_name=msg.sender_name,
+            sender_id=msg.sender_id,
+            chat_title=msg.chat_title,
+        )
+
         task = Task(
-            prompt=prompt,
+            prompt=enveloped_prompt,
+            raw_prompt=raw_prompt,
             worker=worker_type,
             chat_id=msg.chat_id,
             inbound_message_id=msg.message_id,
@@ -445,17 +564,32 @@ class DispatchLoop:
             )
             self._send_immediate_or_outbox(msg.chat_id, err_msg, reply_to_message_id=msg.message_id)
             task.mark_failed(err_msg, exit_code=127)
-            self.state_store.record_message_start(msg.message_id, msg.chat_id, prompt, worker_type.value)
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, raw_prompt, worker_type.value)
             self.state_store.record_message_finish(msg.message_id, "FAILED", 127, chat_id=msg.chat_id)
             return task
 
         # If targeting antigravity / lead seat, route exclusively through SessionHub (No second writer!)
         if executor.name == "antigravity":
+            # 60-Minute Launch Handshake: notify active IDE session if interval elapsed
+            try:
+                from .antigravity_tracks import notify_ide_launch
+                sess = self.session_hub.get_session("lead")
+                cid = sess.conversation_id if sess else os.environ.get("POCKETFLEET_ANTIGRAVITY_CONVERSATION_ID", "")
+                if cid and self.workspace_cwd:
+                    notify_ide_launch(
+                        conversation_id=cid,
+                        workspace_cwd=self.workspace_cwd,
+                        initial_prompt=raw_prompt,
+                        state_store=self.state_store,
+                    )
+            except Exception as notify_err:
+                logger.debug("notify_ide_launch error: %s", notify_err)
+
             idemp_key = f"tg:{msg.chat_id}:{msg.message_id}"
             try:
                 event = self.session_hub.enqueue_task(
                     seat_id="lead",
-                    prompt=prompt,
+                    prompt=enveloped_prompt,
                     source="telegram",
                     idempotency_key=idemp_key,
                     reply_chat_id=msg.chat_id,
@@ -466,13 +600,13 @@ class DispatchLoop:
                 err_msg = f"❌ *Task Enqueue Failed*: {eq_err}"
                 self._send_immediate_or_outbox(msg.chat_id, err_msg, reply_to_message_id=msg.message_id)
                 task.mark_failed(str(eq_err), exit_code=1)
-                self.state_store.record_message_start(msg.message_id, msg.chat_id, prompt, "antigravity")
+                self.state_store.record_message_start(msg.message_id, msg.chat_id, raw_prompt, "antigravity")
                 self.state_store.record_message_finish(msg.message_id, "FAILED", 1, chat_id=msg.chat_id)
                 # Fail Closed: Antigravity enqueue failure MUST return, never fall back to legacy work_queue!
                 return task
 
-            self._pending_tg_events[event.event_id] = (msg.chat_id, msg.message_id, prompt, time.time())
-            self.state_store.record_message_start(msg.message_id, msg.chat_id, prompt, "antigravity")
+            self._pending_tg_events[event.event_id] = (msg.chat_id, msg.message_id, raw_prompt, time.time())
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, raw_prompt, "antigravity")
 
             is_busy = False
             try:
@@ -489,11 +623,11 @@ class DispatchLoop:
                     f"⏳ *Task Queued* (#{max(1, q_size)} in line)\n"
                     f"Event: `{event.event_id[:8]}`\n"
                     f"席位 `lead` 单写者排队施工中，将严格串行执行。\n"
-                    f"`{task.prompt[:60]}...`"
+                    f"`{task.display_prompt[:60]}...`"
                 )
                 self._send_immediate_or_outbox(msg.chat_id, queue_ack, reply_to_message_id=msg.message_id)
             else:
-                ack_text = f"⏳ *Task Started* [{executor.name}]\nEvent: `{event.event_id[:8]}`\n`{task.prompt[:100]}`"
+                ack_text = f"⏳ *Task Started* [{executor.name}]\nEvent: `{event.event_id[:8]}`\n`{task.display_prompt[:100]}`"
                 self._send_immediate_or_outbox(msg.chat_id, ack_text, reply_to_message_id=msg.message_id)
 
             # Antigravity is handled purely by the resident SessionWorker, DO NOT put into legacy work_queue!
@@ -508,16 +642,17 @@ class DispatchLoop:
             queue_ack = (
                 f"⏳ *Task Queued* (#{q_size} in line)\n"
                 f"Currently running: `{self.current_running_task['prompt'][:60]}...`\n"
-                f"Your task `{task.prompt[:60]}...` will start immediately after."
+                f"Your task `{task.display_prompt[:60]}...` will start immediately after."
             )
             self._send_immediate_or_outbox(msg.chat_id, queue_ack, reply_to_message_id=msg.message_id)
         else:
-            ack_text = f"⏳ *Task Started* [{executor.name}]\n`{task.prompt[:100]}`"
+            ack_text = f"⏳ *Task Started* [{executor.name}]\n`{task.display_prompt[:100]}`"
             self._send_immediate_or_outbox(msg.chat_id, ack_text, reply_to_message_id=msg.message_id)
 
         # Enqueue to decoupled worker queue
         self.work_queue.put((task, executor, msg))
         return task
+
 
     def _poll_and_report_events(self) -> None:
         """Poll terminal events from event_ledger and deliver results to TG & Web (Atomic once-only)."""

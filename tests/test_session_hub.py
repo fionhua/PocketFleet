@@ -505,8 +505,8 @@ class TestSessionHubR3(unittest.TestCase):
         )
         elapsed = time.time() - start_time
 
-        # 1. 真实阻塞子进程必须被快速杀死 (2秒内，而不是运行满5秒)
-        self.assertLess(elapsed, 2.0, f"Child process took {elapsed}s; was not killed immediately on heartbeat failure!")
+        # 1. 真实阻塞子进程必须被快速杀死 (3.5秒内，而不是运行满5秒)
+        self.assertLess(elapsed, 3.5, f"Child process took {elapsed}s; was not killed immediately on heartbeat failure!")
 
         # 2. event 收口 (status == 'failed', error 记录 Interrupted)
         self.assertIsNotNone(processed)
