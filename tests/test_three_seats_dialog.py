@@ -243,14 +243,14 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             dialog._toggle_token_visibility()
             self.assertEqual(dialog.entry_token.cget("show"), "*")
 
-            # 2. Test deep link generation and browser launch
-            with mock.patch("webbrowser.open") as mock_browser:
+            # 2. Test deep link generation and direct protocol launch
+            with mock.patch("pocketfleet.control_panel.open_telegram_group_deep_link") as mock_open_link:
                 deep_link = dialog._open_telegram_deep_link()
                 self.assertIsNotNone(deep_link)
                 self.assertTrue(deep_link.startswith("https://t.me/VerifiedLeadBot?startgroup="))
                 self.assertIsNotNone(dialog.current_param)
                 self.assertLessEqual(len(dialog.current_param), 64)
-                mock_browser.assert_called_once_with(deep_link)
+                mock_open_link.assert_called_once_with("VerifiedLeadBot", dialog.current_param)
 
             # 3. Test legacy copy command
             with mock.patch.object(dialog, "clipboard_clear"), \
@@ -603,13 +603,13 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
 
             with mock.patch("pocketfleet.control_panel.verify_bot_token", return_value=(True, 112233, "InCardBot", None)), \
                  mock.patch("pocketfleet.control_panel.save_token_to_env") as mock_save, \
-                 mock.patch("webbrowser.open") as mock_browser:
+                 mock.patch("pocketfleet.control_panel.open_telegram_group_deep_link") as mock_open_link:
                 dialog._drawer_join_tg("lead")
 
                 self.assertTrue(mock_save.called)
-                self.assertTrue(mock_browser.called)
-                self.assertIn("InCardBot", mock_browser.call_args[0][0])
-                self.assertIn("startgroup=", mock_browser.call_args[0][0])
+                self.assertTrue(mock_open_link.called)
+                self.assertEqual(mock_open_link.call_args[0][0], "InCardBot")
+                self.assertIsNotNone(mock_open_link.call_args[0][1])
                 self.assertIn("正在监听加群", w_lead["drawer_status_lbl"].cget("text"))
 
                 # Simulate broker event CHAT_BOUND
@@ -627,6 +627,24 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
                 self.assertIn("InCard WarRoom", dialog.lbl_global_group.cget("text"))
 
             dialog.destroy()
+
+    def test_open_telegram_group_deep_link_protocol(self):
+        """Verify open_telegram_group_deep_link prioritizes native tg:// protocol, then browser fallback."""
+        from pocketfleet.control_panel import open_telegram_group_deep_link
+
+        # 1. Native protocol succeeds
+        if hasattr(os, "startfile"):
+            with mock.patch("os.startfile") as mock_startfile:
+                res = open_telegram_group_deep_link("@TestBot", "param123")
+                self.assertTrue(res)
+                mock_startfile.assert_called_once_with("tg://resolve?domain=TestBot&startgroup=param123")
+
+        # 2. Native protocol raises error -> fallback to webbrowser.open
+        with mock.patch("os.startfile", side_effect=OSError("No association")), \
+             mock.patch("webbrowser.open") as mock_browser:
+            res = open_telegram_group_deep_link("@TestBot", "param123")
+            self.assertTrue(res)
+            mock_browser.assert_called_once_with("https://t.me/TestBot?startgroup=param123")
 
 
 if __name__ == "__main__":

@@ -77,6 +77,7 @@ else:
 
 CONFIG_FILE = REPO_ROOT / "pocketfleet.json"
 load_env_file(REPO_ROOT / ".env")
+logger = logging.getLogger(__name__)
 
 
 def is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
@@ -108,9 +109,32 @@ def create_tray_image(color: str = "cyan"):
     return img
 
 
-# ==============================================================================
-# Three Seats Configuration Dialog (Triad Seats Setup)
-# ==============================================================================
+def open_telegram_group_deep_link(bot_username: str, startgroup_param: str) -> bool:
+    """Open Telegram client directly to add bot to group without browser intermediaries.
+    
+    1. Tries native tg://resolve?domain=...&startgroup=... protocol to bypass browser
+       prompts (Chrome popup & webpage with START BOT button).
+    2. Falls back to https://t.me/ startgroup link if native protocol cannot be opened.
+    """
+    clean_uname = bot_username.lstrip("@")
+    tg_proto = f"tg://resolve?domain={clean_uname}&startgroup={startgroup_param}"
+    https_url = f"https://t.me/{clean_uname}?startgroup={startgroup_param}"
+
+    if hasattr(os, "startfile"):
+        try:
+            os.startfile(tg_proto)
+            return True
+        except Exception as proto_err:
+            logger.info("Direct tg:// protocol failed (%s), falling back to browser: %s", proto_err, https_url)
+
+    try:
+        webbrowser.open(https_url)
+        return True
+    except Exception as e:
+        logger.warning("Failed to open deep link: %s", e)
+        return False
+
+
 # ==============================================================================
 # Three Seats Configuration Dialog (Triad Seats Setup)
 # ==============================================================================
@@ -515,9 +539,9 @@ class SeatTelegramDialog(tk.Toplevel):
         self.after(500, self._poll_broker_events)
 
         try:
-            webbrowser.open(deep_link)
+            open_telegram_group_deep_link(clean_uname, self.current_param)
         except Exception as e:
-            logger.warning("Failed to open browser automatically: %s", e)
+            logger.warning("Failed to open deep link: %s", e)
 
         return deep_link
 
@@ -1667,23 +1691,40 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         w["token"].insert(0, token)
         self._update_seat_tg_capsule(role_key)
 
-        # If global group already exists, check if this bot is already in the group
-        if self.global_chat_id:
-            in_chat, _ = verify_chat_member(token, self.global_chat_id, bot_id)
+        # Check if a warroom group is already known across session, env, or disk
+        target_chat_id = self.global_chat_id or (os.environ.get("TELEGRAM_GROUP_ID") or "").strip()
+        if not target_chat_id and hasattr(self, "mgr"):
+            try:
+                disk_cfg = self.mgr.load_seats_config()
+                target_chat_id = disk_cfg.telegram_chat_id
+                if not self.global_group_name:
+                    self.global_group_name = disk_cfg.telegram_group_name
+            except Exception:
+                pass
+
+        if target_chat_id:
+            self.global_chat_id = target_chat_id
+            in_chat, _ = verify_chat_member(token, target_chat_id, bot_id)
             if in_chat:
                 sent_ok, _ = send_bot_checkin(
                     bot_token=token,
-                    chat_id=self.global_chat_id,
+                    chat_id=target_chat_id,
                     bot_name=w["name"].get().strip() or role_key,
                     seat_title=w["desc_var"].get().strip(),
                     engine_name=w["engine"].get().strip(),
                 )
                 if sent_ok:
+                    group_disp = self.global_group_name or target_chat_id
                     w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
                     self._update_seat_tg_capsule(role_key)
+                    self._update_global_group_banner()
                     if self.on_save_callback:
                         self.on_save_callback()
-                    messagebox.showinfo("通信测试成功", f"✅ Bot @{clean_uname} 已经处于战队群中，通信连接测试成功！", parent=self)
+                    messagebox.showinfo(
+                        "战队群连接成功",
+                        f"✅ Bot @{clean_uname} 已在战队群【{group_disp}】中就位！\n\n通信链路已打通，无需重复选群。",
+                        parent=self,
+                    )
                     return
 
         auth_ids = []
@@ -1728,9 +1769,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.after(500, lambda rk=role_key: self._poll_drawer_broker(rk))
 
         try:
-            webbrowser.open(deep_link)
+            open_telegram_group_deep_link(clean_uname, param)
         except Exception as e:
-            logger.warning("Failed to open browser automatically: %s", e)
+            logger.warning("Failed to open deep link automatically: %s", e)
 
     def _poll_drawer_broker(self, role_key: str):
         broker = self._drawer_brokers.get(role_key)
@@ -1809,6 +1850,19 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
 
     def _update_global_group_banner(self):
+        if not self.global_chat_id:
+            self.global_chat_id = (os.environ.get("TELEGRAM_GROUP_ID") or "").strip()
+        if not self.global_group_name and hasattr(self, "mgr"):
+            try:
+                disk_cfg = self.mgr.load_seats_config()
+                if disk_cfg.telegram_chat_id:
+                    if not self.global_chat_id:
+                        self.global_chat_id = disk_cfg.telegram_chat_id
+                    if disk_cfg.telegram_chat_id == self.global_chat_id:
+                        self.global_group_name = disk_cfg.telegram_group_name
+            except Exception:
+                pass
+
         if self.global_chat_id:
             name_part = f"【{self.global_group_name}】" if self.global_group_name else ""
             self.lbl_global_group.config(
@@ -1824,7 +1878,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                     break
             if has_token:
                 self.lbl_global_group.config(
-                    text="📢 Telegram 协同战队群: ⚪ 待入群发言自动绑定 (启动服务后在群内发一条消息即可锁定)",
+                    text="📢 Telegram 协同战队群: ⚪ 待入群发言自动绑定 (在群内发一条消息或点击席位【TG设置】即可锁定)",
                     fg="#facc15",
                 )
             else:
@@ -1920,6 +1974,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                     w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
 
             self._update_seat_tg_capsule(role_key)
+
+        self._update_global_group_banner()
 
     def _reset_defaults(self):
         default_cfg = get_default_seats_config()

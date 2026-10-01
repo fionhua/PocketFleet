@@ -248,16 +248,15 @@ class TelegramUpdateBroker:
 
         cmd = parts[0].lower()
         is_start = cmd == "/start" or cmd.startswith("/start@")
-        is_fleet_bind = cmd == "/fleet_bind" or cmd.startswith("/fleet_bind@")
+        is_fleet_bind = (
+            cmd == "/fleet_bind"
+            or cmd.startswith("/fleet_bind@")
+            or cmd == "/bind"
+            or cmd.startswith("/bind@")
+        )
 
         if not (is_start or is_fleet_bind):
             return False, False
-
-        # If it's a plain /start with no arguments in a group, ignore (not a binding attempt)
-        if len(parts) < 2:
-            return False, False
-
-        candidate_param = parts[1].strip()
 
         # Constraint: must be group or supergroup
         if msg.chat_type not in ("group", "supergroup"):
@@ -273,23 +272,43 @@ class TelegramUpdateBroker:
             )
             return True, False
 
-        # Validate sender, group constraint, and parameter
-        ok, reason, pin_record = self.verify_and_consume_pin(
-            plain_pin=candidate_param,
-            sender_id=msg.sender_id,
-            is_anonymous=msg.is_anonymous,
-            sender_chat_id=msg.sender_chat_id,
-            chat_id=msg.chat_id,
-        )
-
-        if not ok:
-            self._reply_rejection(msg, f"❌ {reason}")
-            self.state_store.publish_broker_event(
-                event_type="BIND_FAILED",
-                seat_role=self.seat_role,
-                payload={"chat_id": msg.chat_id, "error": reason, "sender_id": msg.sender_id},
-            )
+        # Constraint: reject anonymous admin messages
+        if msg.is_anonymous or msg.sender_chat_id:
+            logger.warning("Rejected binding command from anonymous admin in chat %s", msg.chat_id)
+            self._reply_rejection(msg, "❌ 拒绝绑定：安全白名单拦截匿名管理员操作，请使用真实个人账号发送指令。")
             return True, False
+
+        pin_record = None
+        bot_username = ""
+
+        # Branch 1: Ephemeral param provided via startgroup deep link
+        if len(parts) >= 2:
+            candidate_param = parts[1].strip()
+            ok, reason, pin_record = self.verify_and_consume_pin(
+                plain_pin=candidate_param,
+                sender_id=msg.sender_id,
+                is_anonymous=msg.is_anonymous,
+                sender_chat_id=msg.sender_chat_id,
+                chat_id=msg.chat_id,
+            )
+            if not ok:
+                self._reply_rejection(msg, f"❌ {reason}")
+                self.state_store.publish_broker_event(
+                    event_type="BIND_FAILED",
+                    seat_role=self.seat_role,
+                    payload={"chat_id": msg.chat_id, "error": reason, "sender_id": msg.sender_id},
+                )
+                return True, False
+            bot_username = (pin_record or {}).get("bot_username", "")
+        elif is_fleet_bind:
+            # Branch 2: Direct in-group command (/bind, /fleet_bind) without param (passive auto-binding)
+            if self.authorized_user_ids and msg.sender_id not in self.authorized_user_ids:
+                reason = f"未授权发送者 (ID: {msg.sender_id})，群组绑定已被指挥官白名单锁定"
+                self._reply_rejection(msg, f"❌ 拒绝绑定：{reason}")
+                return True, False
+        else:
+            # Plain /start without param is not a binding command (fails closed / not handled as binding)
+            return False, False
 
         # Successful binding!
         chat_id = msg.chat_id

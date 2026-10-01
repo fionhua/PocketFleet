@@ -458,3 +458,41 @@ def test_pf_tg_r8_startgroup_multiseat_group_conflict(tmp_path: Path):
         assert "通信链路已连接" in mock_send_ok.call_args[0][1]
 
 
+def test_direct_in_group_passive_binding(tmp_path: Path):
+    """Verify sending /bind or /start in a group directly binds the chat without needing a parameter."""
+    state_store = StateStore(db_path=tmp_path / "state.db")
+    broker = TelegramUpdateBroker(
+        bot_token="123456:DirectBindToken",
+        seat_role="lead",
+        state_store=state_store,
+        repo_root=tmp_path,
+        authorized_user_ids=[88888],
+    )
+
+    msg = InboundMessage(
+        message_id=101,
+        chat_id=-100999888,
+        sender_id=88888,
+        sender_name="Commander",
+        text="/bind",
+        chat_type="supergroup",
+        chat_title="Auto Bound WarRoom",
+    )
+
+    with patch.object(broker, "_send_text") as mock_send, \
+         patch.object(broker, "_persist_chat_binding") as mock_persist:
+        handled, is_bound = broker.process_inbound_message(msg)
+        assert handled is True
+        assert is_bound is True
+        assert mock_send.called
+        assert "通信链路已连接" in mock_send.call_args[0][1]
+        assert mock_persist.called
+        assert mock_persist.call_args[0][0] == -100999888
+
+    events = state_store.get_broker_events(after_event_id=0)
+    assert len(events) == 1
+    assert events[0]["event_type"] == "CHAT_BOUND"
+    assert events[0]["payload"]["chat_id"] == -100999888
+
+
+
