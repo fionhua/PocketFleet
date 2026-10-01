@@ -1164,18 +1164,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         card_right = tk.Frame(card_body, bg="#1e293b")
         card_right.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
 
-        # Row 1: Name & Engine (in card_left)
+        # Row 1: Engine, Track, and Bot Identity Badge (in card_left)
         r1 = tk.Frame(card_left, bg="#1e293b")
         r1.pack(fill=tk.X, pady=2)
         r1.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
-
-        lbl_name = tk.Label(r1, text="席位代号:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
-        lbl_name.pack(side=tk.LEFT)
-        lbl_name.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
-
-        entry_name = tk.Entry(r1, bg="#0f172a", fg="#f8fafc", insertbackground="#f8fafc", font=self.font_mono, width=16, relief=tk.FLAT, bd=4)
-        entry_name.pack(side=tk.LEFT, padx=(0, 12))
-        entry_name.bind("<FocusIn>", lambda e, rk=role_key: self._select_seat(rk))
 
         lbl_eng = tk.Label(r1, text="执行引擎:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
         lbl_eng.pack(side=tk.LEFT)
@@ -1237,39 +1229,32 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             )
             btn_chat_check.pack(side=tk.LEFT, padx=(8, 0))
 
-        # Row 2: Telegram Seat Status Capsule (in card_left)
-        r2 = tk.Frame(card_left, bg="#1e293b")
-        r2.pack(fill=tk.X, pady=2)
-        r2.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
-
-        lbl_tg = tk.Label(r2, text="TG 协同:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
-        lbl_tg.pack(side=tk.LEFT)
-        lbl_tg.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
-
-        lbl_tg_status = tk.Label(
-            r2,
-            text="🔴 席位待配置",
-            fg="#f87171",
+        # Bot identity badge (auto-populated from getMe or seat config)
+        lbl_bot_badge = tk.Label(
+            r1,
+            text="",
+            fg="#38bdf8",
             bg="#1e293b",
             font=self.font_bold,
-            cursor="hand2",
         )
-        lbl_tg_status.pack(side=tk.LEFT, padx=(0, 8))
-        lbl_tg_status.bind("<Button-1>", lambda e, rk=role_key: self._expand_tg_drawer(rk))
-        self._bind_btn_tooltip(lbl_tg_status, "点击展开右侧 Telegram Bot Token 与战队群快捷设置")
+        lbl_bot_badge.pack(side=tk.LEFT, padx=(12, 0))
+        lbl_bot_badge.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
-        lbl_env_tag = tk.Label(r2, text="", fg="#64748b", bg="#1e293b", font=self.font_mono)
-        lbl_env_tag.pack(side=tk.LEFT)
+        # Headless entry_name (maintained for tests & internal state, not packed per Commander directive)
+        entry_name = tk.Entry(card_left)
 
-        # Headless entries maintained for test & programmatic backwards-compatibility
+        # Row 2 (old TG协同 row: cut from visual UI, kept headless for test compatibility)
+        r2 = tk.Frame(card_left)
+        lbl_tg = tk.Label(r2)
+        lbl_env_tag = tk.Label(r2)
         entry_env = tk.Entry(r2)
         entry_token = tk.Entry(r2, show="*")
-        lbl_hint = tk.Label(r2, text="")
+        lbl_hint = tk.Label(r2)
         entry_user = tk.Entry(r2)
 
-        # Row 3: Role Assignment Display (in card_left)
+        # Row 2 (visually Row 2 in card_left): Role Assignment Display
         r3 = tk.Frame(card_left, bg="#1e293b")
-        r3.pack(fill=tk.X, pady=2)
+        r3.pack(fill=tk.X, pady=4)
         r3.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
         lbl_role_tag = tk.Label(r3, text="席位职能:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
@@ -1309,7 +1294,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         # ======================================================================
         # In-Card Telegram Collapsible Drawer (in card_right)
         # ======================================================================
-        # State A: Collapsed (compact button)
+        # State A: Collapsed (compact button + status label)
         drawer_collapsed = tk.Frame(card_right, bg="#1e293b")
         drawer_collapsed.pack(fill=tk.BOTH, expand=True)
 
@@ -1323,20 +1308,32 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             font=self.font_bold,
             relief=tk.FLAT,
             padx=14,
-            pady=16,
+            pady=6,
             cursor="hand2",
             command=lambda rk=role_key: self._expand_tg_drawer(rk),
         )
-        btn_tg_config.pack(fill=tk.BOTH, expand=True)
+        btn_tg_config.pack(fill=tk.X, expand=True)
         self._bind_btn_tooltip(btn_tg_config, "点击向左展开本席位 Telegram Bot Token 配置与战队群加入面板")
 
-        # State B: Expanded (in-card quick binding panel)
-        drawer_expanded = tk.Frame(card_right, bg="#0f172a", bd=1, relief=tk.SOLID, padx=8, pady=4)
+        lbl_tg_status = tk.Label(
+            drawer_collapsed,
+            text="⚪ 待配置",
+            fg="#94a3b8",
+            bg="#1e293b",
+            font=self.font_sub,
+            cursor="hand2",
+        )
+        lbl_tg_status.pack(anchor="center", pady=(4, 0))
+        lbl_tg_status.bind("<Button-1>", lambda e, rk=role_key: self._expand_tg_drawer(rk))
+        self._bind_btn_tooltip(lbl_tg_status, "点击展开右侧 Telegram Bot Token 与战队群快捷设置")
+
+        # State B: Expanded (in-card quick binding panel, +100% width)
+        drawer_expanded = tk.Frame(card_right, bg="#0f172a", bd=1, relief=tk.SOLID, padx=12, pady=6)
         # Initially hidden (pack_forget)
 
         # Drawer Row 1: Header
         dr_head = tk.Frame(drawer_expanded, bg="#0f172a")
-        dr_head.pack(fill=tk.X, pady=(0, 3))
+        dr_head.pack(fill=tk.X, pady=(0, 4))
         lbl_dr_title = tk.Label(dr_head, text="✈️ TG设置", fg="#38bdf8", bg="#0f172a", font=self.font_bold)
         lbl_dr_title.pack(side=tk.LEFT)
         btn_dr_close = tk.Button(
@@ -1348,16 +1345,16 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             activeforeground="#f8fafc",
             font=self.font_sub,
             relief=tk.FLAT,
-            padx=6,
-            pady=0,
+            padx=8,
+            pady=1,
             cursor="hand2",
             command=lambda rk=role_key: self._collapse_tg_drawer(rk),
         )
         btn_dr_close.pack(side=tk.RIGHT)
 
-        # Drawer Row 2: Token Input with Eye Toggle (shows full plaintext on click)
+        # Drawer Row 2: Token Input with Eye Toggle (+100% width: width=38)
         dr_tok_row = tk.Frame(drawer_expanded, bg="#0f172a")
-        dr_tok_row.pack(fill=tk.X, pady=(0, 3))
+        dr_tok_row.pack(fill=tk.X, pady=(0, 4))
         lbl_dr_tok = tk.Label(dr_tok_row, text="Token:", fg="#cbd5e1", bg="#0f172a", font=self.font_sub)
         lbl_dr_tok.pack(side=tk.LEFT, padx=(0, 4))
         entry_dr_tok = tk.Entry(
@@ -1366,12 +1363,12 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             fg="#f8fafc",
             insertbackground="#f8fafc",
             font=self.font_mono,
-            width=20,
+            width=38,
             relief=tk.FLAT,
             bd=3,
             show="*",
         )
-        entry_dr_tok.pack(side=tk.LEFT, padx=(0, 4))
+        entry_dr_tok.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
         btn_dr_eye = tk.Button(
             dr_tok_row,
             text="👁️",
@@ -1380,8 +1377,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             activebackground="#475569",
             font=self.font_sub,
             relief=tk.FLAT,
-            padx=4,
-            pady=0,
+            padx=6,
+            pady=1,
             cursor="hand2",
             command=lambda rk=role_key: self._toggle_drawer_token_eye(rk),
         )
@@ -1400,17 +1397,18 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
-            padx=8,
-            pady=2,
+            padx=12,
+            pady=3,
             cursor="hand2",
             command=lambda rk=role_key: self._drawer_join_tg(rk),
         )
-        btn_dr_join.pack(side=tk.LEFT, padx=(0, 6))
+        btn_dr_join.pack(side=tk.LEFT, padx=(0, 8))
         lbl_dr_status = tk.Label(dr_act_row, text="⚪ 待配置", fg="#94a3b8", bg="#0f172a", font=self.font_sub)
         lbl_dr_status.pack(side=tk.LEFT)
 
         self.widgets[role_key] = {
             "name": entry_name,
+            "lbl_bot_badge": lbl_bot_badge,
             "engine": engine_adapter,
             "btn_engine": btn_engine,
             "btn_track": btn_track,
@@ -1668,7 +1666,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         w["drawer_status_lbl"].config(text="🔄 验证Token...", fg="#facc15")
         self.update_idletasks()
 
-        ok, bot_id, uname, err = verify_bot_token(token)
+        ver_res = verify_bot_token(token)
+        ok, bot_id, uname, err = ver_res[0], ver_res[1], ver_res[2], ver_res[3]
         if not ok or not bot_id:
             w["drawer_status_lbl"].config(text=f"❌ {err or '无效'}", fg="#ef4444")
             messagebox.showerror("Token 校验失败", f"Bot Token 校验失败: {err}", parent=self)
@@ -1678,6 +1677,12 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         bot_username = "@" + clean_uname
         w["user"].delete(0, tk.END)
         w["user"].insert(0, bot_username)
+
+        # Auto-fetch Bot nickname from getMe first_name
+        bot_fname = getattr(ver_res, "first_name", None) or ""
+        if bot_fname:
+            w["name"].delete(0, tk.END)
+            w["name"].insert(0, bot_fname)
 
         # Persist token to .env and os.environ
         try:
@@ -1833,21 +1838,23 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         w["lbl_env_tag"].config(text=f"({env_var})")
 
         if token_val:
-            last4 = token_val[-4:] if len(token_val) >= 4 else token_val
-            user_part = f"{user} " if user else ""
-            w["lbl_tg_status"].config(
-                text=f"🟢 已就位: {user_part}(末4位:...{last4})",
-                fg="#4ade80",
-            )
+            w["lbl_tg_status"].config(text="🟢 已就位", fg="#10b981")
             if "drawer_status_lbl" in w:
                 w["drawer_status_lbl"].config(text="🟢 已就位", fg="#10b981")
+            bot_name = w["name"].get().strip()
+            clean_u = user if (user.startswith("@") or not user) else f"@{user}"
+            if bot_name:
+                badge_text = f"🏷️ {bot_name} ({clean_u})" if clean_u else f"🏷️ {bot_name}"
+            else:
+                badge_text = f"🏷️ {clean_u}" if clean_u else ""
+            if "lbl_bot_badge" in w:
+                w["lbl_bot_badge"].config(text=badge_text, fg="#38bdf8")
         else:
-            w["lbl_tg_status"].config(
-                text="🔴 席位待配置",
-                fg="#f87171",
-            )
+            w["lbl_tg_status"].config(text="⚪ 待配置", fg="#94a3b8")
             if "drawer_status_lbl" in w:
                 w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
+            if "lbl_bot_badge" in w:
+                w["lbl_bot_badge"].config(text="")
 
     def _update_global_group_banner(self):
         if not self.global_chat_id:

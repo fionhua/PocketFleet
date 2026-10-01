@@ -392,7 +392,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             with mock.patch.dict(os.environ, {"TELEGRAM_BOT_JUDGE_TOKEN": "123456789:AaBbCcDdEeFfGgHhIiJj1234"}):
                 dialog._update_seat_tg_capsule("lead")
                 self.assertIn("已就位", lbl_status.cget("text"))
-                self.assertIn("1234", lbl_status.cget("text"))
+                self.assertIn("裁决者", w_lead["lbl_bot_badge"].cget("text"))
 
             dialog.destroy()
 
@@ -645,6 +645,35 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             res = open_telegram_group_deep_link("@TestBot", "param123")
             self.assertTrue(res)
             mock_browser.assert_called_once_with("https://t.me/TestBot?startgroup=param123")
+
+    def test_drawer_auto_populate_nickname_and_badge(self):
+        """Verify token verification automatically extracts first_name and displays bot badge."""
+        from pocketfleet.transport.telegram import BotVerificationResult
+
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
+             mock.patch.dict(os.environ, {"TELEGRAM_BOT_LEAD_TOKEN": ""}):
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+            w_lead = dialog.widgets["lead"]
+
+            # 1. Initially no bot badge
+            self.assertEqual(w_lead["lbl_bot_badge"].cget("text"), "")
+
+            # 2. When token is verified, Bot nickname is auto-fetched
+            mock_res = BotVerificationResult(True, 998877, "NewJudgeBot", None, first_name="神盾裁决者")
+            with mock.patch("pocketfleet.control_panel.verify_bot_token", return_value=mock_res), \
+                 mock.patch("pocketfleet.control_panel.save_token_to_env"), \
+                 mock.patch("pocketfleet.control_panel.open_telegram_group_deep_link"):
+                w_lead["drawer_token_entry"].insert(0, "123456:SecretToken")
+                dialog._drawer_join_tg("lead")
+
+                # w["name"] was auto-updated to first_name
+                self.assertEqual(w_lead["name"].get(), "神盾裁决者")
+                # Bot badge is displayed
+                badge_text = w_lead["lbl_bot_badge"].cget("text")
+                self.assertIn("神盾裁决者", badge_text)
+                self.assertIn("@NewJudgeBot", badge_text)
+
+            dialog.destroy()
 
 
 if __name__ == "__main__":

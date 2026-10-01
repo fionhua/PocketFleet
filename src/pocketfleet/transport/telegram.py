@@ -226,8 +226,17 @@ class TelegramTransport(BaseTransport):
 class BotVerificationResult(tuple):
     """4-tuple (ok, bot_id, username, error) supporting tuple unpacking, properties, and dict access."""
 
-    def __new__(cls, ok: bool, bot_id: Optional[int] = None, username: Optional[str] = None, error: Optional[str] = None):
-        return super().__new__(cls, (ok, bot_id, username, error))
+    def __new__(
+        cls,
+        ok: bool,
+        bot_id: Optional[int] = None,
+        username: Optional[str] = None,
+        error: Optional[str] = None,
+        first_name: Optional[str] = None,
+    ):
+        instance = super().__new__(cls, (ok, bot_id, username, error))
+        instance._first_name = first_name
+        return instance
 
     @property
     def ok(self) -> bool:
@@ -245,11 +254,21 @@ class BotVerificationResult(tuple):
     def error(self) -> Optional[str]:
         return self[3]
 
+    @property
+    def first_name(self) -> Optional[str]:
+        return self._first_name
+
     def __bool__(self) -> bool:
         return bool(self[0])
 
     def get(self, key: str, default=None):
-        mapping = {"ok": self[0], "id": self[1], "username": self[2], "error": self[3]}
+        mapping = {
+            "ok": self[0],
+            "id": self[1],
+            "username": self[2],
+            "error": self[3],
+            "first_name": self._first_name,
+        }
         return mapping.get(key, default)
 
     def __getitem__(self, item):
@@ -264,7 +283,7 @@ def verify_bot_token(
 ) -> BotVerificationResult:
     """Verify bot token by calling getMe.
 
-    Returns BotVerificationResult(ok, id, username, error)
+    Returns BotVerificationResult(ok, id, username, error, first_name)
     which unpacks as (ok, bot_id, username, error) and supports dict access.
     """
     token = bot_token.strip()
@@ -280,7 +299,14 @@ def verify_bot_token(
                 res = data.get("result", {})
                 b_id = res.get("id")
                 b_uname = res.get("username", "")
-                return BotVerificationResult(True, int(b_id) if b_id is not None else None, b_uname, None)
+                b_fname = res.get("first_name", "")
+                return BotVerificationResult(
+                    True,
+                    int(b_id) if b_id is not None else None,
+                    b_uname,
+                    None,
+                    first_name=b_fname,
+                )
             return BotVerificationResult(False, None, None, data.get("description", "Token 无效"))
     except urllib.error.HTTPError as exc:
         try:
