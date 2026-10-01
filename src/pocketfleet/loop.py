@@ -26,6 +26,7 @@ from .executors.claude_code import ClaudeCodeExecutor
 from .executors.codex import CodexExecutor
 from .executors.simulation import SimulationExecutor
 from .executors.triad import FleetTriadExecutor
+from .session_hub import SessionHub
 from .state import StateStore
 from .transport.base import BaseTransport
 
@@ -42,15 +43,22 @@ class DispatchLoop:
         state_store: Optional[StateStore] = None,
         bots_config: Optional[dict] = None,
         role_assignment: Optional[Any] = None,
+        session_hub: Optional[SessionHub] = None,
+        authorized_user_ids: Optional[Set[int]] = None,
+        on_chat_bound: Optional[Any] = None,
     ) -> None:
         self.transport = transport
         self.workspace_cwd = workspace_cwd
         self.default_worker = default_worker
-        self.allowed_chat_ids = allowed_chat_ids
+        self.allowed_chat_ids = set(allowed_chat_ids) if allowed_chat_ids else set()
+        self.authorized_user_ids = set(authorized_user_ids) if authorized_user_ids else set()
+        self.on_chat_bound = on_chat_bound
         self.state_store = state_store or StateStore()
+        self.session_hub = session_hub or SessionHub(self.state_store)
         self.bots_config = bots_config or {}
         self.role_assignment = role_assignment
         self.running = False
+        self._pending_tg_events: Dict[str, tuple[int, int, str, float]] = {}
 
         # Registered executors
         codex = CodexExecutor()
@@ -75,6 +83,17 @@ class DispatchLoop:
         # Lock-protected status tracking
         self._status_lock = threading.Lock()
         self.current_running_task: Optional[dict[str, Any]] = None
+
+        # Integrated Update Broker for single-consumer lifecycle and onboarding
+        from .broker import TelegramUpdateBroker
+        raw_token = getattr(self.transport, "bot_token", "") if self.transport else ""
+        bot_token = raw_token if isinstance(raw_token, str) else ""
+        self.broker = TelegramUpdateBroker(
+            bot_token=bot_token,
+            seat_role="lead",
+            state_store=self.state_store,
+            authorized_user_ids=list(self.authorized_user_ids),
+        )
 
     def get_available_workers(self) -> List[WorkerType]:
         available = []
@@ -203,6 +222,42 @@ class DispatchLoop:
                 self.state_store.mark_outbox_failed_attempt(item["id"])
         return sent_count
 
+    def _persist_bound_chat(self, chat_id: int, chat_title: str = "") -> None:
+        """Persist auto-bound Telegram chat ID to telemetry, .env and pocketfleet.json."""
+        try:
+            telemetry.allowed_chat_ids = [chat_id]
+        except Exception:
+            pass
+
+        from pathlib import Path
+        import os
+        from .onboard import save_token_to_env
+
+        # 1. Update .env
+        try:
+            base_dir = Path(self.workspace_cwd).resolve() if self.workspace_cwd else Path.cwd().resolve()
+            env_file = base_dir / ".env"
+            save_token_to_env(str(chat_id), env_path=env_file, var_name="TELEGRAM_GROUP_ID")
+            os.environ["TELEGRAM_GROUP_ID"] = str(chat_id)
+            logger.info("Persisted TELEGRAM_GROUP_ID=%s to %s", chat_id, env_file)
+        except Exception as e:
+            logger.warning("Failed to persist TELEGRAM_GROUP_ID to .env: %s", e)
+
+        # 2. Update config file (pocketfleet.json)
+        try:
+            base_dir = Path(self.workspace_cwd).resolve() if self.workspace_cwd else Path.cwd().resolve()
+            cfg_file = base_dir / "pocketfleet.json"
+            if cfg_file.is_file():
+                import json
+                data = json.loads(cfg_file.read_text(encoding="utf-8"))
+                data["telegram_chat_id"] = str(chat_id)
+                if chat_title:
+                    data["telegram_group_name"] = str(chat_title)
+                cfg_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                logger.info("Persisted telegram_chat_id=%s to %s", chat_id, cfg_file)
+        except Exception as e:
+            logger.warning("Failed to persist telegram_chat_id to config file: %s", e)
+
     def handle_message(self, msg: InboundMessage) -> Optional[Task]:
         # --- [IRON GATE 2: Role-based Gating] ---
         # Never process messages originating from bots
@@ -210,13 +265,45 @@ class DispatchLoop:
             logger.debug("Ignored bot message ID %s from %s", msg.message_id, msg.sender_name)
             return None
 
-        # --- [IRON GATE 3: Security Whitelist Check] ---
-        # Allow if either the chat itself is authorized OR the sender is an authorized commander
-        if self.allowed_chat_ids:
-            is_authorized = (msg.chat_id in self.allowed_chat_ids) or (msg.sender_id in self.allowed_chat_ids)
-            if not is_authorized:
-                logger.warning("Blocked message ID %s from unauthorized chat ID %s (sender %s)", msg.message_id, msg.chat_id, msg.sender_id)
+        # --- [IRON GATE 2.5: TelegramUpdateBroker Onboarding & Ephemeral Binding] ---
+        if hasattr(self, "broker"):
+            handled, is_bound = self.broker.process_inbound_message(msg)
+            if handled:
+                if is_bound:
+                    if self.allowed_chat_ids is None:
+                        self.allowed_chat_ids = set()
+                    self.allowed_chat_ids.add(msg.chat_id)
+                    if self.on_chat_bound:
+                        try:
+                            self.on_chat_bound(msg.chat_id, getattr(msg, "chat_title", "") or msg.sender_name or "")
+                        except Exception as cb_err:
+                            logger.warning("on_chat_bound callback error: %s", cb_err)
                 return None
+
+        # --- [IRON GATE 3: Security Whitelist Check] ---
+        # Allow if chat is in allowed_chat_ids OR sender is in allowed_chat_ids (legacy user whitelist compatibility)
+        if self.allowed_chat_ids:
+            if msg.chat_id not in self.allowed_chat_ids and msg.sender_id not in self.allowed_chat_ids:
+                logger.warning(
+                    "Blocked message ID %s from unauthorized chat ID %s (allowed: %s)",
+                    msg.message_id, msg.chat_id, self.allowed_chat_ids
+                )
+                return None
+        elif not self.authorized_user_ids:
+            # If neither allowed_chat_ids nor authorized_user_ids is configured, fail-closed! (No auto-binding)
+            logger.warning(
+                "Blocked message ID %s from unconfigured chat ID %s (whitelist empty, PIN required)",
+                msg.message_id, msg.chat_id
+            )
+            return None
+
+        # Sender MUST be authorized if authorized_user_ids is configured
+        if self.authorized_user_ids and msg.sender_id not in self.authorized_user_ids:
+            logger.warning(
+                "Blocked message ID %s from unauthorized sender ID %s in chat %s",
+                msg.message_id, msg.sender_id, msg.chat_id
+            )
+            return None
 
         text = msg.text.strip()
         # Clean bot mention in groups, e.g. /status@MyBot or @MyBot prompt
@@ -229,26 +316,51 @@ class DispatchLoop:
         # --- Instant Non-Blocking System Commands (P0-1 Fix) ---
         if text == "/status":
             available = self.get_available_workers()
+            sess = None
+            try:
+                sess = self.session_hub.get_session("lead")
+            except Exception:
+                pass
+
+            recent = []
+            try:
+                recent = self.session_hub.get_recent_events(limit=10, seat_id="lead")
+            except Exception:
+                pass
+
+            running_evt = next((e for e in recent if e.status == "running"), None)
+            queued_count = sum(1 for e in recent if e.status == "queued")
+
             with self._status_lock:
                 running_info = self.current_running_task
 
-            if running_info:
-                elapsed = int(time.time() - running_info["start_time"])
+            if running_evt or (sess and sess.status == "busy") or running_info:
+                active_prompt = (
+                    running_evt.prompt
+                    if running_evt
+                    else (running_info["prompt"] if running_info else "Processing task")
+                )
+                active_worker = "antigravity" if running_evt else (running_info["worker"] if running_info else "lead")
+                cid_str = f"`{sess.conversation_id[:8]}...{sess.conversation_id[-4:]}`" if sess else "`Default`"
+                elapsed = int(time.time() - (running_evt.created_at if running_evt else (running_info["start_time"] if running_info else time.time())))
                 status_text = (
                     "🤖 *PocketFleet Status: BUSY*\n"
-                    f"• Active Worker: `{running_info['worker']}`\n"
-                    f"• Running Task: `{running_info['prompt'][:60]}...`\n"
+                    f"• Active Worker: `{active_worker}`\n"
+                    f"• CLI Track: {cid_str}\n"
+                    f"• Running Task: `{active_prompt[:60]}...`\n"
                     f"• Elapsed Time: {elapsed}s\n"
-                    f"• Queued Tasks: {self.work_queue.qsize()} pending\n"
+                    f"• Queued Tasks: {queued_count} pending\n"
                     f"• Workspace: `{self.workspace_cwd or 'Default'}`"
                 )
             else:
+                cid_str = f"`{sess.conversation_id[:8]}...{sess.conversation_id[-4:]}`" if sess else "`Default`"
                 status_text = (
                     "🤖 *PocketFleet Status: IDLE & READY*\n"
+                    f"• CLI Track: {cid_str}\n"
                     f"• Workspace: `{self.workspace_cwd or 'Default'}`\n"
                     f"• Available Workers: {', '.join([w.value for w in available]) or 'None'}\n"
-                    f"• Queued Tasks: {self.work_queue.qsize()} pending\n"
-                    f"• Architecture: Decoupled Echo-Proof DAG"
+                    f"• Queued Tasks: {queued_count} pending\n"
+                    f"• Architecture: Decoupled Single-Writer Session Hub"
                 )
             self._send_immediate_or_outbox(msg.chat_id, status_text, reply_to_message_id=msg.message_id)
             return None
@@ -308,8 +420,8 @@ class DispatchLoop:
 
 
         # --- Deduplication Check via Persistent SQLite (P0-3 Fix) ---
-        if self.state_store.is_message_processed(msg.message_id):
-            logger.info("Skipped already processed message ID %s", msg.message_id)
+        if self.state_store.is_message_processed(msg.message_id, chat_id=msg.chat_id):
+            logger.info("Skipped already processed message ID %s in chat %s", msg.message_id, msg.chat_id)
             return None
 
         # Parse worker and prompt
@@ -334,7 +446,57 @@ class DispatchLoop:
             self._send_immediate_or_outbox(msg.chat_id, err_msg, reply_to_message_id=msg.message_id)
             task.mark_failed(err_msg, exit_code=127)
             self.state_store.record_message_start(msg.message_id, msg.chat_id, prompt, worker_type.value)
-            self.state_store.record_message_finish(msg.message_id, "FAILED", 127)
+            self.state_store.record_message_finish(msg.message_id, "FAILED", 127, chat_id=msg.chat_id)
+            return task
+
+        # If targeting antigravity / lead seat, route exclusively through SessionHub (No second writer!)
+        if executor.name == "antigravity":
+            idemp_key = f"tg:{msg.chat_id}:{msg.message_id}"
+            try:
+                event = self.session_hub.enqueue_task(
+                    seat_id="lead",
+                    prompt=prompt,
+                    source="telegram",
+                    idempotency_key=idemp_key,
+                    reply_chat_id=msg.chat_id,
+                    reply_message_id=msg.message_id,
+                )
+            except Exception as eq_err:
+                logger.error("Failed to enqueue task to SessionHub: %s", eq_err)
+                err_msg = f"❌ *Task Enqueue Failed*: {eq_err}"
+                self._send_immediate_or_outbox(msg.chat_id, err_msg, reply_to_message_id=msg.message_id)
+                task.mark_failed(str(eq_err), exit_code=1)
+                self.state_store.record_message_start(msg.message_id, msg.chat_id, prompt, "antigravity")
+                self.state_store.record_message_finish(msg.message_id, "FAILED", 1, chat_id=msg.chat_id)
+                # Fail Closed: Antigravity enqueue failure MUST return, never fall back to legacy work_queue!
+                return task
+
+            self._pending_tg_events[event.event_id] = (msg.chat_id, msg.message_id, prompt, time.time())
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, prompt, "antigravity")
+
+            is_busy = False
+            try:
+                sess = self.session_hub.get_session("lead")
+                if sess and sess.status == "busy":
+                    is_busy = True
+            except Exception:
+                pass
+
+            if is_busy or event.status == "queued":
+                recent = self.session_hub.get_recent_events(limit=20, seat_id="lead")
+                q_size = sum(1 for e in recent if e.status == "queued")
+                queue_ack = (
+                    f"⏳ *Task Queued* (#{max(1, q_size)} in line)\n"
+                    f"Event: `{event.event_id[:8]}`\n"
+                    f"席位 `lead` 单写者排队施工中，将严格串行执行。\n"
+                    f"`{task.prompt[:60]}...`"
+                )
+                self._send_immediate_or_outbox(msg.chat_id, queue_ack, reply_to_message_id=msg.message_id)
+            else:
+                ack_text = f"⏳ *Task Started* [{executor.name}]\nEvent: `{event.event_id[:8]}`\n`{task.prompt[:100]}`"
+                self._send_immediate_or_outbox(msg.chat_id, ack_text, reply_to_message_id=msg.message_id)
+
+            # Antigravity is handled purely by the resident SessionWorker, DO NOT put into legacy work_queue!
             return task
 
         # Check if another task is currently executing
@@ -357,13 +519,90 @@ class DispatchLoop:
         self.work_queue.put((task, executor, msg))
         return task
 
+    def _poll_and_report_events(self) -> None:
+        """Poll terminal events from event_ledger and deliver results to TG & Web (Atomic once-only)."""
+        try:
+            events = self.session_hub.get_undelivered_tg_events(limit=50)
+        except Exception as exc:
+            logger.debug("Error fetching undelivered TG events: %s", exc)
+            return
+
+        for ev in events:
+            # 1. Retrieve persistent routing information
+            chat_id = ev.reply_chat_id
+            reply_to_id = ev.reply_message_id
+
+            # Fallback for events enqueued before schema migration
+            if not chat_id and ev.idempotency_key:
+                if ev.idempotency_key.startswith("tg:"):
+                    parts = ev.idempotency_key.split(":")
+                    if len(parts) >= 3:
+                        try:
+                            chat_id = int(parts[1])
+                            reply_to_id = int(parts[2])
+                        except ValueError:
+                            pass
+                elif ev.idempotency_key.startswith("tg_"):
+                    try:
+                        reply_to_id = int(ev.idempotency_key[3:])
+                    except ValueError:
+                        pass
+
+            if not chat_id:
+                pending_info = self._pending_tg_events.pop(ev.event_id, None)
+                if pending_info:
+                    chat_id, reply_to_id, _, _ = pending_info
+
+            if ev.status == "completed":
+                res_preview = (ev.response or "")[-1500:] if len(ev.response or "") > 1500 else (ev.response or "Success")
+                reply_text = (
+                    f"✅ *Task Completed* [lead:antigravity]\n"
+                    f"Event: `{ev.event_id[:8]}`\n"
+                    f"```text\n{res_preview}\n```"
+                )
+            else:
+                err_preview = (ev.error or ev.response or "Unknown error")[-1000:]
+                reply_text = (
+                    f"❌ *Task Failed* [lead:antigravity] (exit code {ev.exit_code or 1})\n"
+                    f"Event: `{ev.event_id[:8]}`\n"
+                    f"```text\n{err_preview}\n```"
+                )
+
+            # Strict Order: Only after successfully sending or writing to durable outbox, record delivery!
+            if chat_id:
+                try:
+                    self._send_immediate_or_outbox(chat_id, reply_text, reply_to_message_id=reply_to_id)
+                    # Atomically claim telegram delivery right via event_deliveries table
+                    self.session_hub.try_record_event_delivery(ev.event_id, destination="telegram")
+                    if reply_to_id:
+                        st = "COMPLETED" if ev.status == "completed" else "FAILED"
+                        ec = 0 if ev.status == "completed" else (ev.exit_code or 1)
+                        self.state_store.record_message_finish(reply_to_id, st, ec, chat_id=chat_id)
+                except Exception as send_err:
+                    logger.error("Failed to dispatch report for event %s: %s", ev.event_id, send_err)
+                    continue
+            else:
+                # No destination chat ID found, mark delivered to prevent endless retries
+                self.session_hub.try_record_event_delivery(ev.event_id, destination="telegram")
+
+            # Update Web Cockpit telemetry
+            c_dur = round((ev.completed_at - ev.created_at), 2) if (ev.completed_at and ev.created_at) else 0.0
+            telemetry.record_task(
+                prompt=ev.prompt,
+                worker=ev.seat_id,
+                status=ev.status.upper(),
+                duration_sec=c_dur,
+                preview=(ev.response or ev.error or "")[:120],
+            )
+
     def _worker_loop(self) -> None:
-        """Dedicated single-worker execution loop running in background thread."""
+        """Dedicated execution / reporting loop running in background thread."""
         logger.info("PocketFleet Worker Execution Thread started.")
         while self.running:
             try:
-                item = self.work_queue.get(timeout=1.0)
+                item = self.work_queue.get(timeout=0.5)
             except queue.Empty:
+                self._poll_and_report_events()
                 continue
 
             if item is None:
@@ -371,8 +610,9 @@ class DispatchLoop:
 
             task, executor, msg = item
             prompt = task.prompt
+            self._poll_and_report_events()
 
-            # Mark task running in memory and persistent database
+            # Non-antigravity fallback path (for test mocks / simulated workers)
             with self._status_lock:
                 self.current_running_task = {
                     "task_id": task.task_id,
@@ -414,11 +654,9 @@ class DispatchLoop:
                 stderr = f"Internal execution error: {run_err}"
             duration = time.time() - start_time
 
-            # Clear running status
             with self._status_lock:
                 self.current_running_task = None
 
-            # --- [IRON GATE 1: Single-direction DAG Output] ---
             if code == 0:
                 task.mark_completed(stdout, exit_code=0)
                 self.state_store.record_message_finish(msg.message_id, "COMPLETED", 0)
@@ -454,7 +692,6 @@ class DispatchLoop:
                     preview=(stderr or stdout)[-150:] if (stderr or stdout) else f"Exit code {code}",
                 )
 
-            # Guaranteed Outbox delivery
             self._send_immediate_or_outbox(
                 chat_id=msg.chat_id,
                 text=reply_text,
@@ -466,14 +703,20 @@ class DispatchLoop:
         logger.info("PocketFleet Worker Execution Thread terminated.")
 
     def step(self) -> int:
-        """Run one single poll tick and flush outbox."""
+        """Run one single poll tick, flush outbox, and poll completed events."""
         # 1. Drain pending outbox retries (P0-2)
         try:
             self.flush_outbox()
         except Exception as outbox_err:
             logger.warning("Outbox flush error: %s", outbox_err)
 
-        # 2. Poll incoming Telegram messages
+        # 2. Poll completed events and deliver results
+        try:
+            self._poll_and_report_events()
+        except Exception as rep_err:
+            logger.warning("Event report error: %s", rep_err)
+
+        # 3. Poll incoming Telegram messages
         try:
             messages = self.transport.poll_messages(timeout_sec=5)
         except Exception as exc:

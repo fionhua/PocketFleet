@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 
 
-def load_env_file(path: Path) -> None:
-    """Load KEY=VALUE pairs while preserving explicitly supplied environment values."""
+def load_env_file(path: Path, override: bool = True) -> None:
+    """Load KEY=VALUE pairs into os.environ. Overrides existing keys if override=True."""
     if not path.is_file():
         return
 
@@ -21,4 +21,5 @@ def load_env_file(path: Path) -> None:
             continue
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        os.environ.setdefault(key, value)
+        if override or key not in os.environ:
+            os.environ[key] = value

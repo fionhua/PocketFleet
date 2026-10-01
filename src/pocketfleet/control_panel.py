@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-PocketFleet Control Panel (Solo Hacker Edition)
-XAMPP-Style Desktop Tray Controller for PocketFleet
-
-Features:
-- Built-in GUI Setup Wizard for 60-second Telegram Bot onboarding
-- In-process Web Cockpit server (Port 8765) with 100% reliable zero-delay startup
-- In-process DispatchLoop supervisor with Telegram connectivity
-- Thread-safe queue architecture avoiding Tkinter mainloop collision
-- Multi-service status monitoring with live status lights (Green/Red)
-- Windows System Tray resident with right-click menu & notifications
-- Real-time embedded console log window
-- Direct browser launch & config file editor
-"""
+from __future__ import annotations
 
 import json
 import logging
@@ -27,12 +14,19 @@ import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 import tkinter as tk
 from tkinter import font as tkfont, messagebox, ttk
 
-from PIL import Image, ImageDraw
-
-import pystray
+try:
+    from PIL import Image, ImageDraw
+    import pystray
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+    Image = None
+    ImageDraw = None
+    pystray = None
 
 from pocketfleet.cockpit import CockpitServer, telemetry
 from pocketfleet.config_env import load_env_file
@@ -45,11 +39,31 @@ from pocketfleet.core import (
     ALLOWED_CHAT_ENGINES,
     ALLOWED_CODE_ENGINES,
     get_default_seats_config,
+    get_default_command_for_engine,
     validate_seats_config,
 )
 from pocketfleet.loop import DispatchLoop
 
-from pocketfleet.onboard import FleetConfig
+from pocketfleet.antigravity_tracks import (
+    AntigravityTrackController,
+    ImportDetectionError,
+    ImportRequiredError,
+    TrackCandidate,
+    is_valid_uuid,
+)
+from pocketfleet.onboard import FleetConfig, save_token_to_env
+from pocketfleet.transport.telegram import (
+    verify_bot_token,
+    verify_chat_member,
+    send_bot_checkin,
+)
+from pocketfleet.broker import (
+    TelegramUpdateBroker,
+    hash_pin,
+    BrokerConflictError,
+    SenderAuthorizationError,
+)
+from pocketfleet.session_hub import SessionHub, SessionWorker
 from pocketfleet.state import StateStore
 from pocketfleet.transport.telegram import TelegramTransport
 
@@ -76,7 +90,9 @@ def is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.3) 
         return False
 
 
-def create_tray_image(color: str = "cyan") -> Image.Image:
+def create_tray_image(color: str = "cyan"):
+    if not HAS_TRAY or Image is None or ImageDraw is None:
+        return None
     color_map = {
         "cyan": "#06b6d4",
         "green": "#22c55e",
@@ -95,6 +111,702 @@ def create_tray_image(color: str = "cyan") -> Image.Image:
 # ==============================================================================
 # Three Seats Configuration Dialog (Triad Seats Setup)
 # ==============================================================================
+# ==============================================================================
+# Three Seats Configuration Dialog (Triad Seats Setup)
+# ==============================================================================
+ROLE_PRESETS = [
+    {
+        "key": "chat",
+        "btn_label": "🗣️ 面向人类交互",
+        "desc_text": "对话AI·推演与宏观对账",
+        "hint": "【面向人类交互】\n承担与人类指挥官第一人称的推演对话、需求澄清与宏观对账，作为星舰前端交流主通道。",
+        "bg": "#0284c7",
+        "fg": "#ffffff",
+    },
+    {
+        "key": "lead",
+        "btn_label": "🎖️ 研发总监",
+        "desc_text": "施工指挥·架构守门与改卷验收",
+        "hint": "【研发总监】\n统领工程落地与代码审查，负责系统生存率守门、架构验收与质量裁决。",
+        "bg": "#059669",
+        "fg": "#ffffff",
+    },
+    {
+        "key": "builder",
+        "btn_label": "🛠️ 主力程序员",
+        "desc_text": "主力程序员·核心施工与算法定桩",
+        "hint": "【主力程序员】\n专注具体模块编码、算法定桩与攻坚施工，接受改卷验收并交付高质量代码。",
+        "bg": "#d97706",
+        "fg": "#ffffff",
+    },
+    {
+        "key": "custom",
+        "btn_label": "✏️ 自定义",
+        "desc_text": "",
+        "hint": "【自定义职能】\n手动为当前选中的席位自由输入自定义职责描述文本。",
+        "bg": "#475569",
+        "fg": "#ffffff",
+    },
+]
+
+
+class SeatTelegramDialog(tk.Toplevel):
+    """Dedicated modal for single-seat Telegram Bot configuration, credential validation,
+    and ephemeral binding via single-consumer TelegramUpdateBroker (PF-03R7).
+    """
+
+    def __init__(
+        self,
+        parent,
+        role_key: str,
+        seat_name: str,
+        engine_name: str,
+        role_title: str,
+        bot_token_env: str,
+        bot_username: str,
+        global_chat_id: str,
+        global_group_name: str,
+        on_success_callback,
+        is_daemon_running_fn=None,
+        authorized_user_ids: Optional[Sequence[int]] = None,
+    ):
+        super().__init__(parent)
+        self.parent = parent
+        self.role_key = role_key
+        self.seat_name = seat_name
+        self.engine_name = engine_name
+        self.role_title = role_title
+        self.bot_token_env = bot_token_env
+        self.bot_username = bot_username
+        self.global_chat_id = str(global_chat_id or "").strip()
+        self.global_group_name = str(global_group_name or "").strip()
+        self.on_success_callback = on_success_callback
+        self.is_daemon_running_fn = is_daemon_running_fn
+        self.authorized_user_ids = list(authorized_user_ids) if authorized_user_ids else []
+
+        self.state_store = StateStore()
+        self.broker: Optional[TelegramUpdateBroker] = None
+        self.current_pin: Optional[str] = None
+        existing_events = self.state_store.get_broker_events(after_event_id=0, limit=1000)
+        self.last_event_id = max([e.get("event_id", 0) for e in existing_events], default=0)
+        self.is_listening = True
+        self.is_advanced_open = False
+
+        self.title(f"Telegram 席位凭据与战队群设置 — [{self.seat_name}]")
+        self.geometry("680x420")
+        self.resizable(False, False)
+        self.configure(bg="#0b0f19")
+        self.transient(parent)
+        self.grab_set()
+
+        self.font_title = tkfont.Font(family="Segoe UI", size=12, weight="bold")
+        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
+        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        self.font_mono = tkfont.Font(family="Consolas", size=9)
+
+        # Center on parent
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        cx = max(0, px + (pw - 680) // 2)
+        cy = max(0, py + (ph - 420) // 2)
+        self.geometry(f"+{cx}+{cy}")
+
+        self.show_token = False
+        self._build_ui()
+        self._init_broker_session()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _build_ui(self):
+        # Header banner
+        header = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        header.pack(fill=tk.X)
+        tk.Label(
+            header,
+            text=f"🤖 Telegram 席位凭据与战队群设置",
+            fg="#38bdf8",
+            bg="#0f172a",
+            font=self.font_title,
+        ).pack(anchor="w")
+        tk.Label(
+            header,
+            text=f"席位: {self.seat_name} ｜ 引擎: {self.engine_name.upper()} ｜ 战队协同群为全席位共享资产",
+            fg="#94a3b8",
+            bg="#0f172a",
+            font=self.font_sub,
+        ).pack(anchor="w", pady=(2, 0))
+
+        content = tk.Frame(self, bg="#0b0f19", padx=20, pady=12)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        # --- Section 1: Bot Token 与身份验证 ---
+        bot_frame = tk.LabelFrame(
+            content,
+            text=f" 🔐 1. 填入并验证 Bot Token ",
+            fg="#10b981",
+            bg="#1e293b",
+            font=self.font_bold,
+            padx=14,
+            pady=8,
+            relief=tk.SOLID,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#334155",
+        )
+        bot_frame.pack(fill=tk.X, pady=(0, 10))
+
+        b_r1 = tk.Frame(bot_frame, bg="#1e293b")
+        b_r1.pack(fill=tk.X, pady=2)
+        tk.Label(b_r1, text="Bot Token:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=11, anchor="w").pack(side=tk.LEFT)
+        self.entry_token = tk.Entry(b_r1, bg="#0f172a", fg="#f8fafc", insertbackground="#f8fafc", font=self.font_mono, width=42, relief=tk.FLAT, bd=4, show="*")
+        env_val = (os.environ.get(self.bot_token_env) or "").strip()
+        if env_val:
+            self.entry_token.insert(0, env_val)
+        self.entry_token.pack(side=tk.LEFT, padx=(0, 6))
+        self.entry_token.bind("<FocusOut>", lambda e: self._init_broker_session())
+        self.entry_token.bind("<Return>", lambda e: self._init_broker_session())
+
+        self.btn_toggle = tk.Button(
+            b_r1, text="👁️", bg="#334155", fg="#f8fafc", activebackground="#475569",
+            font=self.font_sub, relief=tk.FLAT, padx=6, pady=1, cursor="hand2", command=self._toggle_token_visibility,
+        )
+        self.btn_toggle.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_verify = None
+
+        self.lbl_token_status = tk.Label(b_r1, text="", fg="#94a3b8", bg="#1e293b", font=self.font_sub)
+        self.lbl_token_status.pack(side=tk.LEFT)
+
+        b_r2 = tk.Frame(bot_frame, bg="#1e293b")
+        b_r2.pack(fill=tk.X, pady=2)
+        tk.Label(b_r2, text="Bot 用户名:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=11, anchor="w").pack(side=tk.LEFT)
+        self.lbl_bot_uname = tk.Label(b_r2, text=self.bot_username or "（尚未验证）", fg="#38bdf8", bg="#1e293b", font=self.font_mono)
+        self.lbl_bot_uname.pack(side=tk.LEFT, padx=(0, 12))
+
+        # Hidden auth user entry for compatibility with internal helpers & tests (omitted from UI per Commander directive)
+        self.entry_auth_user = tk.Entry(self)
+        init_auth_id = ""
+        if self.authorized_user_ids:
+            init_auth_id = str(self.authorized_user_ids[0])
+        else:
+            env_auth = (os.environ.get("POCKETFLEET_AUTHORIZED_USER_IDS") or os.environ.get("TELEGRAM_AUTHORIZED_USER_IDS") or "").strip()
+            if env_auth:
+                init_auth_id = env_auth.split(",")[0].strip()
+        if init_auth_id:
+            self.entry_auth_user.insert(0, init_auth_id)
+
+        # Hidden/internal env field
+        self.entry_env = tk.Entry(b_r2)
+        self.entry_env.insert(0, self.bot_token_env)
+
+        # --- Section 2: 战队群一键入群绑定 ---
+        self.group_frame = tk.LabelFrame(
+            content,
+            text=" 📢 2. 战队协同群一键绑定 ",
+            fg="#38bdf8",
+            bg="#1e293b",
+            font=self.font_bold,
+            padx=16,
+            pady=12,
+            relief=tk.SOLID,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#334155",
+        )
+        self.group_frame.pack(fill=tk.X, pady=(0, 10))
+
+        if self.global_chat_id and self.role_key != "lead":
+            hint_txt = (
+                f"全舰已锁定协同群：{self.global_group_name or '战队群'} (ID: {self.global_chat_id})\n"
+                f"点击下方按钮将在 Telegram 中打开选群页面，请务必选择同一个战队群添加 Bot 完成绑定："
+            )
+        else:
+            hint_txt = (
+                "点击下方按钮将在 Telegram 中打开官方选群页面，选择战队群确认后，\n"
+                "系统将自动接收授权入站消息并完成战队群绑定与指挥官确权："
+            )
+
+        tk.Label(
+            self.group_frame,
+            text=hint_txt,
+            fg="#cbd5e1",
+            bg="#1e293b",
+            font=self.font_sub,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(0, 8))
+
+        btn_row = tk.Frame(self.group_frame, bg="#1e293b")
+        btn_row.pack(fill=tk.X, pady=(2, 6))
+
+        self.btn_open_tg = tk.Button(
+            btn_row,
+            text="🚀 打开 Telegram，选择战队群",
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=16,
+            pady=8,
+            cursor="hand2",
+            command=self._open_telegram_deep_link,
+        )
+        self.btn_open_tg.pack(anchor="w")
+
+        status_row = tk.Frame(self.group_frame, bg="#1e293b")
+        status_row.pack(fill=tk.X, pady=(4, 0))
+        self.lbl_broker_status = tk.Label(
+            status_row,
+            text="📡 准备就绪：粘贴 Token 后，点击上方按钮即可一键加群绑定",
+            fg="#94a3b8",
+            bg="#1e293b",
+            font=self.font_sub,
+        )
+        self.lbl_broker_status.pack(side=tk.LEFT)
+
+        # Hidden manual entry fields for compatibility with fallback handlers & tests (omitted from UI per Commander directive)
+        self.entry_chat_id = tk.Entry(self)
+        if self.global_chat_id:
+            self.entry_chat_id.insert(0, self.global_chat_id)
+        self.entry_group_name = tk.Entry(self)
+        if self.global_group_name:
+            self.entry_group_name.insert(0, self.global_group_name)
+
+        # --- Section 3: 底部操作栏 ---
+        actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        actions.pack(fill=tk.X, side=tk.BOTTOM)
+
+        btn_cancel = tk.Button(
+            actions,
+            text="完成并关闭 (Done)",
+            bg="#334155", fg="#f8fafc", activebackground="#475569",
+            font=self.font_bold, relief=tk.FLAT, padx=14, pady=6, cursor="hand2",
+            command=self.destroy,
+        )
+        btn_cancel.pack(side=tk.RIGHT)
+
+    def _toggle_advanced(self):
+        pass
+
+    def _toggle_token_visibility(self):
+        self.show_token = not self.show_token
+        if self.show_token:
+            self.entry_token.config(show="")
+            self.btn_toggle.config(text="🙈")
+        else:
+            self.entry_token.config(show="*")
+            self.btn_toggle.config(text="👁️")
+
+    def _get_active_token(self) -> str:
+        token_input = self.entry_token.get().strip()
+        env_val = (os.environ.get(self.bot_token_env) or "").strip()
+        return token_input or env_val
+
+    def _init_broker_session(self):
+        token = self._get_active_token()
+        if not token:
+            self.lbl_token_status.config(text="⚪ 请输入 Token", fg="#94a3b8")
+            return
+
+        ok, bot_id, uname, err = verify_bot_token(token)
+        if ok and bot_id:
+            self.bot_id = bot_id
+            if uname:
+                self.bot_username = "@" + uname.lstrip("@")
+            final_user = self.bot_username or f"Bot_{bot_id}"
+            self.lbl_bot_uname.config(text=f"{final_user} (ID: {bot_id})")
+            self.lbl_token_status.config(text="🟢 Token有效", fg="#10b981")
+
+            try:
+                env_file = REPO_ROOT / ".env"
+                save_token_to_env(token, env_path=env_file, var_name=self.bot_token_env)
+                os.environ[self.bot_token_env] = token
+            except Exception:
+                pass
+
+            auth_user_val = self.entry_auth_user.get().strip() if hasattr(self, "entry_auth_user") else ""
+            auth_id = int(auth_user_val) if auth_user_val.isdigit() else (self.authorized_user_ids[0] if self.authorized_user_ids else None)
+            effective_auth_ids = [auth_id] if auth_id else list(self.authorized_user_ids)
+
+            self.broker = TelegramUpdateBroker(
+                bot_token=token,
+                seat_role=self.role_key,
+                state_store=self.state_store,
+                authorized_user_ids=effective_auth_ids,
+                repo_root=REPO_ROOT,
+                global_chat_id=self.global_chat_id,
+            )
+        else:
+            self.lbl_token_status.config(text=f"❌ {err or '无效'}", fg="#ef4444")
+
+    def _verify_token_action(self):
+        token = self._get_active_token()
+        if not token:
+            messagebox.showerror("缺少 Token", "请先填入 Telegram Bot Token！", parent=self)
+            return
+        self._init_broker_session()
+
+    def _open_telegram_deep_link(self) -> Optional[str]:
+        """PF-TG-R8: Generate ephemeral deep link and open Telegram client/web for 1-click binding."""
+        token = self._get_active_token()
+        if not token:
+            messagebox.showerror("缺少 Token", "请先填入 Telegram Bot Token！", parent=self)
+            return None
+
+        ok, bot_id, uname, err = verify_bot_token(token)
+        if not ok or not bot_id:
+            self.lbl_token_status.config(text=f"❌ {err or '无效'}", fg="#ef4444")
+            messagebox.showerror("Token 校验失败", f"Bot Token 校验失败: {err}", parent=self)
+            return None
+
+        self.bot_id = bot_id
+        if uname:
+            self.bot_username = "@" + uname.lstrip("@")
+        final_user = self.bot_username or f"Bot_{bot_id}"
+        self.lbl_bot_uname.config(text=f"{final_user} (ID: {bot_id})")
+        self.lbl_token_status.config(text="🟢 Token有效", fg="#10b981")
+
+        try:
+            env_file = REPO_ROOT / ".env"
+            save_token_to_env(token, env_path=env_file, var_name=self.bot_token_env)
+            os.environ[self.bot_token_env] = token
+        except Exception:
+            pass
+
+        auth_user_val = self.entry_auth_user.get().strip() if hasattr(self, "entry_auth_user") else ""
+        auth_id = int(auth_user_val) if auth_user_val.isdigit() else (self.authorized_user_ids[0] if self.authorized_user_ids else None)
+        effective_auth_ids = [auth_id] if auth_id else list(self.authorized_user_ids)
+
+        if not self.broker:
+            self.broker = TelegramUpdateBroker(
+                bot_token=token,
+                seat_role=self.role_key,
+                state_store=self.state_store,
+                authorized_user_ids=effective_auth_ids,
+                repo_root=REPO_ROOT,
+                global_chat_id=self.global_chat_id,
+            )
+        else:
+            self.broker.bot_token = token
+            self.broker.authorized_user_ids = effective_auth_ids
+            self.broker.global_chat_id = self.global_chat_id
+
+        clean_uname = (uname or self.bot_username).lstrip("@")
+        self.current_param = self.broker.create_ephemeral_param(
+            bot_id=bot_id,
+            bot_username=clean_uname,
+            seat_role=self.role_key,
+            authorized_user_id=auth_id,
+            ttl_seconds=300,
+        )
+        self.current_pin = self.current_param
+        deep_link = self.broker.get_startgroup_deep_link(clean_uname, self.current_param)
+
+        is_daemon = self.is_daemon_running_fn() if self.is_daemon_running_fn else False
+        if is_daemon:
+            self.lbl_broker_status.config(text="⚡ 后台服务运行中：已接入全局总线，请在 Telegram 中选择战队群...", fg="#38bdf8")
+        else:
+            self.lbl_broker_status.config(text="📡 正在监听中：请在 Telegram 中选择战队群并确认添加...", fg="#fbbf24")
+            self.broker.start_temporary_poller()
+
+        self.is_listening = True
+        self.after(500, self._poll_broker_events)
+
+        try:
+            webbrowser.open(deep_link)
+        except Exception as e:
+            logger.warning("Failed to open browser automatically: %s", e)
+
+        return deep_link
+
+    def _copy_binding_command(self):
+        """Legacy helper retained for compatibility."""
+        if hasattr(self, "current_param") and self.current_param:
+            uname = (self.bot_username or "").lstrip("@")
+            cmd = f"/start@{uname} {self.current_param}"
+            self.clipboard_clear()
+            self.clipboard_append(cmd)
+            messagebox.showinfo("已复制指令", f"指令已复制到剪贴板：\n\n{cmd}", parent=self)
+
+    def _poll_broker_events(self):
+        if not self.is_listening:
+            return
+
+        events = self.state_store.get_broker_events(after_event_id=self.last_event_id)
+        for ev in events:
+            ev_id = ev.get("event_id", 0)
+            self.last_event_id = max(self.last_event_id, ev_id)
+            ev_type = ev.get("event_type")
+            payload = ev.get("payload") or {}
+
+            if ev_type == "CHAT_BOUND":
+                cid = str(payload.get("chat_id", ""))
+                title = payload.get("chat_title", "")
+                cmd_id = payload.get("commander_id") or payload.get("sender_id")
+
+                self.entry_chat_id.delete(0, tk.END)
+                self.entry_chat_id.insert(0, cid)
+                self.entry_group_name.delete(0, tk.END)
+                self.entry_group_name.insert(0, title)
+                if cmd_id and hasattr(self, "entry_auth_user"):
+                    self.entry_auth_user.delete(0, tk.END)
+                    self.entry_auth_user.insert(0, str(cmd_id))
+
+                if hasattr(self, "lbl_broker_status"):
+                    cmd_txt = f" ｜ 指挥官 ID: {cmd_id}" if cmd_id else ""
+                    self.lbl_broker_status.config(text=f"🟢 战队群已连接：{title} (ID: {cid}){cmd_txt}", fg="#10b981")
+
+                # Persist to .env and os.environ
+                try:
+                    env_file = REPO_ROOT / ".env"
+                    save_token_to_env(cid, env_path=env_file, var_name="TELEGRAM_GROUP_ID")
+                    os.environ["TELEGRAM_GROUP_ID"] = cid
+                    if cmd_id:
+                        save_token_to_env(str(cmd_id), env_path=env_file, var_name="POCKETFLEET_AUTHORIZED_USER_IDS")
+                        os.environ["POCKETFLEET_AUTHORIZED_USER_IDS"] = str(cmd_id)
+                except Exception:
+                    pass
+
+                if self.on_success_callback:
+                    try:
+                        self.on_success_callback(
+                            env_var=self.bot_token_env,
+                            username=self.bot_username,
+                            chat_id=cid,
+                            group_name=title,
+                            token=self._get_active_token(),
+                        )
+                    except TypeError:
+                        self.on_success_callback(
+                            self.bot_token_env,
+                            self.bot_username,
+                            cid,
+                            title,
+                            self._get_active_token(),
+                        )
+
+                cmd_info = f"\n授权指挥官 ID: {cmd_id}" if cmd_id else ""
+                messagebox.showinfo(
+                    "🎉 绑定成功！",
+                    f"🎉 战队群组绑定成功！\n\n"
+                    f"群组名称: {title}\n"
+                    f"群 Chat ID: {cid}{cmd_info}\n\n"
+                    f"PocketFleet 通信链路已正式连接！",
+                    parent=self,
+                )
+                self.is_listening = False
+                return
+
+            elif ev_type == "CONFLICT_409":
+                if hasattr(self, "lbl_broker_status"):
+                    self.lbl_broker_status.config(text="❌ HTTP 409 Conflict: Bot Token 被外部占用", fg="#ef4444")
+                messagebox.showerror(
+                    "HTTP 409 冲突",
+                    "【外部占用拦截】HTTP 409 Conflict\n\n"
+                    "检测到该 Bot Token 正在被另一个外部程序（或未关闭的旧脚本）占用！\n"
+                    "根据防御纪律，PocketFleet 严禁强行接管或破坏外部进程，已主动退出监听。\n\n"
+                    "请排查并关闭其他使用该 Token 的进程后重试。",
+                    parent=self,
+                )
+                self.is_listening = False
+                return
+
+            elif ev_type == "BIND_FAILED":
+                err_msg = payload.get("error", "绑定失败")
+                if hasattr(self, "lbl_broker_status"):
+                    self.lbl_broker_status.config(text=f"⚠️ {err_msg}", fg="#ef4444")
+                messagebox.showwarning(
+                    "入群绑定失败",
+                    f"【绑定被拦截】\n\n{err_msg}",
+                    parent=self,
+                )
+
+        self.after(500, self._poll_broker_events)
+
+    def _test_follower_checkin(self):
+        token = self._get_active_token()
+        if not token:
+            messagebox.showerror("缺少 Token", "请先填入当前席位的 Bot Token！", parent=self)
+            return
+
+        ok, bot_id, uname, err = verify_bot_token(token)
+        if not ok or not bot_id:
+            messagebox.showerror("Token 校验失败", f"Bot Token 校验失败: {err}", parent=self)
+            return
+
+        in_chat, status_msg = verify_chat_member(token, self.global_chat_id, bot_id)
+        if not in_chat:
+            messagebox.showerror(
+                "Bot 尚未入群",
+                f"【尚未入群】\n{status_msg}\n\n👉 请在 Telegram 客户端中将 @{uname} 邀请加入战队群后再点击测试！",
+                parent=self,
+            )
+            return
+
+        sent_ok, send_msg = send_bot_checkin(
+            bot_token=token,
+            chat_id=self.global_chat_id,
+            bot_name=self.seat_name,
+            role_title=self.role_title,
+            engine_name=self.engine_name,
+        )
+        if not sent_ok:
+            messagebox.showerror("发送测试消息失败", f"发送失败: {send_msg}", parent=self)
+            return
+
+        if self.on_success_callback:
+            self.on_success_callback(
+                env_var=self.bot_token_env,
+                username="@" + uname.lstrip("@"),
+                chat_id=self.global_chat_id,
+                group_name=self.global_group_name,
+                token=token,
+            )
+
+        messagebox.showinfo(
+            "测试成功",
+            f"✅ 席位 [{self.seat_name}] 入群验证通过！\n\n"
+            f"Bot @{uname} 已成功在群组中发送通信连接测试消息。",
+            parent=self,
+        )
+        self.destroy()
+
+    def _manual_save_action(self):
+        token = self._get_active_token()
+        cid = self.entry_chat_id.get().strip()
+        gname = self.entry_group_name.get().strip() or "战队群"
+        if not cid:
+            messagebox.showerror("缺少群 ID", "请输入群 Chat ID（如 -1004309197838）", parent=self)
+            return
+
+        try:
+            env_file = REPO_ROOT / ".env"
+            if token:
+                save_token_to_env(token, env_path=env_file, var_name=self.bot_token_env)
+                os.environ[self.bot_token_env] = token
+            save_token_to_env(cid, env_path=env_file, var_name="TELEGRAM_GROUP_ID")
+            os.environ["TELEGRAM_GROUP_ID"] = cid
+        except Exception as e:
+            messagebox.showerror("保存异常", f"无法保存配置: {e}", parent=self)
+            return
+
+        if self.on_success_callback:
+            self.on_success_callback(
+                env_var=self.bot_token_env,
+                username=self.bot_username,
+                chat_id=cid,
+                group_name=gname,
+                token=token,
+            )
+
+        messagebox.showinfo("保存成功", f"✅ 手动配置已保存！\n\n群 Chat ID: {cid}\n群组名称: {gname}", parent=self)
+        self.destroy()
+
+    def _on_close(self):
+        self.is_listening = False
+        if self.broker:
+            self.broker.stop_temporary_poller()
+        self.destroy()
+
+
+CODE_AI_BUTTONS = [
+    {"key": "codex", "label": "⚡ OpenAI Codex", "bg": "#10b981", "hint": "【OpenAI Codex】\n自动化终端编码代理，擅长精确单任务施工与脚本生成。"},
+    {"key": "antigravity", "label": "🪐 Antigravity", "bg": "#0284c7", "hint": "【Google Antigravity】\n全尺寸 IDE 与 CLI 双模代理，支持会话轨道挂载与会话回放。"},
+    {"key": "claude_code", "label": "🧠 Claude Code", "bg": "#d97706", "hint": "【Anthropic Claude Code】\n深度逻辑推演与高阶代码重构代理。"},
+    {"key": "aider", "label": "🛠️ Aider", "bg": "#8b5cf6", "hint": "【Aider CLI】\n经典 Git 伴侣式终端多文件编辑代理。"},
+    {"key": "copilot", "label": "🐙 GitHub Copilot", "bg": "#6366f1", "hint": "【GitHub Copilot CLI】\nGitHub 官方终端命令行伴随式智能体。"},
+]
+
+CHAT_AI_BUTTONS = [
+    {"key": "gemini", "label": "✨ Google Gemini", "bg": "#38bdf8", "hint": "【Google Gemini】\n长上下文超大窗口对话模型，适合宏观推演与知识库对账。"},
+    {"key": "chatgpt", "label": "🤖 OpenAI ChatGPT", "bg": "#10b981", "hint": "【OpenAI ChatGPT】\n通用全能对话助手，适合人机协作日常答疑与指令转译。"},
+    {"key": "claude", "label": "🔮 Anthropic Claude", "bg": "#d97706", "hint": "【Anthropic Claude】\n严谨细致的长文本推理对话模型，具备极高宪法安全度。"},
+]
+
+ALL_ENGINE_MAP: dict[str, dict] = {
+    item["key"].lower(): item for item in (CODE_AI_BUTTONS + CHAT_AI_BUTTONS)
+}
+ALL_ENGINE_MAP["claude-code"] = ALL_ENGINE_MAP["claude_code"]
+ALL_ENGINE_MAP["claudecode"] = ALL_ENGINE_MAP["claude_code"]
+ALL_ENGINE_MAP["github_copilot"] = ALL_ENGINE_MAP["copilot"]
+ALL_ENGINE_MAP["github-copilot"] = ALL_ENGINE_MAP["copilot"]
+ALL_ENGINE_MAP["openai_codex"] = ALL_ENGINE_MAP["codex"]
+ALL_ENGINE_MAP["openai-codex"] = ALL_ENGINE_MAP["codex"]
+ALL_ENGINE_MAP["google_gemini"] = ALL_ENGINE_MAP["gemini"]
+ALL_ENGINE_MAP["google-gemini"] = ALL_ENGINE_MAP["gemini"]
+ALL_ENGINE_MAP["openai_chatgpt"] = ALL_ENGINE_MAP["chatgpt"]
+ALL_ENGINE_MAP["anthropic_claude"] = ALL_ENGINE_MAP["claude"]
+
+
+class EngineBadge:
+    """Widget adapter representing a seat's execution engine as an interactive styled button.
+
+    Provides .get() and .set(val) interface matching ttk.Combobox / StringVar for full
+    backward compatibility with tests and controller logic.
+    """
+
+    def __init__(self, button: tk.Button, tooltip_binder=None):
+        self.button = button
+        self.tooltip_binder = tooltip_binder
+        self._val = ""
+
+    def get(self) -> str:
+        return self._val
+
+    def set(self, val: str):
+        self._val = (val or "").strip()
+        self.update_ui()
+
+    def update_ui(self):
+        val = self._val.lower()
+        engine_info = ALL_ENGINE_MAP.get(val)
+        if engine_info:
+            self.button.config(
+                text=engine_info["label"],
+                bg=engine_info["bg"],
+                fg="#ffffff",
+                activebackground=engine_info["bg"],
+                activeforeground="#ffffff",
+            )
+            if self.tooltip_binder:
+                self.tooltip_binder(
+                    self.button,
+                    f"【{engine_info['label']}】\n点击此按钮清除席位执行引擎，设为【未设置】",
+                )
+        elif self._val:
+            self.button.config(
+                text=f"⚙️ {self._val}",
+                bg="#475569",
+                fg="#ffffff",
+                activebackground="#64748b",
+                activeforeground="#ffffff",
+            )
+            if self.tooltip_binder:
+                self.tooltip_binder(
+                    self.button,
+                    f"【{self._val}】\n点击此按钮清除席位执行引擎，设为【未设置】",
+                )
+        else:
+            self.button.config(
+                text="⚪ 未设置 (点击上方按钮指定)",
+                bg="#334155",
+                fg="#94a3b8",
+                activebackground="#475569",
+                activeforeground="#f8fafc",
+            )
+            if self.tooltip_binder:
+                self.tooltip_binder(
+                    self.button,
+                    "当前席位未设置执行引擎。\n请选中本席位后，点击上方按钮一键指定。",
+                )
+
+    def __getattr__(self, name):
+        return getattr(self.button, name)
+
+
+
 class ThreeSeatsConfigDialog(tk.Toplevel):
     def __init__(self, parent, fleet_mgr, on_save_callback=None):
         super().__init__(parent)
@@ -102,8 +814,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.mgr = fleet_mgr
         self.on_save_callback = on_save_callback
 
-        self.title("Fleet Triad Seats Configuration (三席位战队独立编排) — PocketFleet")
-        self.geometry("680x750")
+        self.title("Fleet Triad Seats Configuration (席位战队编排) — PocketFleet")
+        self.geometry("860x740")
         self.resizable(False, False)
         self.configure(bg="#0b0f19")
         self.transient(parent)
@@ -120,13 +832,25 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         ph = parent.winfo_height()
         px = parent.winfo_rootx()
         py = parent.winfo_rooty()
-        cx = max(0, px + (pw - 680) // 2)
-        cy = max(0, py + (ph - 750) // 2)
+        cx = max(0, px + (pw - 860) // 2)
+        cy = max(0, py + (ph - 740) // 2)
         self.geometry(f"+{cx}+{cy}")
 
-        self.widgets = {}
+        self.active_tab: str = "code"
+        self.selected_role: str = "lead"
+        self.global_chat_id: str = ""
+        self.global_group_name: str = ""
+        self.cards: dict[str, tk.LabelFrame] = {}
+        self.card_titles: dict[str, str] = {}
+        self.widgets: dict[str, dict] = {}
+        self._drawer_brokers: dict[str, Any] = {}
+        self._drawer_last_event_ids: dict[str, int] = {}
+        self._tooltip_win: tk.Toplevel | None = None
+
         self._build_ui()
         self._load_values()
+        self._switch_tab("code")
+        self._select_seat("lead")
 
     def _build_ui(self):
         # Header banner
@@ -134,109 +858,203 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         header.pack(fill=tk.X)
         tk.Label(
             header,
-            text="👥 Fleet Triad Seats Configuration (三席位独立编排)",
+            text="👥 Fleet Triad Seats Configuration (席位战队编排)",
             fg="#38bdf8",
             bg="#0f172a",
             font=self.font_title,
         ).pack(anchor="w")
         tk.Label(
             header,
-            text="三席位：对话AI (推演对账) + 施工指挥 (验收统筹) + 主力程序员 (核心编码) | 严禁明文Token",
+            text="二元页签架构：左侧【代码 AI】(多席位施工) ｜ 右侧【对话 AI】(人类交互与对账) ｜ 战队群全席位共用",
             fg="#94a3b8",
             bg="#0f172a",
             font=self.font_sub,
         ).pack(anchor="w", pady=(2, 0))
 
-        content = tk.Frame(self, bg="#0b0f19", padx=20, pady=12)
+        content = tk.Frame(self, bg="#0b0f19", padx=20, pady=10)
         content.pack(fill=tk.BOTH, expand=True)
 
-        # 3 Seat Sections
-        seat_defs = [
-            ("chat", "💬 席位 1: 对话AI (Chat AI — 推演与宏观对账)", "#38bdf8", list(ALLOWED_CHAT_ENGINES)),
-            ("lead", "🎖️ 席位 2: 施工指挥 (Lead — 架构守门与改卷验收)", "#10b981", list(ALLOWED_CODE_ENGINES)),
-            ("builder", "🛠️ 席位 3: 主力程序员 (Builder — 核心施工与算法定桩)", "#f59e0b", list(ALLOWED_CODE_ENGINES)),
-        ]
+        # Tab Switcher (Segmented Buttons)
+        tab_bar = tk.Frame(content, bg="#0b0f19")
+        tab_bar.pack(fill=tk.X, pady=(0, 10))
 
-        for role_key, title, color, engine_choices in seat_defs:
-            card = tk.LabelFrame(
-                content,
-                text=f" {title} ",
-                fg=color,
-                bg="#1e293b",
+        self.btn_tab_code = tk.Button(
+            tab_bar,
+            text="💻 代码 AI (Code AI — 2席)",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=18,
+            pady=6,
+            cursor="hand2",
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            command=lambda: self._switch_tab("code"),
+        )
+        self.btn_tab_code.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_tab_chat = tk.Button(
+            tab_bar,
+            text="💬 对话 AI (Chat AI — 1席)",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=18,
+            pady=6,
+            cursor="hand2",
+            bg="#1e293b",
+            fg="#94a3b8",
+            activebackground="#334155",
+            activeforeground="#ffffff",
+            command=lambda: self._switch_tab("chat"),
+        )
+        self.btn_tab_chat.pack(side=tk.LEFT)
+
+        # ======================================================================
+        # Tab 1: 代码 AI (Code AI)
+        # ======================================================================
+        self.tab_frame_code = tk.Frame(content, bg="#0b0f19")
+
+        # Top Engine Quick Bar (Row of 5 mainstream overseas Code AIs)
+        engine_bar_code = tk.Frame(self.tab_frame_code, bg="#1e293b", padx=12, pady=8)
+        engine_bar_code.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(
+            engine_bar_code,
+            text="⚡ 快速指定代码执行引擎 (选中下方任一席位后，点击按钮一键替换):",
+            fg="#94a3b8",
+            bg="#1e293b",
+            font=self.font_bold,
+        ).pack(anchor="w", pady=(0, 6))
+
+        btn_row_code = tk.Frame(engine_bar_code, bg="#1e293b")
+        btn_row_code.pack(fill=tk.X)
+
+        for eng_item in CODE_AI_BUTTONS:
+            btn = tk.Button(
+                btn_row_code,
+                text=eng_item["label"],
+                bg=eng_item["bg"],
+                fg="#ffffff",
+                activebackground=eng_item["bg"],
+                activeforeground="#ffffff",
                 font=self.font_bold,
-                padx=12,
-                pady=8,
-                relief=tk.GROOVE,
+                relief=tk.FLAT,
+                padx=10,
+                pady=3,
+                cursor="hand2",
+                command=lambda k=eng_item["key"]: self._apply_code_engine(k),
             )
-            card.pack(fill=tk.X, pady=(0, 10))
+            btn.pack(side=tk.LEFT, padx=(0, 8))
+            self._bind_btn_tooltip(btn, eng_item["hint"])
 
-            # Row 1: Name & Engine
-            r1 = tk.Frame(card, bg="#1e293b")
-            r1.pack(fill=tk.X, pady=2)
+        # Code Seat 1: 规划席 (CTO) & Code Seat 2: 执行席 (主力)
+        self._create_seat_card(
+            self.tab_frame_code,
+            role_key="lead",
+            title="🎖️ 席位 1: 规划席·CTO (架构守门与改卷验收)",
+            color="#10b981",
+            engine_choices=list(ALLOWED_CODE_ENGINES),
+        )
+        self._create_seat_card(
+            self.tab_frame_code,
+            role_key="builder",
+            title="🛠️ 席位 2: 执行席·主力 (核心施工与算法定桩)",
+            color="#f59e0b",
+            engine_choices=list(ALLOWED_CODE_ENGINES),
+        )
 
-            tk.Label(r1, text="席位代号:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
-            entry_name = tk.Entry(r1, bg="#0f172a", fg="#f8fafc", insertbackground="#f8fafc", font=self.font_mono, width=18, relief=tk.FLAT, bd=4)
-            entry_name.pack(side=tk.LEFT, padx=(0, 16))
+        # ======================================================================
+        # Tab 2: 对话 AI (Chat AI)
+        # ======================================================================
+        self.tab_frame_chat = tk.Frame(content, bg="#0b0f19")
 
-            tk.Label(r1, text="执行引擎:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
-            combo_eng = ttk.Combobox(r1, values=engine_choices, state="readonly", width=16)
-            combo_eng.pack(side=tk.LEFT)
+        # Top Engine Quick Bar (Row of mainstream Chat AIs)
+        engine_bar_chat = tk.Frame(self.tab_frame_chat, bg="#1e293b", padx=12, pady=8)
+        engine_bar_chat.pack(fill=tk.X, pady=(0, 10))
 
-            # Row 2: Token Env Var & Username
-            r2 = tk.Frame(card, bg="#1e293b")
-            r2.pack(fill=tk.X, pady=2)
+        tk.Label(
+            engine_bar_chat,
+            text="✨ 快速指定对话执行引擎 (点击按钮一键替换人类交互席引擎):",
+            fg="#94a3b8",
+            bg="#1e293b",
+            font=self.font_bold,
+        ).pack(anchor="w", pady=(0, 6))
 
-            tk.Label(r2, text="Token变量:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
-            entry_env = tk.Entry(r2, bg="#0f172a", fg="#38bdf8", insertbackground="#38bdf8", font=self.font_mono, width=22, relief=tk.FLAT, bd=4)
-            entry_env.pack(side=tk.LEFT, padx=(0, 8))
+        btn_row_chat = tk.Frame(engine_bar_chat, bg="#1e293b")
+        btn_row_chat.pack(fill=tk.X)
 
-            tk.Label(r2, text="Bot用户名:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=9, anchor="w").pack(side=tk.LEFT)
-            entry_user = tk.Entry(r2, bg="#0f172a", fg="#94a3b8", insertbackground="#94a3b8", font=self.font_mono, width=18, relief=tk.FLAT, bd=4)
-            entry_user.pack(side=tk.LEFT)
+        for eng_item in CHAT_AI_BUTTONS:
+            btn = tk.Button(
+                btn_row_chat,
+                text=eng_item["label"],
+                bg=eng_item["bg"],
+                fg="#ffffff",
+                activebackground=eng_item["bg"],
+                activeforeground="#ffffff",
+                font=self.font_bold,
+                relief=tk.FLAT,
+                padx=12,
+                pady=3,
+                cursor="hand2",
+                command=lambda k=eng_item["key"]: self._apply_chat_engine(k),
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 10))
+            self._bind_btn_tooltip(btn, eng_item["hint"])
 
-            # Row 3: Description & Command
-            r3 = tk.Frame(card, bg="#1e293b")
-            r3.pack(fill=tk.X, pady=2)
+        # Chat Seat 1: 人类交互席
+        self._create_seat_card(
+            self.tab_frame_chat,
+            role_key="chat",
+            title="💬 席位 1: 人类交互席 (推演与宏观对账 - 非必选)",
+            color="#38bdf8",
+            engine_choices=list(ALLOWED_CHAT_ENGINES),
+        )
 
-            tk.Label(r3, text="职责描述:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=10, anchor="w").pack(side=tk.LEFT)
-            entry_desc = tk.Entry(r3, bg="#0f172a", fg="#cbd5e1", insertbackground="#cbd5e1", font=self.font_sub, relief=tk.FLAT, bd=4)
-            entry_desc.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        # Initially pack code tab
+        self.tab_frame_code.pack(fill=tk.BOTH, expand=True)
 
-            tk.Label(r3, text="启动指令:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=8, anchor="w").pack(side=tk.LEFT)
-            entry_cmd = tk.Entry(r3, bg="#0f172a", fg="#a7f3d0", insertbackground="#a7f3d0", font=self.font_mono, width=12, relief=tk.FLAT, bd=4)
-            entry_cmd.pack(side=tk.LEFT)
+        # ======================================================================
+        # Shared Bottom Area (Collaborative group, context window, actions)
+        # ======================================================================
+        # Global Telegram Collaborative Group Banner
+        self.lbl_global_group = tk.Label(
+            content,
+            text="📢 Telegram 协同战队群: 尚未配置 (点击任一席位的 TG 状态按钮进行配置/打卡)",
+            fg="#94a3b8",
+            bg="#0b0f19",
+            font=self.font_sub,
+            anchor="w",
+        )
+        self.lbl_global_group.pack(fill=tk.X, pady=(4, 2))
 
-            self.widgets[role_key] = {
-                "name": entry_name,
-                "engine": combo_eng,
-                "env": entry_env,
-                "user": entry_user,
-                "desc": entry_desc,
-                "cmd": entry_cmd,
-            }
-
-        # Extra options
+        # Extra options (Context window synchronization)
         opt_frame = tk.Frame(content, bg="#0b0f19")
-        opt_frame.pack(fill=tk.X, pady=(4, 0))
+        opt_frame.pack(fill=tk.X, pady=(6, 0))
 
-        tk.Label(opt_frame, text="最近消息条数 (context_window):", fg="#94a3b8", bg="#0b0f19", font=self.font_sub).pack(side=tk.LEFT)
-        self.entry_cw = tk.Entry(opt_frame, bg="#1e293b", fg="#f8fafc", font=self.font_mono, width=6, relief=tk.FLAT, bd=4)
-        self.entry_cw.insert(0, "20")
-        self.entry_cw.pack(side=tk.LEFT, padx=(4, 20))
-
-        self.var_nositu = tk.BooleanVar(value=True)
-        cb_nositu = tk.Checkbutton(
+        self.var_sync_context = tk.BooleanVar(value=True)
+        self.cb_sync_context = tk.Checkbutton(
             opt_frame,
-            text="不启用司柝中继",
-            variable=self.var_nositu,
+            text="对被 @ 的席位同步最近对话历史 (Context Window):",
+            variable=self.var_sync_context,
             bg="#0b0f19",
             fg="#38bdf8",
             selectcolor="#1e293b",
             activebackground="#0b0f19",
             activeforeground="#38bdf8",
             font=self.font_sub,
+            command=self._on_sync_context_toggle,
         )
-        cb_nositu.pack(side=tk.LEFT)
+        self.cb_sync_context.pack(side=tk.LEFT)
+
+        self.entry_cw = tk.Entry(opt_frame, bg="#1e293b", fg="#f8fafc", font=self.font_mono, width=5, relief=tk.FLAT, bd=4)
+        self.entry_cw.insert(0, "20")
+        self.entry_cw.pack(side=tk.LEFT, padx=(4, 6))
+
+        tk.Label(opt_frame, text="条", fg="#94a3b8", bg="#0b0f19", font=self.font_sub).pack(side=tk.LEFT)
+
+        # Internal flag kept for backward compatibility
+        self.var_nositu = tk.BooleanVar(value=True)
 
         # Bottom Actions
         actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
@@ -288,6 +1106,745 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
         btn_cancel.pack(side=tk.RIGHT)
 
+    def _create_seat_card(self, parent: tk.Widget, role_key: str, title: str, color: str, engine_choices: list[str]):
+        card = tk.LabelFrame(
+            parent,
+            text=f" {title} ",
+            fg=color,
+            bg="#1e293b",
+            font=self.font_bold,
+            padx=12,
+            pady=8,
+            relief=tk.SOLID,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#334155",
+            highlightcolor="#334155",
+        )
+        card.pack(fill=tk.X, pady=(0, 8))
+        self.cards[role_key] = card
+        self.card_titles[role_key] = title
+
+        # Card click selection binding
+        card.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        # Card body with two columns: left for seat properties, right for TG in-card drawer
+        card_body = tk.Frame(card, bg="#1e293b")
+        card_body.pack(fill=tk.BOTH, expand=True)
+        card_body.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        card_left = tk.Frame(card_body, bg="#1e293b")
+        card_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        card_left.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        card_right = tk.Frame(card_body, bg="#1e293b")
+        card_right.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+
+        # Row 1: Name & Engine (in card_left)
+        r1 = tk.Frame(card_left, bg="#1e293b")
+        r1.pack(fill=tk.X, pady=2)
+        r1.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        lbl_name = tk.Label(r1, text="席位代号:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
+        lbl_name.pack(side=tk.LEFT)
+        lbl_name.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        entry_name = tk.Entry(r1, bg="#0f172a", fg="#f8fafc", insertbackground="#f8fafc", font=self.font_mono, width=16, relief=tk.FLAT, bd=4)
+        entry_name.pack(side=tk.LEFT, padx=(0, 12))
+        entry_name.bind("<FocusIn>", lambda e, rk=role_key: self._select_seat(rk))
+
+        lbl_eng = tk.Label(r1, text="执行引擎:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
+        lbl_eng.pack(side=tk.LEFT)
+        lbl_eng.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        btn_engine = tk.Button(
+            r1,
+            text="⚪ 未设置 (点击上方按钮指定)",
+            bg="#334155",
+            fg="#94a3b8",
+            activebackground="#475569",
+            activeforeground="#f8fafc",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=10,
+            pady=2,
+            cursor="hand2",
+            command=lambda rk=role_key: self._on_engine_badge_click(rk),
+        )
+        btn_engine.pack(side=tk.LEFT)
+
+        engine_adapter = EngineBadge(
+            button=btn_engine,
+            tooltip_binder=self._bind_btn_tooltip,
+        )
+
+        # Dynamic Antigravity Track Config button
+        btn_track = tk.Button(
+            r1,
+            text="🧭 轨道配置",
+            bg="#0d9488",
+            fg="#ffffff",
+            activebackground="#0f766e",
+            activeforeground="#ffffff",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=8,
+            pady=1,
+            cursor="hand2",
+            command=self._open_antigravity_tracks,
+        )
+
+        # Chat AI verification & launch button
+        btn_chat_check = None
+        if role_key == "chat":
+            btn_chat_check = tk.Button(
+                r1,
+                text="🌐 启动/自检",
+                bg="#0284c7",
+                fg="#ffffff",
+                activebackground="#0369a1",
+                activeforeground="#ffffff",
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=8,
+                pady=1,
+                cursor="hand2",
+                command=self._verify_chat_ai_bridge,
+            )
+            btn_chat_check.pack(side=tk.LEFT, padx=(8, 0))
+
+        # Row 2: Telegram Seat Status Capsule (in card_left)
+        r2 = tk.Frame(card_left, bg="#1e293b")
+        r2.pack(fill=tk.X, pady=2)
+        r2.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        lbl_tg = tk.Label(r2, text="TG 协同:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
+        lbl_tg.pack(side=tk.LEFT)
+        lbl_tg.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        lbl_tg_status = tk.Label(
+            r2,
+            text="🔴 席位待配置",
+            fg="#f87171",
+            bg="#1e293b",
+            font=self.font_bold,
+            cursor="hand2",
+        )
+        lbl_tg_status.pack(side=tk.LEFT, padx=(0, 8))
+        lbl_tg_status.bind("<Button-1>", lambda e, rk=role_key: self._expand_tg_drawer(rk))
+        self._bind_btn_tooltip(lbl_tg_status, "点击展开右侧 Telegram Bot Token 与战队群快捷设置")
+
+        lbl_env_tag = tk.Label(r2, text="", fg="#64748b", bg="#1e293b", font=self.font_mono)
+        lbl_env_tag.pack(side=tk.LEFT)
+
+        # Headless entries maintained for test & programmatic backwards-compatibility
+        entry_env = tk.Entry(r2)
+        entry_token = tk.Entry(r2, show="*")
+        lbl_hint = tk.Label(r2, text="")
+        entry_user = tk.Entry(r2)
+
+        # Row 3: Role Assignment Display (in card_left)
+        r3 = tk.Frame(card_left, bg="#1e293b")
+        r3.pack(fill=tk.X, pady=2)
+        r3.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        lbl_role_tag = tk.Label(r3, text="席位职能:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
+        lbl_role_tag.pack(side=tk.LEFT)
+        lbl_role_tag.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
+
+        btn_role_badge = tk.Button(
+            r3,
+            text="【职能配置】",
+            bg="#334155",
+            fg="#f8fafc",
+            activebackground="#475569",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=12,
+            pady=2,
+            cursor="hand2",
+            command=lambda rk=role_key: self._select_seat(rk),
+        )
+        btn_role_badge.pack(side=tk.LEFT, padx=(0, 8))
+
+        entry_custom = tk.Entry(
+            r3,
+            bg="#0f172a",
+            fg="#cbd5e1",
+            insertbackground="#cbd5e1",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            bd=4,
+        )
+        entry_custom.bind("<FocusIn>", lambda e, rk=role_key: self._select_seat(rk))
+
+        cmd_var = tk.StringVar(value="")
+        desc_var = tk.StringVar(value="")
+
+        # ======================================================================
+        # In-Card Telegram Collapsible Drawer (in card_right)
+        # ======================================================================
+        # State A: Collapsed (compact button)
+        drawer_collapsed = tk.Frame(card_right, bg="#1e293b")
+        drawer_collapsed.pack(fill=tk.BOTH, expand=True)
+
+        btn_tg_config = tk.Button(
+            drawer_collapsed,
+            text="✈️ TG设置",
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=14,
+            pady=16,
+            cursor="hand2",
+            command=lambda rk=role_key: self._expand_tg_drawer(rk),
+        )
+        btn_tg_config.pack(fill=tk.BOTH, expand=True)
+        self._bind_btn_tooltip(btn_tg_config, "点击向左展开本席位 Telegram Bot Token 配置与战队群加入面板")
+
+        # State B: Expanded (in-card quick binding panel)
+        drawer_expanded = tk.Frame(card_right, bg="#0f172a", bd=1, relief=tk.SOLID, padx=8, pady=4)
+        # Initially hidden (pack_forget)
+
+        # Drawer Row 1: Header
+        dr_head = tk.Frame(drawer_expanded, bg="#0f172a")
+        dr_head.pack(fill=tk.X, pady=(0, 3))
+        lbl_dr_title = tk.Label(dr_head, text="✈️ TG设置", fg="#38bdf8", bg="#0f172a", font=self.font_bold)
+        lbl_dr_title.pack(side=tk.LEFT)
+        btn_dr_close = tk.Button(
+            dr_head,
+            text="✖ 收起",
+            bg="#1e293b",
+            fg="#94a3b8",
+            activebackground="#334155",
+            activeforeground="#f8fafc",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=6,
+            pady=0,
+            cursor="hand2",
+            command=lambda rk=role_key: self._collapse_tg_drawer(rk),
+        )
+        btn_dr_close.pack(side=tk.RIGHT)
+
+        # Drawer Row 2: Token Input with Eye Toggle (shows full plaintext on click)
+        dr_tok_row = tk.Frame(drawer_expanded, bg="#0f172a")
+        dr_tok_row.pack(fill=tk.X, pady=(0, 3))
+        lbl_dr_tok = tk.Label(dr_tok_row, text="Token:", fg="#cbd5e1", bg="#0f172a", font=self.font_sub)
+        lbl_dr_tok.pack(side=tk.LEFT, padx=(0, 4))
+        entry_dr_tok = tk.Entry(
+            dr_tok_row,
+            bg="#1e293b",
+            fg="#f8fafc",
+            insertbackground="#f8fafc",
+            font=self.font_mono,
+            width=20,
+            relief=tk.FLAT,
+            bd=3,
+            show="*",
+        )
+        entry_dr_tok.pack(side=tk.LEFT, padx=(0, 4))
+        btn_dr_eye = tk.Button(
+            dr_tok_row,
+            text="👁️",
+            bg="#334155",
+            fg="#f8fafc",
+            activebackground="#475569",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=4,
+            pady=0,
+            cursor="hand2",
+            command=lambda rk=role_key: self._toggle_drawer_token_eye(rk),
+        )
+        btn_dr_eye.pack(side=tk.LEFT)
+        self._bind_btn_tooltip(btn_dr_eye, "切换显示/隐藏明文 Token (好用第一)")
+
+        # Drawer Row 3: Action Button + Status
+        dr_act_row = tk.Frame(drawer_expanded, bg="#0f172a")
+        dr_act_row.pack(fill=tk.X)
+        btn_dr_join = tk.Button(
+            dr_act_row,
+            text="🚀 加入TG群",
+            bg="#10b981",
+            fg="#ffffff",
+            activebackground="#059669",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=8,
+            pady=2,
+            cursor="hand2",
+            command=lambda rk=role_key: self._drawer_join_tg(rk),
+        )
+        btn_dr_join.pack(side=tk.LEFT, padx=(0, 6))
+        lbl_dr_status = tk.Label(dr_act_row, text="⚪ 待配置", fg="#94a3b8", bg="#0f172a", font=self.font_sub)
+        lbl_dr_status.pack(side=tk.LEFT)
+
+        self.widgets[role_key] = {
+            "name": entry_name,
+            "engine": engine_adapter,
+            "btn_engine": btn_engine,
+            "btn_track": btn_track,
+            "btn_chat_check": btn_chat_check,
+            "btn_tg_config": btn_tg_config,
+            "btn_tg_capsule": btn_tg_config,
+            "lbl_tg_status": lbl_tg_status,
+            "lbl_env_tag": lbl_env_tag,
+            "env": entry_env,
+            "token": entry_token,
+            "hint": lbl_hint,
+            "user": entry_user,
+            "role_badge": btn_role_badge,
+            "custom_entry": entry_custom,
+            "cmd_var": cmd_var,
+            "desc_var": desc_var,
+            "is_custom": False,
+            "drawer_collapsed": drawer_collapsed,
+            "drawer_expanded": drawer_expanded,
+            "drawer_token_entry": entry_dr_tok,
+            "drawer_token_eye": btn_dr_eye,
+            "drawer_join_btn": btn_dr_join,
+            "drawer_status_lbl": lbl_dr_status,
+        }
+
+    def _switch_tab(self, tab_name: str):
+        self.active_tab = tab_name
+        if tab_name == "code":
+            self.btn_tab_code.config(bg="#0284c7", fg="#ffffff")
+            self.btn_tab_chat.config(bg="#1e293b", fg="#94a3b8")
+            self.tab_frame_chat.pack_forget()
+            self.tab_frame_code.pack(fill=tk.BOTH, expand=True)
+            if self.selected_role not in ("lead", "builder"):
+                self._select_seat("lead")
+            else:
+                self._select_seat(self.selected_role)
+        else:
+            self.btn_tab_code.config(bg="#1e293b", fg="#94a3b8")
+            self.btn_tab_chat.config(bg="#0284c7", fg="#ffffff")
+            self.tab_frame_code.pack_forget()
+            self.tab_frame_chat.pack(fill=tk.BOTH, expand=True)
+            self._select_seat("chat")
+
+    def _apply_code_engine(self, engine_key: str):
+        target = self.selected_role
+        if target not in ("lead", "builder"):
+            target = "lead"
+            self._select_seat("lead")
+        w = self.widgets.get(target)
+        if not w:
+            return
+        w["engine"].set(engine_key)
+        self._on_engine_change(target)
+
+    def _apply_chat_engine(self, engine_key: str):
+        w = self.widgets.get("chat")
+        if not w:
+            return
+        w["engine"].set(engine_key)
+        self._on_engine_change("chat")
+        self._select_seat("chat")
+
+    # --- Tooltip Helper for Presets ---
+
+    def _bind_btn_tooltip(self, widget: tk.Widget, text: str):
+        widget.bind("<Enter>", lambda e: self._show_tooltip(e.x_root, e.y_root, text))
+        widget.bind("<Leave>", lambda e: self._hide_tooltip())
+
+    def _show_tooltip(self, x: int, y: int, text: str):
+        self._hide_tooltip()
+        tw = tk.Toplevel(self)
+        tw.wm_overrideredirect(True)
+        tw.configure(bg="#0f172a", bd=1, relief=tk.SOLID)
+        tw.geometry(f"+{x + 12}+{y + 16}")
+
+        frame = tk.Frame(tw, bg="#0f172a", padx=10, pady=8)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            frame,
+            text=text,
+            fg="#38bdf8",
+            bg="#0f172a",
+            font=self.font_sub,
+            justify=tk.LEFT,
+            wraplength=340,
+        ).pack()
+        self._tooltip_win = tw
+
+    def _hide_tooltip(self):
+        if self._tooltip_win:
+            try:
+                self._tooltip_win.destroy()
+            except Exception:
+                pass
+            self._tooltip_win = None
+
+    # --- Seat Selection & Preset Assignment with Mutual Exclusion ---
+
+    def _select_seat(self, role_key: str):
+        self.selected_role = role_key
+        for rk, card in self.cards.items():
+            base_title = self.card_titles[rk]
+            if rk == role_key:
+                card.config(
+                    highlightbackground="#38bdf8",
+                    highlightcolor="#38bdf8",
+                    highlightthickness=2,
+                    text=f" {base_title} [⭐ 当前选中编排] ",
+                )
+            else:
+                card.config(
+                    highlightbackground="#334155",
+                    highlightcolor="#334155",
+                    highlightthickness=1,
+                    text=f" {base_title} ",
+                )
+
+    def _apply_preset_to_selected(self, preset: dict):
+        if not self.selected_role or self.selected_role not in self.widgets:
+            return
+        target_role = self.selected_role
+        preset_key = preset["key"]
+
+        if preset_key == "custom":
+            # Custom is non-exclusive
+            w = self.widgets[target_role]
+            w["is_custom"] = True
+            w["role_badge"].config(text="【✏️ 自定义】", bg="#475569", fg="#ffffff")
+            w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+            w["custom_entry"].focus_set()
+        else:
+            # Presets 1-3 are strictly mutually exclusive: if another seat already holds this preset, downgrade it to custom
+            for other_role, other_w in self.widgets.items():
+                if other_role != target_role:
+                    if not other_w["is_custom"] and other_w["desc_var"].get() == preset["desc_text"]:
+                        other_w["is_custom"] = True
+                        other_w["desc_var"].set("")
+                        other_w["role_badge"].config(text="【✏️ 自定义】", bg="#475569", fg="#ffffff")
+                        other_w["custom_entry"].delete(0, tk.END)
+                        other_w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+
+            w = self.widgets[target_role]
+            w["is_custom"] = False
+            w["desc_var"].set(preset["desc_text"])
+            w["role_badge"].config(text=f"【{preset['btn_label']}】", bg=preset["bg"], fg=preset["fg"])
+            w["custom_entry"].pack_forget()
+
+    def _on_engine_badge_click(self, role_key: str):
+        w = self.widgets.get(role_key)
+        if not w:
+            return
+        current_eng = w["engine"].get().strip()
+        if current_eng:
+            # Click on assigned engine badge clears it back to unset
+            w["engine"].set("")
+            self._on_engine_change(role_key)
+        else:
+            # Click on unset badge selects the seat for quick assignment
+            self._select_seat(role_key)
+
+    def _on_engine_change(self, role_key: str):
+        w = self.widgets[role_key]
+        eng = w["engine"].get().strip().lower()
+        cmd = get_default_command_for_engine(eng) if eng else ""
+        w["cmd_var"].set(cmd)
+        if eng == "antigravity":
+            w["btn_track"].pack(side=tk.LEFT, padx=(8, 0))
+        else:
+            w["btn_track"].pack_forget()
+        self._select_seat(role_key)
+
+    def _on_sync_context_toggle(self):
+        if self.var_sync_context.get():
+            self.entry_cw.config(state="normal", bg="#1e293b", fg="#f8fafc")
+        else:
+            self.entry_cw.config(state="disabled", bg="#0f172a", fg="#64748b")
+
+    def _verify_chat_ai_bridge(self):
+        is_listening = is_port_listening(8765)
+        if is_listening:
+            messagebox.showinfo(
+                "对话席位自检成功",
+                "✅ 对话席位 Web 桥接网关正常运行 (Port 8765 已就绪)！\n\n"
+                "• 浏览器插件 / Web 桥接已连接；\n"
+                "• 您可在 TG 协同群中发送 '@Bot 你好' 测试端到端连通性。",
+                parent=self,
+            )
+        else:
+            messagebox.showwarning(
+                "Web 网关未启动",
+                "⚠️ 本地 Web 桥接网关 (Port 8765) 尚未启动。\n\n"
+                "请在 PocketFleet 主控制面板中点击【🚀 Start All Services】启动服务，"
+                "启动后 Web 网关将自动监听。",
+                parent=self,
+            )
+
+    def _expand_tg_drawer(self, role_key: str):
+        for rk, other_w in self.widgets.items():
+            if rk != role_key and "drawer_collapsed" in other_w:
+                self._collapse_tg_drawer(rk)
+        w = self.widgets.get(role_key)
+        if not w:
+            return
+        if "drawer_collapsed" in w and "drawer_expanded" in w:
+            w["drawer_collapsed"].pack_forget()
+            w["drawer_expanded"].pack(fill=tk.BOTH, expand=True)
+            # If entry empty, check env
+            env_var = w["env"].get().strip()
+            cur_tok = w["drawer_token_entry"].get().strip()
+            if not cur_tok:
+                tok_from_env = (os.environ.get(env_var) or "").strip()
+                if tok_from_env:
+                    w["drawer_token_entry"].delete(0, tk.END)
+                    w["drawer_token_entry"].insert(0, tok_from_env)
+                    w["drawer_status_lbl"].config(text="🟢 Token已就位", fg="#10b981")
+            w["drawer_token_entry"].focus_set()
+        self._select_seat(role_key)
+
+    def _collapse_tg_drawer(self, role_key: str):
+        w = self.widgets.get(role_key)
+        if not w:
+            return
+        if "drawer_expanded" in w and "drawer_collapsed" in w:
+            w["drawer_expanded"].pack_forget()
+            w["drawer_collapsed"].pack(fill=tk.BOTH, expand=True)
+
+    def _toggle_drawer_token_eye(self, role_key: str):
+        w = self.widgets.get(role_key)
+        if not w:
+            return
+        entry = w["drawer_token_entry"]
+        btn = w["drawer_token_eye"]
+        if entry.cget("show") == "*":
+            entry.config(show="")
+            btn.config(text="🙈")
+        else:
+            entry.config(show="*")
+            btn.config(text="👁️")
+
+    def _drawer_join_tg(self, role_key: str):
+        w = self.widgets.get(role_key)
+        if not w:
+            return
+        token = w["drawer_token_entry"].get().strip()
+        env_var = w["env"].get().strip() or f"TELEGRAM_BOT_{role_key.upper()}_TOKEN"
+        if not token:
+            token = (os.environ.get(env_var) or "").strip()
+
+        if not token:
+            w["drawer_status_lbl"].config(text="❌ 请输入Token", fg="#ef4444")
+            messagebox.showerror("缺少 Token", "请先填入 Telegram Bot Token！", parent=self)
+            return
+
+        w["drawer_status_lbl"].config(text="🔄 验证Token...", fg="#facc15")
+        self.update_idletasks()
+
+        ok, bot_id, uname, err = verify_bot_token(token)
+        if not ok or not bot_id:
+            w["drawer_status_lbl"].config(text=f"❌ {err or '无效'}", fg="#ef4444")
+            messagebox.showerror("Token 校验失败", f"Bot Token 校验失败: {err}", parent=self)
+            return
+
+        clean_uname = (uname or w["user"].get().strip()).lstrip("@")
+        bot_username = "@" + clean_uname
+        w["user"].delete(0, tk.END)
+        w["user"].insert(0, bot_username)
+
+        # Persist token to .env and os.environ
+        try:
+            env_file = REPO_ROOT / ".env"
+            save_token_to_env(token, env_path=env_file, var_name=env_var)
+            os.environ[env_var] = token
+        except Exception as e:
+            logger.warning("Failed to save token to .env: %s", e)
+
+        w["token"].delete(0, tk.END)
+        w["token"].insert(0, token)
+        self._update_seat_tg_capsule(role_key)
+
+        # If global group already exists, check if this bot is already in the group
+        if self.global_chat_id:
+            in_chat, _ = verify_chat_member(token, self.global_chat_id, bot_id)
+            if in_chat:
+                sent_ok, _ = send_bot_checkin(
+                    bot_token=token,
+                    chat_id=self.global_chat_id,
+                    bot_name=w["name"].get().strip() or role_key,
+                    seat_title=w["desc_var"].get().strip(),
+                    engine_name=w["engine"].get().strip(),
+                )
+                if sent_ok:
+                    w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
+                    self._update_seat_tg_capsule(role_key)
+                    if self.on_save_callback:
+                        self.on_save_callback()
+                    messagebox.showinfo("通信测试成功", f"✅ Bot @{clean_uname} 已经处于战队群中，通信连接测试成功！", parent=self)
+                    return
+
+        auth_ids = []
+        fleet_cfg = getattr(self, "fleet_config", None)
+        if fleet_cfg and hasattr(fleet_cfg, "authorized_user_ids") and fleet_cfg.authorized_user_ids:
+            auth_ids = list(fleet_cfg.authorized_user_ids)
+        elif os.environ.get("POCKETFLEET_AUTHORIZED_USER_IDS"):
+            raw_ids = os.environ.get("POCKETFLEET_AUTHORIZED_USER_IDS", "")
+            for p in raw_ids.split(","):
+                if p.strip().isdigit():
+                    auth_ids.append(int(p.strip()))
+
+        state_store = StateStore()
+        existing_events = state_store.get_broker_events(after_event_id=0, limit=1000)
+        last_event_id = max([e.get("event_id", 0) for e in existing_events], default=0)
+
+        broker = TelegramUpdateBroker(
+            bot_token=token,
+            seat_role=role_key,
+            state_store=state_store,
+            authorized_user_ids=auth_ids,
+            repo_root=REPO_ROOT,
+            global_chat_id=self.global_chat_id,
+        )
+        self._drawer_brokers[role_key] = broker
+        self._drawer_last_event_ids[role_key] = last_event_id
+
+        param = broker.create_ephemeral_param(
+            bot_id=bot_id,
+            bot_username=clean_uname,
+            seat_role=role_key,
+            authorized_user_id=auth_ids[0] if auth_ids else None,
+            ttl_seconds=300,
+        )
+        deep_link = broker.get_startgroup_deep_link(clean_uname, param)
+
+        is_daemon = self.mgr.is_daemon_running() if hasattr(self.mgr, "is_daemon_running") else False
+        if not is_daemon:
+            broker.start_temporary_poller()
+
+        w["drawer_status_lbl"].config(text="📡 正在监听加群...", fg="#facc15")
+        self.after(500, lambda rk=role_key: self._poll_drawer_broker(rk))
+
+        try:
+            webbrowser.open(deep_link)
+        except Exception as e:
+            logger.warning("Failed to open browser automatically: %s", e)
+
+    def _poll_drawer_broker(self, role_key: str):
+        broker = self._drawer_brokers.get(role_key)
+        if not broker:
+            return
+        last_id = self._drawer_last_event_ids.get(role_key, 0)
+        events = broker.state_store.get_broker_events(after_event_id=last_id, limit=50)
+        for ev in events:
+            ev_id = ev.get("event_id", 0)
+            if ev_id > last_id:
+                last_id = ev_id
+            ev_type = ev.get("event_type")
+            payload = ev.get("payload", {})
+            if ev_type == "CHAT_BOUND":
+                chat_id = str(payload.get("chat_id", ""))
+                chat_title = payload.get("chat_title", "")
+                self.global_chat_id = chat_id
+                self.global_group_name = chat_title
+                self._update_global_group_banner()
+                self._update_seat_tg_capsule(role_key)
+                w = self.widgets.get(role_key, {})
+                if "drawer_status_lbl" in w:
+                    w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
+                broker.stop_temporary_poller()
+                if self.on_save_callback:
+                    self.on_save_callback()
+                return
+            elif ev_type == "CONFLICT_409":
+                w = self.widgets.get(role_key, {})
+                if "drawer_status_lbl" in w:
+                    w["drawer_status_lbl"].config(text="⚠️ 端口/Bot冲突(409)", fg="#ef4444")
+                broker.stop_temporary_poller()
+                return
+
+        self._drawer_last_event_ids[role_key] = last_id
+        self.after(500, lambda rk=role_key: self._poll_drawer_broker(rk))
+
+    def _open_seat_telegram_dialog(self, role_key: str):
+        """In-card drawer is the primary UX; expand drawer without external popup modal."""
+        self._expand_tg_drawer(role_key)
+
+    def destroy(self):
+        if hasattr(self, "_drawer_brokers"):
+            for b in self._drawer_brokers.values():
+                try:
+                    b.stop_temporary_poller()
+                except Exception:
+                    pass
+        super().destroy()
+
+    def _update_seat_tg_capsule(self, role_key: str):
+        w = self.widgets[role_key]
+        env_var = w["env"].get().strip()
+        user = w["user"].get().strip()
+        token_val = (os.environ.get(env_var) or "").strip()
+        if not token_val and "drawer_token_entry" in w:
+            token_val = w["drawer_token_entry"].get().strip()
+
+        w["lbl_env_tag"].config(text=f"({env_var})")
+
+        if token_val:
+            last4 = token_val[-4:] if len(token_val) >= 4 else token_val
+            user_part = f"{user} " if user else ""
+            w["lbl_tg_status"].config(
+                text=f"🟢 已就位: {user_part}(末4位:...{last4})",
+                fg="#4ade80",
+            )
+            if "drawer_status_lbl" in w:
+                w["drawer_status_lbl"].config(text="🟢 已就位", fg="#10b981")
+        else:
+            w["lbl_tg_status"].config(
+                text="🔴 席位待配置",
+                fg="#f87171",
+            )
+            if "drawer_status_lbl" in w:
+                w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
+
+    def _update_global_group_banner(self):
+        if self.global_chat_id:
+            name_part = f"【{self.global_group_name}】" if self.global_group_name else ""
+            self.lbl_global_group.config(
+                text=f"📢 Telegram 协同战队群: {name_part} Chat ID: {self.global_chat_id} (全席位共用)",
+                fg="#38bdf8",
+            )
+        else:
+            has_token = False
+            for r_key, w in self.widgets.items():
+                env_var = w["env"].get().strip()
+                if (os.environ.get(env_var) or "").strip():
+                    has_token = True
+                    break
+            if has_token:
+                self.lbl_global_group.config(
+                    text="📢 Telegram 协同战队群: ⚪ 待入群发言自动绑定 (启动服务后在群内发一条消息即可锁定)",
+                    fg="#facc15",
+                )
+            else:
+                self.lbl_global_group.config(
+                    text="📢 Telegram 协同战队群: 尚未配置 (点击任一席位的 TG 状态按钮进行配置/打卡)",
+                    fg="#94a3b8",
+                )
+
+    def _open_antigravity_tracks(self):
+        AntigravityTracksDialog(
+            parent=self,
+            fleet_mgr=self.mgr,
+            on_bind_callback=self._on_track_bound_callback,
+        )
+
+    def _on_track_bound_callback(self):
+        self.mgr.log("🧭 [TRACK] Antigravity 轨道已在席位编排中更新。")
+        if self.on_save_callback:
+            self.on_save_callback()
+
     def _load_values(self):
         cfg = self.mgr.load_seats_config()
         self._populate_fields(cfg)
@@ -295,7 +1852,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
     def _populate_fields(self, cfg: FleetSeatsConfig):
         self.entry_cw.delete(0, tk.END)
         self.entry_cw.insert(0, str(cfg.context_window))
-        self.var_nositu.set(cfg.no_situ)
+        self.var_sync_context.set(getattr(cfg, "sync_context_window", True))
+        self._on_sync_context_toggle()
+
+        self.global_chat_id = getattr(cfg, "telegram_chat_id", "") or (os.environ.get("TELEGRAM_GROUP_ID") or "").strip()
+        self.global_group_name = getattr(cfg, "telegram_group_name", "")
+        self._update_global_group_banner()
+
+        # Track used preset texts to ensure mutual exclusion on load
+        used_preset_texts: set[str] = set()
 
         for role_key, w in self.widgets.items():
             seat = cfg.seats.get(role_key)
@@ -308,10 +1873,53 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             w["env"].insert(0, seat.bot_token_env)
             w["user"].delete(0, tk.END)
             w["user"].insert(0, seat.bot_username)
-            w["desc"].delete(0, tk.END)
-            w["desc"].insert(0, seat.description)
-            w["cmd"].delete(0, tk.END)
-            w["cmd"].insert(0, seat.command)
+            w["cmd_var"].set(seat.command or get_default_command_for_engine(seat.engine))
+
+            # Dynamic track config button
+            if seat.engine.lower() == "antigravity":
+                w["btn_track"].pack(side=tk.LEFT, padx=(8, 0))
+            else:
+                w["btn_track"].pack_forget()
+
+            # Match description to presets or custom with mutual exclusion
+            desc = seat.description.strip()
+            matched = False
+            for p in ROLE_PRESETS[:3]:
+                if (desc == p["desc_text"] or desc == p["btn_label"]) and p["desc_text"] not in used_preset_texts:
+                    w["desc_var"].set(p["desc_text"])
+                    w["is_custom"] = False
+                    w["role_badge"].config(text=f"【{p['btn_label']}】", bg=p["bg"], fg=p["fg"])
+                    w["custom_entry"].pack_forget()
+                    used_preset_texts.add(p["desc_text"])
+                    matched = True
+                    break
+            if not matched:
+                w["desc_var"].set(desc)
+                w["is_custom"] = True
+                w["role_badge"].config(text="【✏️ 自定义】", bg="#475569", fg="#ffffff")
+                w["custom_entry"].delete(0, tk.END)
+                w["custom_entry"].insert(0, desc)
+                w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+
+            # Masked token and last 4 characters hint (never full plaintext echo)
+            env_val = (os.environ.get(seat.bot_token_env) or "").strip()
+            w["token"].delete(0, tk.END)
+            if env_val:
+                masked = "••••••••" + (env_val[-4:] if len(env_val) >= 4 else env_val)
+                w["token"].insert(0, masked)
+                hint_str = f"末4位: ...{env_val[-4:]}" if len(env_val) >= 4 else "已设置"
+                w["hint"].config(text=hint_str, fg="#10b981")
+                if "drawer_token_entry" in w:
+                    w["drawer_token_entry"].delete(0, tk.END)
+                    w["drawer_token_entry"].insert(0, env_val)
+                if "drawer_status_lbl" in w:
+                    w["drawer_status_lbl"].config(text="🟢 Token已就位", fg="#10b981")
+            else:
+                w["hint"].config(text="未配置", fg="#ef4444")
+                if "drawer_status_lbl" in w:
+                    w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
+
+            self._update_seat_tg_capsule(role_key)
 
     def _reset_defaults(self):
         default_cfg = get_default_seats_config()
@@ -332,8 +1940,28 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             engine = w["engine"].get().strip()
             env_var = w["env"].get().strip()
             user = w["user"].get().strip()
-            desc = w["desc"].get().strip()
-            cmd = w["cmd"].get().strip()
+
+            if not engine:
+                messagebox.showerror(
+                    "执行引擎未设置",
+                    f"席位 '{role_key}' ({name or role_key}) 尚未指定执行引擎！\n\n请点击上方引擎按钮为该席位指定执行引擎后再保存。",
+                    parent=self,
+                )
+                if role_key == "chat":
+                    self._switch_tab("chat")
+                else:
+                    self._switch_tab("code")
+                self._select_seat(role_key)
+                return
+
+            if w["is_custom"]:
+                desc = w["custom_entry"].get().strip()
+            else:
+                desc = w["desc_var"].get().strip()
+
+            # Automatic engine-to-command binding (cleanly hidden from UI)
+            cmd = w["cmd_var"].get().strip() or get_default_command_for_engine(engine)
+            token_val = w["token"].get().strip()
 
             # Plaintext token check (fail loud)
             if ":" in env_var or " " in env_var:
@@ -349,13 +1977,34 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
             if not env_var:
                 messagebox.showerror("缺失配置", f"席位 '{role_key}' 必须指定环境变量名 (Token变量)！", parent=self)
-                w["env"].focus_set()
                 return
+
+            tok_dr = ""
+            if "drawer_token_entry" in w:
+                tok_dr = w["drawer_token_entry"].get().strip()
+            effective_tok = tok_dr or token_val
+
+            # Auto-resolve username if empty but token is provided
+            if not user and effective_tok and not effective_tok.startswith("•"):
+                ok, _, un, _ = verify_bot_token(effective_tok)
+                if ok and un:
+                    user = "@" + un.lstrip("@")
+                    w["user"].delete(0, tk.END)
+                    w["user"].insert(0, user)
 
             if not user:
                 messagebox.showerror("缺失配置", f"席位 '{role_key}' 必须指定 Bot 用户名！", parent=self)
-                w["user"].focus_set()
                 return
+
+            # If user entered a fresh token (not the masked placeholder), safely write to .env
+            if effective_tok and not effective_tok.startswith("•") and not effective_tok.endswith("••••"):
+                try:
+                    env_file = REPO_ROOT / ".env"
+                    save_token_to_env(effective_tok, env_path=env_file, var_name=env_var)
+                    os.environ[env_var] = effective_tok
+                except Exception as e:
+                    messagebox.showerror("写入.env失败", f"无法写入 Token 到 .env: {e}", parent=self)
+                    return
 
             seat_cfg = SeatConfig(
                 role=role_key,
@@ -372,7 +2021,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         new_fleet_cfg = FleetSeatsConfig(
             seats=seats_dict,
             context_window=cw_val,
-            no_situ=self.var_nositu.get(),
+            no_situ=True,
+            telegram_chat_id=self.global_chat_id,
+            telegram_group_name=self.global_group_name,
+            sync_context_window=self.var_sync_context.get(),
         )
 
         try:
@@ -387,9 +2039,481 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             messagebox.showerror("保存失败", f"无法写入配置文件:\n{e}", parent=self)
             return
 
+        # Ensure TELEGRAM_GROUP_ID is saved to .env if configured
+        if self.global_chat_id:
+            try:
+                env_file = REPO_ROOT / ".env"
+                save_token_to_env(self.global_chat_id, env_path=env_file, var_name="TELEGRAM_GROUP_ID")
+                os.environ["TELEGRAM_GROUP_ID"] = self.global_chat_id
+            except Exception:
+                pass
+
         self.destroy()
         if self.on_save_callback:
             self.on_save_callback()
+
+
+# ==============================================================================
+# Antigravity Tracks Dialog (Track Manager & Official Import Guide)
+# ==============================================================================
+# ==============================================================================
+# Antigravity Tracks Dialog (Dialogue-Centric Track Selector & Smart Binder)
+# ==============================================================================
+class AntigravityTracksDialog(tk.Toplevel):
+    def __init__(self, parent, fleet_mgr, on_bind_callback=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.mgr = fleet_mgr
+        self.on_bind_callback = on_bind_callback
+
+        self.title("Antigravity 轨道管理与会话绑定 — PocketFleet")
+        self.geometry("960x650")
+        self.minsize(860, 560)
+        self.configure(bg="#0b0f19")
+        self.transient(parent)
+        self.grab_set()
+
+        self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
+        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
+        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        self.font_mono = tkfont.Font(family="Consolas", size=9)
+
+        # Center on parent
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        cx = max(0, px + (pw - 960) // 2)
+        cy = max(0, py + (ph - 650) // 2)
+        self.geometry(f"+{cx}+{cy}")
+
+        self.controller = AntigravityTrackController(workspace_cwd=REPO_ROOT)
+        self.tracks_data: list[TrackCandidate] = []
+        self._item_to_candidate: dict[str, TrackCandidate] = {}
+        self.show_all_var = tk.BooleanVar(value=False)
+        self.is_scanning = False
+
+        # Tooltip state
+        self._tooltip_win: tk.Toplevel | None = None
+        self._tooltip_timer: str | None = None
+        self._hovered_row_id: str | None = None
+
+        self._build_ui()
+        self.refresh_tracks()
+
+    def _build_ui(self):
+        # Header banner
+        header = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        header.pack(fill=tk.X)
+        tk.Label(
+            header,
+            text="🧭 Antigravity 对话轨发现与一键绑定 (Track Selector)",
+            fg="#38bdf8",
+            bg="#0f172a",
+            font=self.font_title,
+        ).pack(anchor="w")
+
+        self.lbl_bound_status = tk.Label(
+            header,
+            text="当前绑定的对话轨: 正在检查...",
+            fg="#f8fafc",
+            bg="#0f172a",
+            font=self.font_sub,
+        )
+        self.lbl_bound_status.pack(anchor="w", pady=(3, 0))
+
+        # Compact instruction bar (replaces cumbersome 3-step guide box)
+        tip_bar = tk.Frame(self, bg="#1e293b", padx=16, pady=6)
+        tip_bar.pack(fill=tk.X, padx=16, pady=(10, 6))
+        tk.Label(
+            tip_bar,
+            text="💡 提示：鼠标悬停在任意行上可预览完整末轮对话。选中目标会话后（包括 IDE 正在进行的对话），直接点击下方【🔗 绑定为对话轨】即可一键秒级绑定！",
+            fg="#38bdf8",
+            bg="#1e293b",
+            font=self.font_sub,
+        ).pack(anchor="w")
+
+        # Treeview table Frame
+        table_frame = tk.Frame(self, bg="#0b0f19", padx=16, pady=4)
+        table_frame.pack(fill=tk.BOTH, expand=True)
+
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "Tracks.Treeview",
+            background="#1e293b",
+            foreground="#f8fafc",
+            fieldbackground="#1e293b",
+            rowheight=26,
+            font=("Segoe UI", 9),
+        )
+        style.configure(
+            "Tracks.Treeview.Heading",
+            background="#334155",
+            foreground="#f1f5f9",
+            font=("Segoe UI", 9, "bold"),
+        )
+        style.map(
+            "Tracks.Treeview",
+            background=[("selected", "#0284c7")],
+            foreground=[("selected", "#ffffff")],
+        )
+
+        columns = ("status", "snippet", "last_activity", "total_bytes")
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show="headings",
+            style="Tracks.Treeview",
+            selectmode="browse",
+        )
+
+        self.tree.heading("status", text="状态 / 来源")
+        self.tree.heading("snippet", text="最新对话内容 (Last Dialogue Message)")
+        self.tree.heading("last_activity", text="最后活动时间 (Activity)")
+        self.tree.heading("total_bytes", text="会话容量 (Size)")
+
+        self.tree.column("status", width=140, anchor="center")
+        self.tree.column("snippet", width=520, anchor="w")
+        self.tree.column("last_activity", width=140, anchor="center")
+        self.tree.column("total_bytes", width=90, anchor="e")
+
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Hover Tooltip Event Bindings
+        self.tree.bind("<Motion>", self._on_tree_motion)
+        self.tree.bind("<Leave>", self._hide_tooltip)
+        self.tree.bind("<ButtonPress>", self._hide_tooltip)
+        self.tree.bind("<Double-1>", lambda e: self._on_bind_click())
+
+        # Bottom toolbar
+        bar = tk.Frame(self, bg="#0b0f19", padx=16, pady=12)
+        bar.pack(fill=tk.X)
+
+        btn_refresh = tk.Button(
+            bar,
+            text="🔄 刷新列表",
+            bg="#334155",
+            fg="#f8fafc",
+            activebackground="#475569",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=12,
+            pady=5,
+            cursor="hand2",
+            command=self.refresh_tracks,
+        )
+        btn_refresh.pack(side=tk.LEFT, padx=(0, 8))
+
+        chk_show_all = tk.Checkbutton(
+            bar,
+            text="显示全部 (<512KB 小轨)",
+            variable=self.show_all_var,
+            command=self.refresh_tracks,
+            bg="#0b0f19",
+            fg="#94a3b8",
+            activebackground="#0b0f19",
+            activeforeground="#f8fafc",
+            selectcolor="#1e293b",
+            font=self.font_sub,
+        )
+        chk_show_all.pack(side=tk.LEFT, padx=(0, 20))
+
+        # Unified single smart action button
+        self.btn_bind = tk.Button(
+            bar,
+            text="🔗 绑定为对话轨 (Bind Track)",
+            bg="#10b981",
+            fg="#ffffff",
+            activebackground="#059669",
+            activeforeground="#ffffff",
+            font=tkfont.Font(family="Segoe UI", size=10, weight="bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=5,
+            cursor="hand2",
+            command=self._on_bind_click,
+        )
+        self.btn_bind.pack(side=tk.LEFT)
+
+        btn_close = tk.Button(
+            bar,
+            text="关闭",
+            bg="#475569",
+            fg="#ffffff",
+            activebackground="#64748b",
+            activeforeground="#ffffff",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=14,
+            pady=5,
+            cursor="hand2",
+            command=self.destroy,
+        )
+        btn_close.pack(side=tk.RIGHT)
+
+    # --- Tooltip Management ---
+
+    def _on_tree_motion(self, event):
+        row_id = self.tree.identify_row(event.y)
+        if row_id != self._hovered_row_id:
+            self._hide_tooltip()
+            self._hovered_row_id = row_id
+            if row_id:
+                if self._tooltip_timer:
+                    self.after_cancel(self._tooltip_timer)
+                # 350ms debounce hover delay
+                self._tooltip_timer = self.after(
+                    350,
+                    lambda: self._show_tooltip(event.x_root, event.y_root, row_id),
+                )
+
+    def _show_tooltip(self, x: int, y: int, row_id: str):
+        cand = self._item_to_candidate.get(row_id)
+        if not cand:
+            return
+
+        self._hide_tooltip()
+
+        tw = tk.Toplevel(self)
+        tw.wm_overrideredirect(True)
+        tw.configure(bg="#0f172a", bd=1, relief=tk.SOLID)
+        # Position slightly offset from cursor
+        tw.geometry(f"+{x + 18}+{y + 12}")
+
+        frame = tk.Frame(tw, bg="#0f172a", padx=12, pady=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Header tag
+        src_tag = "💬 IDE 对话空间 (可一键直连绑定)" if cand.source == "ide" else "⚡ CLI 对话空间 (可直接绑定)"
+        tk.Label(
+            frame,
+            text=f"📌 {src_tag}",
+            fg="#38bdf8",
+            bg="#0f172a",
+            font=self.font_bold,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        # User prompt preview
+        from pocketfleet.antigravity_tracks import clean_dialogue_snippet
+        clean_user = clean_dialogue_snippet(cand.last_user_prompt, max_chars=320)
+        clean_resp = clean_dialogue_snippet(cand.last_model_response, max_chars=220)
+
+        if clean_user:
+            tk.Label(
+                frame,
+                text="👤 用户指令 (已回溯至最新有效发言):",
+                fg="#f1f5f9",
+                bg="#0f172a",
+                font=self.font_bold,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(2, 0))
+            tk.Label(
+                frame,
+                text=f"“{clean_user}”",
+                fg="#7dd3fc",
+                bg="#0f172a",
+                font=self.font_sub,
+                justify=tk.LEFT,
+                wraplength=480,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(1, 6))
+        elif clean_resp:
+            tk.Label(
+                frame,
+                text="💡 提示: 此会话未检测到人类独立提问，仅包含助手执行:",
+                fg="#fbbf24",
+                bg="#0f172a",
+                font=self.font_sub,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(2, 4))
+        else:
+            tk.Label(
+                frame,
+                text="📌 空白新会话 (暂无任何交互记录)",
+                fg="#94a3b8",
+                bg="#0f172a",
+                font=self.font_sub,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(2, 6))
+
+        # Model response preview if available
+        if clean_resp:
+            tk.Label(
+                frame,
+                text="🤖 助手最新回复:",
+                fg="#94a3b8",
+                bg="#0f172a",
+                font=self.font_bold,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(2, 0))
+            tk.Label(
+                frame,
+                text=f"{clean_resp}",
+                fg="#cbd5e1",
+                bg="#0f172a",
+                font=self.font_sub,
+                justify=tk.LEFT,
+                wraplength=480,
+                anchor="w",
+            ).pack(fill=tk.X, pady=(1, 6))
+
+        # Bottom metadata row
+        row_dict = self.controller.format_row(cand)
+        meta_str = f"UUID: {cand.conversation_id}  |  容量: {row_dict['total_bytes']}  |  活动: {row_dict['last_activity']}"
+        tk.Label(
+            frame,
+            text=meta_str,
+            fg="#64748b",
+            bg="#0f172a",
+            font=self.font_mono,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(4, 0))
+
+        self._tooltip_win = tw
+
+    def _hide_tooltip(self, event=None):
+        if self._tooltip_timer:
+            self.after_cancel(self._tooltip_timer)
+            self._tooltip_timer = None
+        if self._tooltip_win:
+            try:
+                self._tooltip_win.destroy()
+            except Exception:
+                pass
+            self._tooltip_win = None
+        self._hovered_row_id = None
+
+    # --- Data & Binding Methods ---
+
+    def _update_bound_label(self):
+        bound_id = self.controller.get_current_bound_id()
+        if bound_id:
+            from pocketfleet.antigravity_tracks import get_default_ide_root
+            ide_db = get_default_ide_root() / "conversations" / f"{bound_id}.db"
+            origin_type = "IDE 原生轨" if ide_db.is_file() else "CLI 外勤轨"
+            self.lbl_bound_status.config(
+                text=f"当前绑定的对话轨: {bound_id} ({origin_type}，已同步至项目 .env)",
+                fg="#38bdf8",
+            )
+        else:
+            self.lbl_bound_status.config(
+                text="当前未绑定持久轨 (默认以全新独立会话启动)",
+                fg="#94a3b8",
+            )
+        return bound_id
+
+    def refresh_tracks(self):
+        if self.is_scanning:
+            return
+        self.is_scanning = True
+        show_all = self.show_all_var.get()
+
+        def _worker():
+            err = None
+            tracks = []
+            try:
+                tracks = self.controller.scan_tracks(show_all=show_all)
+            except Exception as ex:
+                err = ex
+            self.after(0, lambda: self._on_scan_done(tracks, err))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_scan_done(self, tracks: list[TrackCandidate], err: Exception | None):
+        self.is_scanning = False
+        if err:
+            self.mgr.log(f"[TRACK] 轨道扫描异常: {err}")
+            messagebox.showwarning("扫描提示", f"扫描轨道时出现异常:\n{err}", parent=self)
+            return
+
+        self.tracks_data = tracks
+        self._item_to_candidate.clear()
+        bound_id = self._update_bound_label()
+
+        # Clear and repopulate tree
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        select_item = None
+        for cand in self.tracks_data:
+            row_dict = self.controller.format_row(cand, bound_id=bound_id)
+            values = (
+                row_dict["status"],
+                row_dict["snippet"],
+                row_dict["last_activity"],
+                row_dict["total_bytes"],
+            )
+            item_id = self.tree.insert("", tk.END, values=values)
+            self._item_to_candidate[item_id] = cand
+
+            if row_dict["bound"]:
+                select_item = item_id
+
+        if select_item:
+            self.tree.selection_set(select_item)
+            self.tree.see(select_item)
+
+    def _get_selected_candidate(self) -> TrackCandidate | None:
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        return self._item_to_candidate.get(sel[0])
+
+    def _on_bind_click(self):
+        self._hide_tooltip()
+        cand = self._get_selected_candidate()
+        if not cand:
+            messagebox.showinfo("请先选择", "请先在列表中选中一条对话轨！", parent=self)
+            return
+
+        is_running = self.mgr.is_daemon_running()
+        if is_running:
+            messagebox.showwarning(
+                "服务运行中禁止换轨",
+                "Telegram daemon 正在运行，禁止修改轨道绑定。\n\n"
+                "请先在控制面板点击【Stop All Services】停止服务，\n"
+                "避免长轮询冲突造成 409 Conflict。",
+                parent=self,
+            )
+            return
+
+        try:
+            self.controller.bind_track(cand, is_daemon_running=is_running)
+            from pocketfleet.antigravity_tracks import clean_dialogue_snippet
+            snippet = clean_dialogue_snippet(cand.last_user_prompt or cand.last_model_response, 50)
+            self.mgr.log(f"🧭 [TRACK] Antigravity lead conversation bound: {cand.conversation_id}")
+
+            if cand.source == "ide":
+                msg = (
+                    f"🎉 绑定成功！已为您无感同步当前 IDE 对话至执行环境：\n\n"
+                    f"“{snippet}”\n"
+                    f"(UUID: {cand.conversation_id})\n\n"
+                    f"✅ 已完成数据原子克隆并写入 .env。\n"
+                    f"在 Telegram 发送指令，执行引擎将直接在此 IDE 对话上下文中继续施工！"
+                )
+            else:
+                msg = (
+                    f"🎉 绑定成功！已绑定 CLI 对话轨为施工续轨：\n\n"
+                    f"“{snippet}”\n"
+                    f"(UUID: {cand.conversation_id})\n\n"
+                    f"已无损写入项目 .env 文件。"
+                )
+
+            messagebox.showinfo("绑定成功", msg, parent=self)
+            self._update_bound_label()
+            self.refresh_tracks()
+            if self.on_bind_callback:
+                self.on_bind_callback()
+        except Exception as e:
+            messagebox.showerror("绑定失败", f"无法绑定轨道:\n{e}", parent=self)
 
 
 # ==============================================================================
@@ -402,6 +2526,8 @@ class FleetManager:
         self.dispatch_loop: DispatchLoop | None = None
         self.loop_thread: threading.Thread | None = None
         self.cockpit_port = 8765
+        self.session_hub: SessionHub | None = None
+        self.lead_worker: SessionWorker | None = None
 
     def is_daemon_running(self) -> bool:
         return bool(self.dispatch_loop and getattr(self.dispatch_loop, "running", False))
@@ -438,7 +2564,7 @@ class FleetManager:
 
     def load_fleet_config(self) -> dict:
         default_cfg = {
-            "authorized_user_ids": [6801810539],
+            "authorized_user_ids": [],
             "role_assignment": {"lead": "antigravity", "builder": "codex"},
             "bots": {
                 "antigravity": {
@@ -468,14 +2594,34 @@ class FleetManager:
 
     def load_seats_config(self) -> FleetSeatsConfig:
         if not CONFIG_FILE.is_file():
-            return get_default_seats_config()
+            default_cfg = get_default_seats_config()
+            self.save_seats_config(default_cfg)
+            return default_cfg
         try:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except Exception as e:
             raise ValueError(f"配置文件 {CONFIG_FILE.name} 损坏 (JSON解析失败): {e}") from e
 
-        if "seats" not in data:
-            raise ValueError(f"配置文件 {CONFIG_FILE.name} 缺少 'seats' 三席位定义，配置非法！")
+        if not isinstance(data, dict):
+            data = {}
+
+        if "seats" not in data or not isinstance(data.get("seats"), dict):
+            # 自动平滑升级旧版配置文件：补全默认三席位定义并写回落盘
+            default_cfg = get_default_seats_config()
+            payload = default_cfg.to_dict()
+            if "context_window" in data and isinstance(data["context_window"], int):
+                payload["context_window"] = data["context_window"]
+            if "no_situ" in data and isinstance(data["no_situ"], bool):
+                payload["no_situ"] = data["no_situ"]
+            if "authorized_user_ids" in data and isinstance(data["authorized_user_ids"], list):
+                payload["authorized_user_ids"] = data["authorized_user_ids"]
+
+            try:
+                CONFIG_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+                self.log(f"🔄 [CONFIG] 检测到旧版 {CONFIG_FILE.name}，已自动平滑升级并补全三席位架构。")
+            except Exception as w_err:
+                self.log(f"[WARN] 自动升级写回配置异常: {w_err}")
+            return FleetSeatsConfig.from_dict(payload)
 
         return FleetSeatsConfig.from_dict(data)
 
@@ -508,23 +2654,60 @@ class FleetManager:
             self.dispatch_loop.set_role_assignment(RoleAssignment(lead=lead, builder=builder))
         self.log(f"👥 [ROLE] Swapped WarRoom: 【任务负责人】{lead.title()} ↔ 【主力程序员】{builder.title()}")
 
-    def start_daemon(self, executor: str | None = None) -> bool:
+    def start_daemon(self, executor: str | None = None, allow_auto_bind: bool = False) -> bool:
         if self.is_daemon_running():
             self.log("[WARN] Telegram Daemon is already active.")
             return True
+
+        # 1. Reload .env on daemon startup (ensures fresh token / track bindings)
+        load_env_file(REPO_ROOT / ".env", override=True)
 
         cfg = self.load_fleet_config()
         roles = cfg.get("role_assignment", {"lead": "antigravity", "builder": "codex"})
         token, allowed_ids, configured_executor = self._load_credentials()
 
+        # Fail Closed Gate 1: Token verification
         if not token or token == "YOUR_TELEGRAM_BOT_TOKEN":
             self.log("[CONFIG] No valid Bot Token found! Wizard prompt triggered.")
             return False
 
+        # Fail Closed Gate 2: Security Whitelist verification (empty list strictly rejects startup unless explicit allow_auto_bind)
+        if not allowed_ids:
+            if not allow_auto_bind:
+                self.log("❌ [SECURITY] 授权用户列表为空！根据安全默认规则拒绝启动 Telegram 守护进程（禁止解释为 allow-all）。")
+                return False
+            else:
+                self.log("⚡ [AUTO-BIND] 当前尚未绑定协同群 ID，守护进程进入【待入群发言自动绑定】模式。")
+                self.log("👉 请在 Telegram 将 Bot 邀请加入战队群，并在群内发送一条消息或 /start，系统将自动识别并锁定该群！")
+        else:
+            self.log(f"🔒 [SECURITY] 协同群安全白名单已锁定: {list(allowed_ids)}")
+
+        # Fail Closed Gate 3: Legal Antigravity CLI track binding verification
+        track_ctrl = AntigravityTrackController(workspace_cwd=REPO_ROOT)
+        bound_id = track_ctrl.get_current_bound_id()
+        if not bound_id or not is_valid_uuid(bound_id):
+            self.log("❌ [START REJECTED] 未绑定合法 Antigravity CLI 轨道！拒绝启动 Daemon。请先在控制台点击【Antigravity 轨道】进行官方导入与绑定。")
+            return False
+
         active_executor = executor or configured_executor or cfg.get("executor") or "fleet_triad"
-        self.log("[DAEMON] Initializing evidence-backed dispatch loop...")
+        self.log("[DAEMON] Initializing evidence-backed dispatch loop and SessionWorker...")
         try:
             state_store = StateStore()
+            self.session_hub = SessionHub(state_store)
+
+            # Register authoritative lead Session and launch resident SessionWorker
+            self.session_hub.register_or_update_session(
+                seat_id="lead",
+                engine="antigravity",
+                conversation_id=bound_id,
+                workspace=str(REPO_ROOT),
+                role="adjudicator",
+            )
+            self.lead_worker = self.session_hub.create_worker(seat_id="lead")
+            self.lead_worker.start()
+            self.log(f"🧭 [SESSION_HUB] Lead SessionWorker active on CLI track '{bound_id[:8]}...{bound_id[-4:]}'.")
+
+            auth_uids = set(seats_cfg.authorized_user_ids) if seats_cfg.authorized_user_ids else None
             transport = TelegramTransport(bot_token=token, state_store=state_store)
             self.dispatch_loop = DispatchLoop(
                 transport=transport,
@@ -534,6 +2717,9 @@ class FleetManager:
                 state_store=state_store,
                 bots_config=cfg.get("bots", {}),
                 role_assignment=RoleAssignment(lead=roles.get("lead", "antigravity"), builder=roles.get("builder", "codex")),
+                session_hub=self.session_hub,
+                authorized_user_ids=auth_uids,
+                on_chat_bound=self._on_chat_auto_bound,
             )
 
             telemetry.allowed_chat_ids = list(allowed_ids) if allowed_ids else []
@@ -552,8 +2738,21 @@ class FleetManager:
             return True
         except Exception as e:
             self.log(f"[ERROR] Failed to start daemon: {e}")
+            # Clean up partially initialized resources on failure
+            if self.lead_worker:
+                try:
+                    self.lead_worker.stop(cancel_active=True, timeout=2.0)
+                except Exception:
+                    pass
+                self.lead_worker = None
+            if self.dispatch_loop:
+                try:
+                    self.dispatch_loop.stop()
+                except Exception:
+                    pass
+                self.dispatch_loop = None
+            self.session_hub = None
             return False
-
 
     def switch_executor(self, executor_type: str) -> None:
         try:
@@ -575,24 +2774,67 @@ class FleetManager:
             self.log(f"[ERROR] Failed to switch engine: {e}")
 
     def stop_daemon(self) -> None:
-        if not self.is_daemon_running():
+        if not self.is_daemon_running() and not self.lead_worker:
             self.log("[DAEMON] Daemon is not running.")
             return
-        self.log("[DAEMON] Stopping Telegram Bridge Daemon...")
+        self.log("[DAEMON] Stopping Telegram Bridge Daemon and SessionWorker...")
+        if self.lead_worker:
+            try:
+                self.lead_worker.stop(cancel_active=True, timeout=5.0)
+            except Exception as w_err:
+                self.log(f"[WARN] Error stopping lead worker: {w_err}")
+            self.lead_worker = None
+
         if self.dispatch_loop:
             self.dispatch_loop.stop()
             self.dispatch_loop = None
+        self.session_hub = None
         telemetry.telegram_connected = False
-        self.log("[DAEMON] Daemon stopped.")
+        self.log("[DAEMON] Daemon and workers stopped.")
+
+    def _on_chat_auto_bound(self, chat_id: int, chat_title: str) -> None:
+        self.log(f"🎉 [AUTO-BIND] 协同战役室自动绑定成功！")
+        self.log(f"   Chat ID: {chat_id} ｜ 群名称: {chat_title or '战队群'}")
+        self.log("🔒 [SECURITY] 战队群安全白名单已全面锁定，Fail-Closed 审计已就绪。")
 
     def _load_credentials(self) -> tuple[str | None, set[int] | None, str | None]:
         seats_cfg = self.load_seats_config()
         lead_seat = seats_cfg.seats.get("lead")
         token_env = lead_seat.bot_token_env if lead_seat else "TELEGRAM_BOT_JUDGE_TOKEN"
         tok = os.environ.get(token_env) or os.environ.get("POCKETFLEET_BOT_TOKEN")
-        ids = set(seats_cfg.authorized_user_ids) if seats_cfg.authorized_user_ids else None
+
+        # Authoritative single source for whitelist: POCKETFLEET_AUTHORIZED_USER_IDS env var has highest priority
+        env_auth_str = os.environ.get("POCKETFLEET_AUTHORIZED_USER_IDS")
+        if env_auth_str is not None:
+            import re
+            parts = re.split(r"[,;|\s]+", env_auth_str.strip())
+            ids = set()
+            for p in parts:
+                if p:
+                    try:
+                        ids.add(int(p))
+                    except ValueError:
+                        pass
+        elif seats_cfg.authorized_user_ids:
+            ids = set(seats_cfg.authorized_user_ids)
+        else:
+            ids = set()
+
+        # Also incorporate configured group chat ID into allowed IDs
+        env_grp = (os.environ.get("TELEGRAM_GROUP_ID") or "").strip()
+        if env_grp:
+            try:
+                ids.add(int(env_grp))
+            except ValueError:
+                pass
+        if seats_cfg.telegram_chat_id:
+            try:
+                ids.add(int(seats_cfg.telegram_chat_id.strip()))
+            except ValueError:
+                pass
+
         exec_type = lead_seat.engine if lead_seat else "fleet_triad"
-        return tok, ids, exec_type
+        return tok, (ids if ids else None), exec_type
 
 
 
@@ -862,7 +3104,8 @@ class PocketFleetControlApp:
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
-            padx=10,
+            padx=12,
+            pady=3,
             cursor="hand2",
             command=self.open_three_seats_dialog,
         )
@@ -882,13 +3125,23 @@ class PocketFleetControlApp:
             widget.destroy()
 
         seats_cfg = self.mgr.load_seats_config()
+        track_ctrl = AntigravityTrackController(workspace_cwd=REPO_ROOT)
+        bound_id = track_ctrl.get_current_bound_id()
+        bound_summary = f"{bound_id[:8]}...{bound_id[-4:]}" if bound_id else "未绑定"
+
         seat_roles = [
-            ("chat", "💬 席位 1: 对话AI (Chat)", "#38bdf8"),
-            ("lead", "🎖️ 席位 2: 施工指挥 (Lead)", "#10b981"),
-            ("builder", "🛠️ 席位 3: 主力程序员 (Builder)", "#f59e0b"),
+            ("chat", "💬 人类交互席 (Chat)", "#38bdf8"),
+            ("lead", "🎖️ 规划席·CTO (Lead)", "#10b981"),
+            ("builder", "🛠️ 执行席·主力 (Builder)", "#f59e0b"),
         ]
 
+        # Dynamically append any extended code seats if configured
+        for rk, s_cfg in seats_cfg.seats.items():
+            if rk not in ("chat", "lead", "builder"):
+                seat_roles.append((rk, f"⚙️ 扩展席位 ({rk})", "#a855f7"))
+
         for col, (role_key, role_label, accent_color) in enumerate(seat_roles):
+            self.seats_container.columnconfigure(col, weight=1)
             seat = seats_cfg.seats.get(role_key)
             card_sub = tk.Frame(self.seats_container, bg="#1e293b", bd=1, relief=tk.RIDGE, padx=10, pady=8)
             card_sub.grid(row=0, column=col, sticky="nsew", padx=4)
@@ -906,6 +3159,8 @@ class PocketFleetControlApp:
             eng_text = (seat.engine.upper() if seat else "UNKNOWN")
             token_env = seat.bot_token_env if seat else ""
             desc = seat.description if seat else ""
+            user = seat.bot_username if seat else ""
+            token_val = (os.environ.get(token_env) or "").strip() if token_env else ""
 
             tk.Label(
                 card_sub,
@@ -925,12 +3180,24 @@ class PocketFleetControlApp:
                 anchor="w",
             ).pack(fill=tk.X)
 
+            if seat and seat.engine.lower() == "antigravity":
+                tk.Label(
+                    card_sub,
+                    text="轨道: 🟢 已就绪" if bound_id else "轨道: ⚪ 待绑定",
+                    fg="#10b981" if bound_id else "#94a3b8",
+                    bg="#1e293b",
+                    font=self.font_sub,
+                    anchor="w",
+                ).pack(fill=tk.X)
+
+            tg_status_text = f"TG: 🟢 {user}" if (token_val and user) else "TG: 🔴 待配置"
+            tg_status_color = "#10b981" if (token_val and user) else "#ef4444"
             tk.Label(
                 card_sub,
-                text=f"Token变量: {token_env}",
-                fg="#94a3b8",
+                text=tg_status_text,
+                fg=tg_status_color,
                 bg="#1e293b",
-                font=self.font_mono,
+                font=self.font_sub,
                 anchor="w",
             ).pack(fill=tk.X)
 
@@ -949,6 +3216,13 @@ class PocketFleetControlApp:
 
     def _on_seats_saved(self) -> None:
         self.append_log("👥 [SEATS] Fleet Triad seats configuration updated and verified.")
+        self._render_seat_cards()
+
+    def open_antigravity_tracks_dialog(self) -> None:
+        AntigravityTracksDialog(self.root, fleet_mgr=self.mgr, on_bind_callback=self._on_track_bound)
+
+    def _on_track_bound(self) -> None:
+        self.append_log("🧭 [TRACK] Antigravity track bound to lead executor.")
         self._render_seat_cards()
 
     def _build_toolbar(self) -> None:
@@ -1076,6 +3350,8 @@ class PocketFleetControlApp:
 
     # ---------------- System Tray ----------------
     def _setup_tray(self) -> None:
+        if not HAS_TRAY or pystray is None:
+            return
         menu = pystray.Menu(
             pystray.MenuItem("🚀 Open PocketFleet Control Panel", self.show_from_tray, default=True),
             pystray.Menu.SEPARATOR,

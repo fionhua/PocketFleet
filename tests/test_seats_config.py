@@ -9,6 +9,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pocketfleet.core import (
     ALLOWED_CHAT_ENGINES,
@@ -208,6 +209,60 @@ class TestThreeSeatsConfig(unittest.TestCase):
         """load_from_file raises FileNotFoundError if target does not exist."""
         with self.assertRaises(FileNotFoundError):
             FleetSeatsConfig.load_from_file(Path("non_existent_pocketfleet_config.json"))
+
+    def test_auto_migration_legacy_config_without_seats(self):
+        """Verify legacy pocketfleet.json without 'seats' is smoothly auto-migrated."""
+        from pocketfleet.control_panel import FleetManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy_file = Path(tmpdir) / "pocketfleet.json"
+            # Write old-format JSON missing 'seats'
+            legacy_data = {
+                "context_window": 30,
+                "no_situ": False,
+                "authorized_user_ids": [123456],
+                "bots": {
+                    "antigravity": {"name": "Old Bot"}
+                }
+            }
+            legacy_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+
+            with mock.patch("pocketfleet.control_panel.CONFIG_FILE", legacy_file):
+                mgr = FleetManager(log_cb=lambda msg: None)
+                # Must NOT raise ValueError; must smoothly auto-migrate and return valid FleetSeatsConfig
+                migrated = mgr.load_seats_config()
+                self.assertEqual(migrated.context_window, 30)
+                self.assertFalse(migrated.no_situ)
+                self.assertEqual(migrated.authorized_user_ids, [123456])
+                self.assertEqual(len(migrated.seats), 3)
+                self.assertIn("lead", migrated.seats)
+                self.assertIn("builder", migrated.seats)
+                self.assertIn("chat", migrated.seats)
+
+                # Verify written back to disk
+                disk_data = json.loads(legacy_file.read_text(encoding="utf-8"))
+                self.assertIn("seats", disk_data)
+
+    def test_engine_command_auto_binding(self):
+        """Verify get_default_command_for_engine correctly maps engines to executables and binds automatically."""
+        from pocketfleet.core import get_default_command_for_engine, SeatConfig
+
+        self.assertEqual(get_default_command_for_engine("antigravity"), "agy")
+        self.assertEqual(get_default_command_for_engine("gemini"), "gemini")
+        self.assertEqual(get_default_command_for_engine("codex"), "codex")
+        self.assertEqual(get_default_command_for_engine("claude_code"), "claude")
+        self.assertEqual(get_default_command_for_engine("aider"), "aider")
+
+        # SeatConfig from_dict with empty command automatically binds default
+        seat = SeatConfig.from_dict({
+            "role": "lead",
+            "name": "裁决者",
+            "engine": "antigravity",
+            "bot_token_env": "TELEGRAM_BOT_JUDGE_TOKEN",
+            "bot_username": "@bot",
+            "description": "施工指挥",
+            "command": "",
+        })
+        self.assertEqual(seat.command, "agy")
 
 
 if __name__ == "__main__":

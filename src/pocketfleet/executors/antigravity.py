@@ -5,19 +5,41 @@ import os
 import shutil
 from typing import Tuple
 
+from ..antigravity_tracks import is_valid_uuid
 from .base import BaseExecutor, run_safe_process_tree
 
 
 class AntigravityExecutor(BaseExecutor):
     name: str = "antigravity"
 
-    def __init__(self, binary_path: str | None = None) -> None:
+    def __init__(
+        self,
+        binary_path: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
         self.binary_path = (
             binary_path
             or os.environ.get("POCKETFLEET_ANTIGRAVITY_CLI")
             or shutil.which("agy")
             or "agy"
         )
+
+        raw_cid = (
+            conversation_id
+            if conversation_id is not None
+            else os.environ.get("POCKETFLEET_ANTIGRAVITY_CONVERSATION_ID")
+        )
+        if raw_cid:
+            cleaned_cid = str(raw_cid).strip()
+            if not is_valid_uuid(cleaned_cid):
+                raise ValueError(
+                    f"Invalid conversation_id '{raw_cid}' configured for AntigravityExecutor. "
+                    "Expected a valid 36-character hexadecimal UUID string. "
+                    "Failing loud to prevent silent track branching."
+                )
+            self.conversation_id: str | None = cleaned_cid.lower()
+        else:
+            self.conversation_id = None
 
     def is_available(self) -> bool:
         if os.path.isabs(self.binary_path):
@@ -29,6 +51,7 @@ class AntigravityExecutor(BaseExecutor):
         prompt: str,
         cwd: str | None = None,
         timeout_sec: int = 300,
+        cancel_event: Any | None = None,
     ) -> Tuple[int, str, str]:
         if not self.is_available():
             return 127, "", f"Antigravity CLI '{self.binary_path}' not found."
@@ -40,8 +63,26 @@ class AntigravityExecutor(BaseExecutor):
             "accept-edits",
             "--output-format",
             "text",
+        ]
+        if self.conversation_id:
+            cmd.extend(["--conversation", self.conversation_id])
+
+        cmd.extend([
             f"--print-timeout={cli_timeout}s",
             f"--print={prompt}",
-        ]
+        ])
         env = dict(os.environ)
-        return run_safe_process_tree(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec)
+
+        # Launch-time Handshake: Notify active IDE session that CLI work has commenced
+        if self.conversation_id and cwd:
+            try:
+                from ..antigravity_tracks import notify_ide_launch
+                notify_ide_launch(
+                    conversation_id=self.conversation_id,
+                    workspace_cwd=cwd,
+                    initial_prompt=prompt,
+                )
+            except Exception:
+                pass
+
+        return run_safe_process_tree(cmd, cwd=cwd, env=env, timeout_sec=timeout_sec, cancel_event=cancel_event)

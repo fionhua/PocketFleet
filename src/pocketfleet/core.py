@@ -38,6 +38,10 @@ class InboundMessage:
     text: str
     is_bot: bool = False
     timestamp: float = field(default_factory=time.time)
+    chat_type: str = "group"
+    chat_title: str = ""
+    sender_chat_id: int | None = None
+    is_anonymous: bool = False
 
 
 @dataclass
@@ -102,7 +106,25 @@ class SeatRole(str, Enum):
 
 
 ALLOWED_CHAT_ENGINES: tuple[str, ...] = ("gemini", "chatgpt", "claude")
-ALLOWED_CODE_ENGINES: tuple[str, ...] = ("codex", "antigravity", "claude_code", "aider")
+ALLOWED_CODE_ENGINES: tuple[str, ...] = ("codex", "antigravity", "claude_code", "aider", "copilot")
+
+DEFAULT_ENGINE_COMMANDS: dict[str, str] = {
+    "antigravity": "agy",
+    "gemini": "gemini",
+    "codex": "codex",
+    "claude_code": "claude",
+    "aider": "aider",
+    "copilot": "copilot",
+    "chatgpt": "chatgpt",
+    "claude": "claude",
+}
+
+
+def get_default_command_for_engine(engine: str) -> str:
+    """Return default CLI executable command name associated with an engine."""
+    eng_clean = (engine or "").lower().strip()
+    return DEFAULT_ENGINE_COMMANDS.get(eng_clean, eng_clean)
+
 
 _ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -132,14 +154,16 @@ class SeatConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> SeatConfig:
+        engine = str(data.get("engine", "")).strip().lower()
+        cmd = str(data.get("command", "")).strip() or get_default_command_for_engine(engine)
         return cls(
             role=str(data.get("role", "")).strip(),
             name=str(data.get("name", "")).strip(),
-            engine=str(data.get("engine", "")).strip().lower(),
+            engine=engine,
             bot_token_env=str(data.get("bot_token_env", "")).strip(),
             bot_username=str(data.get("bot_username", "")).strip(),
             description=str(data.get("description", "")).strip(),
-            command=str(data.get("command", "")).strip(),
+            command=cmd,
             read_watermark=int(data.get("read_watermark", 0)),
         )
 
@@ -150,12 +174,18 @@ class FleetSeatsConfig:
     context_window: int = 20
     no_situ: bool = True
     authorized_user_ids: list[int] = field(default_factory=list)
+    telegram_chat_id: str = ""
+    telegram_group_name: str = ""
+    sync_context_window: bool = True
 
     def to_dict(self) -> dict:
         return {
             "context_window": self.context_window,
             "no_situ": self.no_situ,
             "authorized_user_ids": self.authorized_user_ids,
+            "telegram_chat_id": self.telegram_chat_id,
+            "telegram_group_name": self.telegram_group_name,
+            "sync_context_window": self.sync_context_window,
             "seats": {role: seat.to_dict() for role, seat in self.seats.items()},
         }
 
@@ -184,6 +214,9 @@ class FleetSeatsConfig:
             context_window=int(data.get("context_window", 20)),
             no_situ=bool(data.get("no_situ", True)),
             authorized_user_ids=uids_clean,
+            telegram_chat_id=str(data.get("telegram_chat_id", "")).strip(),
+            telegram_group_name=str(data.get("telegram_group_name", "")).strip(),
+            sync_context_window=bool(data.get("sync_context_window", True)),
         )
         validate_seats_config(config)
         return config
@@ -221,8 +254,9 @@ def validate_seats_config(config: FleetSeatsConfig) -> None:
     seen_usernames: dict[str, str] = {}
 
     for role_name, seat in config.seats.items():
-        if role_name not in required_roles:
-            raise ValueError(f"Unknown seat role '{role_name}'. Allowed: {', '.join(sorted(required_roles))}")
+        is_extended_code_seat = role_name.startswith("code_") or role_name.startswith("builder_")
+        if role_name not in required_roles and not is_extended_code_seat:
+            raise ValueError(f"Unknown seat role '{role_name}'. Allowed: {', '.join(sorted(required_roles))} or code_*")
 
         if seat.role != role_name:
             raise ValueError(f"Seat role '{seat.role}' does not match dictionary key '{role_name}'")
@@ -277,7 +311,7 @@ def get_default_seats_config() -> FleetSeatsConfig:
     return FleetSeatsConfig(
         context_window=20,
         no_situ=True,
-        authorized_user_ids=[6801810539],
+        authorized_user_ids=[],
         seats={
             SeatRole.CHAT.value: SeatConfig(
                 role=SeatRole.CHAT.value,

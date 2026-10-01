@@ -16,6 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .session_hub import SessionHub
+
 logger = logging.getLogger(__name__)
 
 # Single-Page Embedded Web Cockpit
@@ -363,6 +365,26 @@ class CockpitTelemetry:
             if len(self.tasks) > 50:
                 self.tasks = self.tasks[:50]
 
+    def sync_events(self, events: list[Any]) -> None:
+        with self.lock:
+            tasks_list = []
+            for ev in events:
+                c_time = getattr(ev, "created_at", None)
+                time_str = time.strftime("%H:%M:%S", time.localtime(c_time)) if c_time else "Just now"
+                comp_time = getattr(ev, "completed_at", None)
+                dur = round((comp_time - c_time), 2) if (comp_time and c_time) else 0.0
+                prev = (getattr(ev, "response", "") or getattr(ev, "error", "") or ev.status)
+                tasks_list.append({
+                    "created_at": time_str,
+                    "prompt": ev.prompt,
+                    "worker": getattr(ev, "seat_id", "lead"),
+                    "status": ev.status.upper(),
+                    "duration_sec": dur,
+                    "preview": prev[:120],
+                })
+            if tasks_list:
+                self.tasks = tasks_list
+
     def to_dict(self) -> dict[str, Any]:
         with self.lock:
             return {
@@ -399,6 +421,12 @@ class CockpitRequestHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
+            try:
+                hub = SessionHub()
+                events = hub.get_recent_events(limit=20)
+                telemetry.sync_events(events)
+            except Exception:
+                pass
             data = telemetry.to_dict()
             self.wfile.write(json.dumps(data).encode("utf-8"))
             return
@@ -420,19 +448,34 @@ class CockpitRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b'{"error": "Empty prompt"}')
                     return
 
-                # Record test task in telemetry
+                seat_id = payload.get("seat_id", "lead")
+                hub = SessionHub()
+                event = hub.enqueue_task(
+                    seat_id=seat_id,
+                    prompt=prompt,
+                    source="web",
+                    idempotency_key=payload.get("idempotency_key"),
+                )
+
+                # Record task in telemetry as queued
                 telemetry.record_task(
                     prompt=prompt,
-                    worker="local_cockpit",
-                    status="COMPLETED",
-                    duration_sec=0.1,
-                    preview="[Test Simulation Executed Successfully via Cockpit]",
+                    worker=event.seat_id,
+                    status=event.status.upper(),
+                    duration_sec=0.0,
+                    preview=f"Task {event.event_id[:8]} enqueued into durable ledger",
                 )
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"status": "COMPLETED", "result": "Dispatched to local loop"}')
+                resp_data = {
+                    "status": event.status.upper(),
+                    "event_id": event.event_id,
+                    "seat_id": event.seat_id,
+                    "result": f"Enqueued to seat '{seat_id}' with event_id {event.event_id}",
+                }
+                self.wfile.write(json.dumps(resp_data).encode("utf-8"))
             except Exception as e:
                 self.send_response(500)
                 self.end_headers()

@@ -41,6 +41,7 @@ class TestDispatchLoop(unittest.TestCase):
             transport=self.transport,
             default_worker=WorkerType.CLAUDE_CODE,
             state_store=self.state_store,
+            allowed_chat_ids={111, 123},
         )
 
     def tearDown(self):
@@ -144,12 +145,12 @@ class TestDispatchLoop(unittest.TestCase):
 
     def test_group_chat_authorized_by_sender(self):
         # Security whitelist: sender is authorized commander even if group chat ID is negative
-        self.loop.allowed_chat_ids = {6801810539}
+        self.loop.allowed_chat_ids = {123456789}
         self.loop.default_worker = WorkerType.SIMULATION
         group_msg = InboundMessage(
             message_id=906,
             chat_id=-100123456789,
-            sender_id=6801810539,
+            sender_id=123456789,
             sender_name="Commander",
             text="构建自动化支付结算网关",
             is_bot=False,
@@ -183,6 +184,87 @@ class TestDispatchLoop(unittest.TestCase):
         with mock.patch.object(self.loop.executors[WorkerType.CODEX], "is_available", return_value=False):
             selected = self.loop.select_worker(WorkerType.CODEX)
         self.assertIsNone(selected)
+
+    def test_broker_pin_binding_and_fail_closed_on_unauthorized(self):
+        """Verify DispatchLoop requires PIN for binding and fails closed on unpinned messages."""
+        bound_events = []
+        pending_loop = DispatchLoop(
+            transport=self.transport,
+            default_worker=WorkerType.SIMULATION,
+            state_store=self.state_store,
+            allowed_chat_ids=None,
+            authorized_user_ids={777},
+            workspace_cwd=self.tmp_dir.name,
+            on_chat_bound=lambda cid, title: bound_events.append((cid, title)),
+        )
+
+        # 1. Plain ordinary message without PIN is blocked (Fail-Closed)
+        unpinned_msg = InboundMessage(
+            message_id=1000,
+            chat_id=-100888999,
+            sender_id=777,
+            sender_name="NewCommander",
+            text="/start",
+            chat_type="supergroup",
+            is_bot=False,
+        )
+        res = pending_loop.handle_message(unpinned_msg)
+        self.assertIsNone(res)
+        self.assertNotIn(-100888999, pending_loop.allowed_chat_ids)
+        self.assertEqual(len(bound_events), 0)
+
+        # 2. Ephemeral PIN binding via broker succeeds
+        pin = pending_loop.broker.create_ephemeral_pin(
+            bot_id=999,
+            bot_username="SimulationBot",
+            authorized_user_id=777,
+        )
+        bind_msg = InboundMessage(
+            message_id=1001,
+            chat_id=-100888999,
+            sender_id=777,
+            sender_name="NewCommander",
+            text=f"/fleet_bind {pin}",
+            chat_type="supergroup",
+            chat_title="Fleet WarRoom",
+            is_bot=False,
+        )
+        with mock.patch.object(pending_loop.broker, "_persist_chat_binding") as mock_persist:
+            res_bind = pending_loop.handle_message(bind_msg)
+            self.assertIsNone(res_bind)
+            self.assertIn(-100888999, pending_loop.allowed_chat_ids)
+            self.assertTrue(mock_persist.called)
+            self.assertEqual(len(bound_events), 1)
+            self.assertEqual(bound_events[0], (-100888999, "Fleet WarRoom"))
+
+        # 3. Subsequent task from the bound group is accepted
+        task_msg = InboundMessage(
+            message_id=1002,
+            chat_id=-100888999,
+            sender_id=777,
+            sender_name="NewCommander",
+            text="/sim execute health check",
+            chat_type="supergroup",
+            is_bot=False,
+        )
+        task = pending_loop.handle_message(task_msg)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.prompt, "execute health check")
+
+        # 4. Message from another unauthorized chat is rejected (Fail-Closed)
+        rogue_msg = InboundMessage(
+            message_id=1003,
+            chat_id=-100999999,
+            sender_id=888,
+            sender_name="Stranger",
+            text="hello rogue",
+            chat_type="supergroup",
+            is_bot=False,
+        )
+        rejected = pending_loop.handle_message(rogue_msg)
+        self.assertIsNone(rejected)
+
+        pending_loop.stop()
 
 
 if __name__ == "__main__":
