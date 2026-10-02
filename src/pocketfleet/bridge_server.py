@@ -99,6 +99,11 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "principal": "PocketFleet-Local-Bridge",
                     "kill_switch_active": kill_switch,
+                    "capabilities": {
+                        "codeai_pull": True,
+                        "codeai_post": True,
+                        "codeai_ack": True,
+                    },
                     "codeai_allowed_recipients": [
                         "@AiSoulJudgeBot",
                         "@AiSoulMudSnakeBot",
@@ -119,6 +124,10 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
                     "active_sessions": ["chatgpt", "claude", "gemini"],
                 },
             )
+            return
+
+        if path == "/api/v1/tools":
+            self._send_json_response(200, {"ok": True, "tools": []})
             return
 
         self._send_json_response(404, {"error": f"Not found: {path}"})

@@ -131,10 +131,10 @@ function panel() {
     root.dataset.collapsed = String(isPanelCollapsed);
     root.innerHTML = `
     <div class="bridge-heading">
-      <span class="bridge-mark" aria-hidden="true"><span class="bridge-light"></span>FH</span>
+      <span class="bridge-mark" aria-hidden="true"><span class="bridge-light"></span>PF</span>
       <div>
-        <strong>Folded Host Bridge</strong>
-        <span class="bridge-kicker">LOCAL ACTION LINK</span>
+        <strong>PocketFleet Bridge</strong>
+        <span class="bridge-kicker">AI STARFLEET LINK</span>
       </div>
       <button class="bridge-collapse-toggle" type="button" data-action="collapse" title="收起浮层" aria-label="收起浮层">收起</button>
     </div>
@@ -144,11 +144,11 @@ function panel() {
       <button class="bridge-primary" type="button" data-action="control" data-control>暂停执行</button>
       <button type="button" data-action="retry" data-retry disabled>重试回传</button>
       <button type="button" data-action="check">重新检测</button>
-      <button type="button" data-action="instructions">工具说明</button>
+      <button type="button" data-action="instructions">协同说明</button>
     </div>
-    <div class="bridge-collapsed-bar" data-action="expand" title="展开 Folded Host Bridge 浮层">
+    <div class="bridge-collapsed-bar" data-action="expand" title="展开 PocketFleet Bridge 浮层">
       <span class="bridge-status-dot"></span>
-      <span class="bridge-collapsed-label">FH 桥</span>
+      <span class="bridge-collapsed-label">PF 桥</span>
       <span class="bridge-expand-icon">◀</span>
     </div>
     `;
@@ -668,18 +668,17 @@ async function retryDelivery() {
 }
 
 async function insertInstructions() {
+  const instructions = [
+    "【PocketFleet 多AI协同出站规范】",
+    "• 当你在对话中向星舰战队其它席位或 Telegram 发信时，请在回复首行以规范头开头：",
+    "  [Telegram]re:{收件席位} 回复内容...",
+    "• 示例：",
+    "  [Telegram]re:@AiSoulJudgeBot 代码审计已完成，基线无异常。",
+    "• 浏览器扩展将自动识别发信指令并通过本地网桥无感转发至战队群！",
+  ].join("\n");
   try {
-    const catalog = await send({ type: "bridge-tools" });
-    const instructions = [
-      "你已接入 Folded Host Local Bridge。普通对话不得使用桥接宏头。需要使用本地工具时，回复的第一个非空白内容必须是：",
-      BRIDGE_HEADER,
-      "宏头后只输出一个 JSON 对象（普通文本或代码块均可），不要同时解释：",
-      `{"${CALL_KEY}":{"request_id":"生成新的UUID","tool":"工具名","arguments":{}}}`,
-      "每条消息只能调用一个工具；收到真实结果后，需要继续行动就再次输出宏头，完成或受阻则正常回复 DONE / NEEDS_HUMAN / BLOCKED。绝不猜测执行结果。可用工具：",
-      JSON.stringify(catalog.tools),
-    ].join("\n");
     insertIntoEditor(instructions);
-    setActivity("工具说明已放入输入框，请检查后发送");
+    setActivity("协同发信规范说明已放入输入框");
   } catch (error) {
     setActivity(error.message);
   }
