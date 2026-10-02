@@ -31,7 +31,9 @@ except ImportError:
 if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        # Tk 8.6 does not handle WM_DPICHANGED reliably. System-DPI awareness
+        # lets Windows scale the native frame without cursor/window drift.
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         try:
             ctypes.windll.user32.SetProcessDPIAware()
@@ -89,6 +91,59 @@ CONFIG_FILE = REPO_ROOT / "pocketfleet.json"
 load_env_file(REPO_ROOT / ".env")
 logger = logging.getLogger(__name__)
 
+# Quiet daylight palette: white work surfaces, soft gray structure, green actions,
+# and red/orange reserved for states that genuinely require attention.
+COLOR_APP_BG = "#f3f5f2"
+COLOR_SURFACE_ALT = "#f8faf7"
+COLOR_SURFACE = "#ffffff"
+COLOR_CONTROL = "#e6e9e5"
+COLOR_CONTROL_HOVER = "#d5dbd5"
+COLOR_TITLE_BAR = "#176b87"
+COLOR_TITLE_TEXT = "#ffffff"
+COLOR_TITLE_SUBTEXT = "#d7eef2"
+COLOR_TAB_IDLE = "#dce6df"
+COLOR_TAB_IDLE_HOVER = "#c9d8ce"
+COLOR_TAB_BORDER = "#a8bbb0"
+COLOR_INPUT_BG = "#edf1ed"
+COLOR_TEXT = "#24302a"
+COLOR_TEXT_SECONDARY = "#34443b"
+COLOR_TEXT_MUTED = "#66736b"
+COLOR_TEXT_SOFT = "#8a968f"
+COLOR_INFO = "#14885d"
+COLOR_PRIMARY = "#188f55"
+COLOR_PRIMARY_HOVER = "#147c49"
+COLOR_SUCCESS = "#1aa35b"
+COLOR_SUCCESS_HOVER = "#15894c"
+COLOR_DANGER = "#d84a43"
+COLOR_DANGER_HOVER = "#bf3934"
+COLOR_WARNING = "#d9901f"
+COLOR_WARNING_HOVER = "#b96e12"
+
+
+def apply_windows_titlebar_theme(window: tk.Misc) -> None:
+    """Give native Windows title bars a clear, consistent drag target."""
+    if sys.platform != "win32":
+        return
+
+    def _apply() -> None:
+        try:
+            window.update_idletasks()
+            client_hwnd = window.winfo_id()
+            hwnd = ctypes.windll.user32.GetParent(client_hwnd) or client_hwnd
+
+            def _colorref(hex_color: str) -> int:
+                red, green, blue = (int(hex_color[index:index + 2], 16) for index in (1, 3, 5))
+                return red | (green << 8) | (blue << 16)
+
+            caption_color = ctypes.c_int(_colorref(COLOR_TITLE_BAR))
+            text_color = ctypes.c_int(_colorref(COLOR_TITLE_TEXT))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text_color), ctypes.sizeof(text_color))
+        except Exception:
+            logger.debug("Native title-bar color is unavailable on this Windows version", exc_info=True)
+
+    window.after_idle(_apply)
+
 
 def get_ui_font_family() -> str:
     """Return a clean default sans-serif font family, avoiding FangSong/KaiTi fallbacks."""
@@ -117,15 +172,15 @@ def create_tray_image(color: str = "cyan"):
     if not HAS_TRAY or Image is None or ImageDraw is None:
         return None
     color_map = {
-        "cyan": "#06b6d4",
-        "green": "#22c55e",
-        "red": "#ef4444",
-        "yellow": "#f59e0b",
+        "cyan": COLOR_INFO,
+        "green": COLOR_SUCCESS,
+        "red": COLOR_DANGER,
+        "yellow": COLOR_WARNING,
     }
-    hex_color = color_map.get(color, "#06b6d4")
+    hex_color = color_map.get(color, COLOR_INFO)
     img = Image.new("RGBA", (64, 64), color=(0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle([4, 4, 60, 60], radius=16, fill="#0f172a", outline=hex_color, width=3)
+    draw.rounded_rectangle([4, 4, 60, 60], radius=16, fill=COLOR_SURFACE_ALT, outline=hex_color, width=3)
     draw.polygon([(32, 12), (48, 48), (32, 40), (16, 48)], fill=hex_color)
     draw.ellipse([28, 24, 36, 32], fill="#ffffff")
     return img
@@ -163,35 +218,35 @@ def open_telegram_group_deep_link(bot_username: str, startgroup_param: str) -> b
 ROLE_PRESETS = [
     {
         "key": "chat",
-        "btn_label": "🗣️ 面向人类交互",
+        "btn_label": "🗣️面向人类交互",
         "desc_text": "对话AI·推演与宏观对账",
         "hint": "【面向人类交互】\n承担与人类指挥官第一人称的推演对话、需求澄清与宏观对账，作为星舰前端交流主通道。",
-        "bg": "#0284c7",
+        "bg": COLOR_PRIMARY,
         "fg": "#ffffff",
     },
     {
         "key": "lead",
-        "btn_label": "🎖️ 研发总监",
+        "btn_label": "🎖️研发总监",
         "desc_text": "施工指挥·架构守门与改卷验收",
         "hint": "【研发总监】\n统领工程落地与代码审查，负责系统生存率守门、架构验收与质量裁决。",
-        "bg": "#059669",
+        "bg": COLOR_SUCCESS_HOVER,
         "fg": "#ffffff",
     },
     {
         "key": "builder",
-        "btn_label": "🛠️ 主力程序员",
+        "btn_label": "🛠️主力程序员",
         "desc_text": "主力程序员·核心施工与算法定桩",
         "hint": "【主力程序员】\n专注具体模块编码、算法定桩与攻坚施工，接受改卷验收并交付高质量代码。",
-        "bg": "#d97706",
+        "bg": COLOR_WARNING_HOVER,
         "fg": "#ffffff",
     },
     {
         "key": "custom",
-        "btn_label": "✏️ 自定义",
+        "btn_label": "✏️自定义",
         "desc_text": "",
         "hint": "【自定义职能】\n手动为当前选中的席位自由输入自定义职责描述文本。",
-        "bg": "#475569",
-        "fg": "#ffffff",
+        "bg": COLOR_CONTROL_HOVER,
+        "fg": COLOR_TEXT,
     },
 ]
 
@@ -241,7 +296,8 @@ class SeatTelegramDialog(tk.Toplevel):
         self.title(f"Telegram 席位凭据与战队群设置 — [{self.seat_name}]")
         self.geometry("680x420")
         self.resizable(False, False)
-        self.configure(bg="#0b0f19")
+        self.configure(bg=COLOR_APP_BG)
+        apply_windows_titlebar_theme(self)
         self.transient(parent)
         self.grab_set()
 
@@ -267,46 +323,46 @@ class SeatTelegramDialog(tk.Toplevel):
 
     def _build_ui(self):
         # Header banner
-        header = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        header = tk.Frame(self, bg=COLOR_TITLE_BAR, padx=20, pady=12)
         header.pack(fill=tk.X)
         tk.Label(
             header,
             text=f"🤖 Telegram 席位凭据与战队群设置",
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_TEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_title,
         ).pack(anchor="w")
         tk.Label(
             header,
             text=f"席位: {self.seat_name} ｜ 引擎: {self.engine_name.upper()} ｜ 战队协同群为全席位共享资产",
-            fg="#94a3b8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_SUBTEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_sub,
         ).pack(anchor="w", pady=(2, 0))
 
-        content = tk.Frame(self, bg="#0b0f19", padx=20, pady=12)
+        content = tk.Frame(self, bg=COLOR_APP_BG, padx=20, pady=12)
         content.pack(fill=tk.BOTH, expand=True)
 
         # --- Section 1: Bot Token 与身份验证 ---
         bot_frame = tk.LabelFrame(
             content,
             text=f" 🔐 1. 填入并验证 Bot Token ",
-            fg="#10b981",
-            bg="#1e293b",
+            fg=COLOR_SUCCESS,
+            bg=COLOR_SURFACE,
             font=self.font_bold,
             padx=14,
             pady=8,
             relief=tk.SOLID,
             bd=1,
             highlightthickness=1,
-            highlightbackground="#334155",
+            highlightbackground=COLOR_CONTROL,
         )
         bot_frame.pack(fill=tk.X, pady=(0, 10))
 
-        b_r1 = tk.Frame(bot_frame, bg="#1e293b")
+        b_r1 = tk.Frame(bot_frame, bg=COLOR_SURFACE)
         b_r1.pack(fill=tk.X, pady=2)
-        tk.Label(b_r1, text="Bot Token:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=11, anchor="w").pack(side=tk.LEFT)
-        self.entry_token = tk.Entry(b_r1, bg="#0f172a", fg="#f8fafc", insertbackground="#f8fafc", font=self.font_mono, width=42, relief=tk.FLAT, bd=4, show="*")
+        tk.Label(b_r1, text="Bot Token:", fg=COLOR_TEXT, bg=COLOR_SURFACE, font=self.font_sub, width=11, anchor="w").pack(side=tk.LEFT)
+        self.entry_token = tk.Entry(b_r1, bg=COLOR_SURFACE_ALT, fg=COLOR_TEXT, insertbackground=COLOR_TEXT, font=self.font_mono, width=42, relief=tk.FLAT, bd=4, show="*")
         env_val = (os.environ.get(self.bot_token_env) or "").strip()
         if env_val:
             self.entry_token.insert(0, env_val)
@@ -315,20 +371,20 @@ class SeatTelegramDialog(tk.Toplevel):
         self.entry_token.bind("<Return>", lambda e: self._init_broker_session())
 
         self.btn_toggle = tk.Button(
-            b_r1, text="👁️", bg="#334155", fg="#f8fafc", activebackground="#475569",
+            b_r1, text="👁️", bg=COLOR_CONTROL, fg=COLOR_TEXT, activebackground=COLOR_CONTROL_HOVER,
             font=self.font_sub, relief=tk.FLAT, padx=6, pady=1, cursor="hand2", command=self._toggle_token_visibility,
         )
         self.btn_toggle.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_verify = None
 
-        self.lbl_token_status = tk.Label(b_r1, text="", fg="#94a3b8", bg="#1e293b", font=self.font_sub)
+        self.lbl_token_status = tk.Label(b_r1, text="", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub)
         self.lbl_token_status.pack(side=tk.LEFT)
 
-        b_r2 = tk.Frame(bot_frame, bg="#1e293b")
+        b_r2 = tk.Frame(bot_frame, bg=COLOR_SURFACE)
         b_r2.pack(fill=tk.X, pady=2)
-        tk.Label(b_r2, text="Bot 用户名:", fg="#94a3b8", bg="#1e293b", font=self.font_sub, width=11, anchor="w").pack(side=tk.LEFT)
-        self.lbl_bot_uname = tk.Label(b_r2, text=self.bot_username or "（尚未验证）", fg="#38bdf8", bg="#1e293b", font=self.font_mono)
+        tk.Label(b_r2, text="Bot 用户名:", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub, width=11, anchor="w").pack(side=tk.LEFT)
+        self.lbl_bot_uname = tk.Label(b_r2, text=self.bot_username or "（尚未验证）", fg=COLOR_INFO, bg=COLOR_SURFACE, font=self.font_mono)
         self.lbl_bot_uname.pack(side=tk.LEFT, padx=(0, 12))
 
         # Hidden auth user entry for compatibility with internal helpers & tests (omitted from UI per Commander directive)
@@ -351,15 +407,15 @@ class SeatTelegramDialog(tk.Toplevel):
         self.group_frame = tk.LabelFrame(
             content,
             text=" 📢 2. 战队协同群一键绑定 ",
-            fg="#38bdf8",
-            bg="#1e293b",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE,
             font=self.font_bold,
             padx=16,
             pady=12,
             relief=tk.SOLID,
             bd=1,
             highlightthickness=1,
-            highlightbackground="#334155",
+            highlightbackground=COLOR_CONTROL,
         )
         self.group_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -377,21 +433,21 @@ class SeatTelegramDialog(tk.Toplevel):
         tk.Label(
             self.group_frame,
             text=hint_txt,
-            fg="#cbd5e1",
-            bg="#1e293b",
+            fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_SURFACE,
             font=self.font_sub,
             justify=tk.LEFT,
         ).pack(anchor="w", pady=(0, 8))
 
-        btn_row = tk.Frame(self.group_frame, bg="#1e293b")
+        btn_row = tk.Frame(self.group_frame, bg=COLOR_SURFACE)
         btn_row.pack(fill=tk.X, pady=(2, 6))
 
         self.btn_open_tg = tk.Button(
             btn_row,
             text="🚀 打开 Telegram，选择战队群",
-            bg="#0284c7",
+            bg=COLOR_PRIMARY,
             fg="#ffffff",
-            activebackground="#0369a1",
+            activebackground=COLOR_PRIMARY_HOVER,
             font=self.font_bold,
             relief=tk.FLAT,
             padx=16,
@@ -401,13 +457,13 @@ class SeatTelegramDialog(tk.Toplevel):
         )
         self.btn_open_tg.pack(anchor="w")
 
-        status_row = tk.Frame(self.group_frame, bg="#1e293b")
+        status_row = tk.Frame(self.group_frame, bg=COLOR_SURFACE)
         status_row.pack(fill=tk.X, pady=(4, 0))
         self.lbl_broker_status = tk.Label(
             status_row,
             text="📡 准备就绪：粘贴 Token 后，点击上方按钮即可一键加群绑定",
-            fg="#94a3b8",
-            bg="#1e293b",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_SURFACE,
             font=self.font_sub,
         )
         self.lbl_broker_status.pack(side=tk.LEFT)
@@ -421,13 +477,13 @@ class SeatTelegramDialog(tk.Toplevel):
             self.entry_group_name.insert(0, self.global_group_name)
 
         # --- Section 3: 底部操作栏 ---
-        actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        actions = tk.Frame(self, bg=COLOR_SURFACE_ALT, padx=20, pady=12)
         actions.pack(fill=tk.X, side=tk.BOTTOM)
 
         btn_cancel = tk.Button(
             actions,
             text="完成并关闭 (Done)",
-            bg="#334155", fg="#f8fafc", activebackground="#475569",
+            bg=COLOR_CONTROL, fg=COLOR_TEXT, activebackground=COLOR_CONTROL_HOVER,
             font=self.font_bold, relief=tk.FLAT, padx=14, pady=6, cursor="hand2",
             command=self.destroy,
         )
@@ -453,7 +509,7 @@ class SeatTelegramDialog(tk.Toplevel):
     def _init_broker_session(self):
         token = self._get_active_token()
         if not token:
-            self.lbl_token_status.config(text="⚪ 请输入 Token", fg="#94a3b8")
+            self.lbl_token_status.config(text="⚪ 请输入 Token", fg=COLOR_TEXT_MUTED)
             return
 
         ok, bot_id, uname, err = verify_bot_token(token)
@@ -463,7 +519,7 @@ class SeatTelegramDialog(tk.Toplevel):
                 self.bot_username = "@" + uname.lstrip("@")
             final_user = self.bot_username or f"Bot_{bot_id}"
             self.lbl_bot_uname.config(text=f"{final_user} (ID: {bot_id})")
-            self.lbl_token_status.config(text="🟢 Token有效", fg="#10b981")
+            self.lbl_token_status.config(text="🟢 Token有效", fg=COLOR_SUCCESS)
 
             try:
                 env_file = REPO_ROOT / ".env"
@@ -485,7 +541,7 @@ class SeatTelegramDialog(tk.Toplevel):
                 global_chat_id=self.global_chat_id,
             )
         else:
-            self.lbl_token_status.config(text=f"❌ {err or '无效'}", fg="#ef4444")
+            self.lbl_token_status.config(text=f"❌ {err or '无效'}", fg=COLOR_DANGER)
 
     def _verify_token_action(self):
         token = self._get_active_token()
@@ -503,7 +559,7 @@ class SeatTelegramDialog(tk.Toplevel):
 
         ok, bot_id, uname, err = verify_bot_token(token)
         if not ok or not bot_id:
-            self.lbl_token_status.config(text=f"❌ {err or '无效'}", fg="#ef4444")
+            self.lbl_token_status.config(text=f"❌ {err or '无效'}", fg=COLOR_DANGER)
             messagebox.showerror("Token 校验失败", f"Bot Token 校验失败: {err}", parent=self)
             return None
 
@@ -512,7 +568,7 @@ class SeatTelegramDialog(tk.Toplevel):
             self.bot_username = "@" + uname.lstrip("@")
         final_user = self.bot_username or f"Bot_{bot_id}"
         self.lbl_bot_uname.config(text=f"{final_user} (ID: {bot_id})")
-        self.lbl_token_status.config(text="🟢 Token有效", fg="#10b981")
+        self.lbl_token_status.config(text="🟢 Token有效", fg=COLOR_SUCCESS)
 
         try:
             env_file = REPO_ROOT / ".env"
@@ -552,9 +608,9 @@ class SeatTelegramDialog(tk.Toplevel):
 
         is_daemon = self.is_daemon_running_fn() if self.is_daemon_running_fn else False
         if is_daemon:
-            self.lbl_broker_status.config(text="⚡ 后台服务运行中：已接入全局总线，请在 Telegram 中选择战队群...", fg="#38bdf8")
+            self.lbl_broker_status.config(text="⚡ 后台服务运行中：已接入全局总线，请在 Telegram 中选择战队群...", fg=COLOR_INFO)
         else:
-            self.lbl_broker_status.config(text="📡 正在监听中：请在 Telegram 中选择战队群并确认添加...", fg="#fbbf24")
+            self.lbl_broker_status.config(text="📡 正在监听中：请在 Telegram 中选择战队群并确认添加...", fg=COLOR_WARNING)
             self.broker.start_temporary_poller()
 
         self.is_listening = True
@@ -602,7 +658,7 @@ class SeatTelegramDialog(tk.Toplevel):
 
                 if hasattr(self, "lbl_broker_status"):
                     cmd_txt = f" ｜ 指挥官 ID: {cmd_id}" if cmd_id else ""
-                    self.lbl_broker_status.config(text=f"🟢 战队群已连接：{title} (ID: {cid}){cmd_txt}", fg="#10b981")
+                    self.lbl_broker_status.config(text=f"🟢 战队群已连接：{title} (ID: {cid}){cmd_txt}", fg=COLOR_SUCCESS)
 
                 # Persist to .env and os.environ
                 try:
@@ -647,7 +703,7 @@ class SeatTelegramDialog(tk.Toplevel):
 
             elif ev_type == "CONFLICT_409":
                 if hasattr(self, "lbl_broker_status"):
-                    self.lbl_broker_status.config(text="❌ HTTP 409 Conflict: Bot Token 被外部占用", fg="#ef4444")
+                    self.lbl_broker_status.config(text="❌ HTTP 409 Conflict: Bot Token 被外部占用", fg=COLOR_DANGER)
                 messagebox.showerror(
                     "HTTP 409 冲突",
                     "【外部占用拦截】HTTP 409 Conflict\n\n"
@@ -662,7 +718,7 @@ class SeatTelegramDialog(tk.Toplevel):
             elif ev_type == "BIND_FAILED":
                 err_msg = payload.get("error", "绑定失败")
                 if hasattr(self, "lbl_broker_status"):
-                    self.lbl_broker_status.config(text=f"⚠️ {err_msg}", fg="#ef4444")
+                    self.lbl_broker_status.config(text=f"⚠️ {err_msg}", fg=COLOR_DANGER)
                 messagebox.showwarning(
                     "入群绑定失败",
                     f"【绑定被拦截】\n\n{err_msg}",
@@ -758,17 +814,17 @@ class SeatTelegramDialog(tk.Toplevel):
 
 
 CODE_AI_BUTTONS = [
-    {"key": "codex", "label": "⚡ OpenAI Codex", "bg": "#10b981", "hint": "【OpenAI Codex】\n自动化终端编码代理，擅长精确单任务施工与脚本生成。"},
-    {"key": "antigravity", "label": "🪐 Antigravity", "bg": "#0284c7", "hint": "【Google Antigravity】\n全尺寸 IDE 与 CLI 双模代理，支持会话轨道挂载与会话回放。"},
-    {"key": "claude_code", "label": "🧠 Claude Code", "bg": "#d97706", "hint": "【Anthropic Claude Code】\n深度逻辑推演与高阶代码重构代理。"},
-    {"key": "aider", "label": "🛠️ Aider", "bg": "#8b5cf6", "hint": "【Aider CLI】\n经典 Git 伴侣式终端多文件编辑代理。"},
-    {"key": "copilot", "label": "🐙 GitHub Copilot", "bg": "#6366f1", "hint": "【GitHub Copilot CLI】\nGitHub 官方终端命令行伴随式智能体。"},
+    {"key": "codex", "label": "⚡ OpenAI Codex", "bg": COLOR_SUCCESS, "hint": "【OpenAI Codex】\n自动化终端编码代理，擅长精确单任务施工与脚本生成。"},
+    {"key": "antigravity", "label": "🪐 Antigravity", "bg": COLOR_PRIMARY, "hint": "【Google Antigravity】\n全尺寸 IDE 与 CLI 双模代理，支持会话轨道挂载与会话回放。"},
+    {"key": "claude_code", "label": "🧠 Claude Code", "bg": COLOR_WARNING_HOVER, "hint": "【Anthropic Claude Code】\n深度逻辑推演与高阶代码重构代理。"},
+    {"key": "aider", "label": "🛠️ Aider", "bg": COLOR_TEXT_MUTED, "hint": "【Aider CLI】\n经典 Git 伴侣式终端多文件编辑代理。"},
+    {"key": "copilot", "label": "🐙 GitHub Copilot", "bg": COLOR_TEXT_MUTED, "hint": "【GitHub Copilot CLI】\nGitHub 官方终端命令行伴随式智能体。"},
 ]
 
 CHAT_AI_BUTTONS = [
-    {"key": "gemini", "label": "✨ Google Gemini", "bg": "#38bdf8", "hint": "【Google Gemini】\n长上下文超大窗口对话模型，适合宏观推演与知识库对账。"},
-    {"key": "chatgpt", "label": "🤖 OpenAI ChatGPT", "bg": "#10b981", "hint": "【OpenAI ChatGPT】\n通用全能对话助手，适合人机协作日常答疑与指令转译。"},
-    {"key": "claude", "label": "🔮 Anthropic Claude", "bg": "#d97706", "hint": "【Anthropic Claude】\n严谨细致的长文本推理对话模型，具备极高宪法安全度。"},
+    {"key": "gemini", "label": "✨ Google Gemini", "bg": COLOR_INFO, "hint": "【Google Gemini】\n长上下文超大窗口对话模型，适合宏观推演与知识库对账。"},
+    {"key": "chatgpt", "label": "🤖 OpenAI ChatGPT", "bg": COLOR_SUCCESS, "hint": "【OpenAI ChatGPT】\n通用全能对话助手，适合人机协作日常答疑与指令转译。"},
+    {"key": "claude", "label": "🔮 Anthropic Claude", "bg": COLOR_WARNING_HOVER, "hint": "【Anthropic Claude】\n严谨细致的长文本推理对话模型，具备极高宪法安全度。"},
 ]
 
 ALL_ENGINE_MAP: dict[str, dict] = {
@@ -812,15 +868,15 @@ class EngineBadge:
             disp_label = engine_info["label"]
             self.button.config(
                 text=f"{disp_label}   ❌",
-                bg="#0f172a",
-                fg="#38bdf8",
-                activebackground="#1e293b",
-                activeforeground="#ef4444",
+                bg=COLOR_SURFACE_ALT,
+                fg=COLOR_INFO,
+                activebackground=COLOR_SURFACE,
+                activeforeground=COLOR_DANGER,
                 relief=tk.SOLID,
                 bd=1,
                 highlightthickness=1,
-                highlightbackground="#0284c7",
-                highlightcolor="#38bdf8",
+                highlightbackground=COLOR_PRIMARY,
+                highlightcolor=COLOR_INFO,
                 padx=8,
                 pady=2,
                 cursor="hand2",
@@ -833,15 +889,15 @@ class EngineBadge:
         elif self._val:
             self.button.config(
                 text=f"⚙️ {self._val}   ❌",
-                bg="#0f172a",
-                fg="#38bdf8",
-                activebackground="#1e293b",
-                activeforeground="#ef4444",
+                bg=COLOR_SURFACE_ALT,
+                fg=COLOR_INFO,
+                activebackground=COLOR_SURFACE,
+                activeforeground=COLOR_DANGER,
                 relief=tk.SOLID,
                 bd=1,
                 highlightthickness=1,
-                highlightbackground="#0284c7",
-                highlightcolor="#38bdf8",
+                highlightbackground=COLOR_PRIMARY,
+                highlightcolor=COLOR_INFO,
                 padx=8,
                 pady=2,
                 cursor="hand2",
@@ -854,15 +910,15 @@ class EngineBadge:
         else:
             self.button.config(
                 text="⚪ 未设置 (点击上方按钮指定)",
-                bg="#1e293b",
-                fg="#64748b",
-                activebackground="#334155",
-                activeforeground="#f8fafc",
+                bg=COLOR_SURFACE,
+                fg=COLOR_TEXT_SOFT,
+                activebackground=COLOR_CONTROL,
+                activeforeground=COLOR_TEXT,
                 relief=tk.FLAT,
                 bd=1,
                 highlightthickness=1,
-                highlightbackground="#334155",
-                highlightcolor="#475569",
+                highlightbackground=COLOR_CONTROL,
+                highlightcolor=COLOR_CONTROL_HOVER,
                 padx=8,
                 pady=2,
                 cursor="hand2",
@@ -888,7 +944,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.title("Fleet Triad Seats Configuration (席位战队编排) — PocketFleet")
         self.geometry("860x820")
         self.resizable(False, False)
-        self.configure(bg="#0b0f19")
+        self.configure(bg=COLOR_APP_BG)
+        apply_windows_titlebar_theme(self)
         self.transient(parent)
         self.grab_set()
 
@@ -926,41 +983,44 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
     def _build_ui(self):
         # Header banner
-        header = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        header = tk.Frame(self, bg=COLOR_TITLE_BAR, padx=20, pady=12)
         header.pack(fill=tk.X)
         tk.Label(
             header,
             text="👥 Fleet Triad Seats Configuration (席位战队编排)",
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_TEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_title,
         ).pack(anchor="w")
         tk.Label(
             header,
             text="二元页签架构：左侧【代码 AI】(多席位施工) ｜ 右侧【对话 AI】(人类交互与对账) ｜ 战队群全席位共用",
-            fg="#94a3b8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_SUBTEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_sub,
         ).pack(anchor="w", pady=(2, 0))
 
-        content = tk.Frame(self, bg="#0b0f19", padx=20, pady=10)
+        content = tk.Frame(self, bg=COLOR_APP_BG, padx=20, pady=10)
         content.pack(fill=tk.BOTH, expand=True)
 
         # Tab Switcher (Segmented Buttons)
-        tab_bar = tk.Frame(content, bg="#0b0f19")
+        tab_bar = tk.Frame(content, bg=COLOR_APP_BG)
         tab_bar.pack(fill=tk.X, pady=(0, 10))
 
         self.btn_tab_code = tk.Button(
             tab_bar,
             text="💻 代码 AI (Code AI — 2席)",
             font=self.font_bold,
-            relief=tk.FLAT,
+            relief=tk.SOLID,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=COLOR_PRIMARY,
             padx=18,
             pady=6,
             cursor="hand2",
-            bg="#0284c7",
+            bg=COLOR_PRIMARY,
             fg="#ffffff",
-            activebackground="#0369a1",
+            activebackground=COLOR_PRIMARY_HOVER,
             activeforeground="#ffffff",
             command=lambda: self._switch_tab("code"),
         )
@@ -970,40 +1030,43 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             tab_bar,
             text="💬 对话 AI (Chat AI — 1席)",
             font=self.font_bold,
-            relief=tk.FLAT,
+            relief=tk.SOLID,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=COLOR_TAB_BORDER,
             padx=18,
             pady=6,
             cursor="hand2",
-            bg="#1e293b",
-            fg="#94a3b8",
-            activebackground="#334155",
-            activeforeground="#ffffff",
+            bg=COLOR_TAB_IDLE,
+            fg=COLOR_TEXT,
+            activebackground=COLOR_TAB_IDLE_HOVER,
+            activeforeground=COLOR_TEXT,
             command=lambda: self._switch_tab("chat"),
         )
         self.btn_tab_chat.pack(side=tk.LEFT)
 
         # Dedicated container for tab pages so tab switching stays isolated above memo_frame
-        self.tab_container = tk.Frame(content, bg="#0b0f19")
+        self.tab_container = tk.Frame(content, bg=COLOR_APP_BG)
         self.tab_container.pack(fill=tk.BOTH, expand=True)
 
         # ======================================================================
         # Tab 1: 代码 AI (Code AI)
         # ======================================================================
-        self.tab_frame_code = tk.Frame(self.tab_container, bg="#0b0f19")
+        self.tab_frame_code = tk.Frame(self.tab_container, bg=COLOR_APP_BG)
 
         # Top Engine Quick Bar (Row of 5 mainstream overseas Code AIs)
-        engine_bar_code = tk.Frame(self.tab_frame_code, bg="#1e293b", padx=12, pady=8)
+        engine_bar_code = tk.Frame(self.tab_frame_code, bg=COLOR_SURFACE, padx=12, pady=8)
         engine_bar_code.pack(fill=tk.X, pady=(0, 10))
 
         tk.Label(
             engine_bar_code,
             text="⚡ 快速指定代码执行引擎 (选中下方任一席位后，点击按钮一键替换):",
-            fg="#94a3b8",
-            bg="#1e293b",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_SURFACE,
             font=self.font_bold,
         ).pack(anchor="w", pady=(0, 6))
 
-        btn_row_code = tk.Frame(engine_bar_code, bg="#1e293b")
+        btn_row_code = tk.Frame(engine_bar_code, bg=COLOR_SURFACE)
         btn_row_code.pack(fill=tk.X)
 
         for eng_item in CODE_AI_BUTTONS:
@@ -1029,35 +1092,35 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             self.tab_frame_code,
             role_key="lead",
             title="🎖️ 席位 1: 规划席·CTO (架构守门与改卷验收)",
-            color="#10b981",
+            color=COLOR_SUCCESS,
             engine_choices=list(ALLOWED_CODE_ENGINES),
         )
         self._create_seat_card(
             self.tab_frame_code,
             role_key="builder",
             title="🛠️ 席位 2: 执行席·主力 (核心施工与算法定桩)",
-            color="#f59e0b",
+            color=COLOR_WARNING,
             engine_choices=list(ALLOWED_CODE_ENGINES),
         )
 
         # ======================================================================
         # Tab 2: 对话 AI (Chat AI)
         # ======================================================================
-        self.tab_frame_chat = tk.Frame(self.tab_container, bg="#0b0f19")
+        self.tab_frame_chat = tk.Frame(self.tab_container, bg=COLOR_APP_BG)
 
         # Top Engine Quick Bar (Row of mainstream Chat AIs)
-        engine_bar_chat = tk.Frame(self.tab_frame_chat, bg="#1e293b", padx=12, pady=8)
+        engine_bar_chat = tk.Frame(self.tab_frame_chat, bg=COLOR_SURFACE, padx=12, pady=8)
         engine_bar_chat.pack(fill=tk.X, pady=(0, 10))
 
         tk.Label(
             engine_bar_chat,
             text="✨ 快速指定对话执行引擎 (点击按钮一键替换人类交互席引擎):",
-            fg="#94a3b8",
-            bg="#1e293b",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_SURFACE,
             font=self.font_bold,
         ).pack(anchor="w", pady=(0, 6))
 
-        btn_row_chat = tk.Frame(engine_bar_chat, bg="#1e293b")
+        btn_row_chat = tk.Frame(engine_bar_chat, bg=COLOR_SURFACE)
         btn_row_chat.pack(fill=tk.X)
 
         for eng_item in CHAT_AI_BUTTONS:
@@ -1083,7 +1146,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             self.tab_frame_chat,
             role_key="chat",
             title="💬 席位 1: 人类交互席 (推演与宏观对账 - 非必选)",
-            color="#38bdf8",
+            color=COLOR_INFO,
             engine_choices=list(ALLOWED_CHAT_ENGINES),
         )
 
@@ -1094,8 +1157,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         sentinel_frame = tk.LabelFrame(
             self.tab_frame_chat,
             text=" 🛡️ 战队巡检哨兵配置 (Inspector Sentinel) ",
-            bg="#0f172a",
-            fg="#38bdf8",
+            bg=COLOR_SURFACE_ALT,
+            fg=COLOR_INFO,
             font=self.font_bold,
             padx=12,
             pady=8,
@@ -1104,23 +1167,23 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
         sentinel_frame.pack(fill=tk.X, pady=(10, 0))
 
-        s_row = tk.Frame(sentinel_frame, bg="#0f172a")
+        s_row = tk.Frame(sentinel_frame, bg=COLOR_SURFACE_ALT)
         s_row.pack(fill=tk.X)
 
         self.chk_sentinel = tk.Checkbutton(
             s_row,
             text="启用战队定时巡检哨兵",
             variable=self.sentinel_enabled_var,
-            fg="#f8fafc",
-            bg="#0f172a",
-            selectcolor="#1e293b",
-            activebackground="#0f172a",
-            activeforeground="#38bdf8",
+            fg=COLOR_TEXT,
+            bg=COLOR_SURFACE_ALT,
+            selectcolor=COLOR_SURFACE,
+            activebackground=COLOR_SURFACE_ALT,
+            activeforeground=COLOR_INFO,
             font=self.font_bold,
         )
         self.chk_sentinel.pack(side=tk.LEFT)
 
-        tk.Label(s_row, text="每隔", fg="#cbd5e1", bg="#0f172a", font=self.font_bold).pack(side=tk.LEFT, padx=(12, 4))
+        tk.Label(s_row, text="每隔", fg=COLOR_TEXT_SECONDARY, bg=COLOR_SURFACE_ALT, font=self.font_bold).pack(side=tk.LEFT, padx=(12, 4))
 
         self.spn_sentinel_interval = tk.Spinbox(
             s_row,
@@ -1128,8 +1191,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             to=120,
             textvariable=self.sentinel_interval_var,
             width=4,
-            bg="#1e293b",
-            fg="#f8fafc",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT,
             font=self.font_mono,
             relief=tk.FLAT,
             bd=2,
@@ -1137,13 +1200,13 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
         self.spn_sentinel_interval.pack(side=tk.LEFT)
 
-        tk.Label(s_row, text="分钟向对话席位发起一次任务看板巡检与催办请求", fg="#cbd5e1", bg="#0f172a", font=self.font_bold).pack(side=tk.LEFT, padx=(4, 0))
+        tk.Label(s_row, text="分钟向对话席位发起一次任务看板巡检与催办请求", fg=COLOR_TEXT_SECONDARY, bg=COLOR_SURFACE_ALT, font=self.font_bold).pack(side=tk.LEFT, padx=(4, 0))
 
         tk.Label(
             sentinel_frame,
             text="💡 开启后，系统将定时向对话 AI 注入外勤任务看板；若有停滞未办结任务，由对话 AI 负责 [mailto:@Bot] 催办。",
-            fg="#94a3b8",
-            bg="#0f172a",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_SURFACE_ALT,
             font=self.font_sub,
         ).pack(anchor="w", pady=(6, 0))
 
@@ -1156,8 +1219,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.memo_frame = tk.LabelFrame(
             content,
             text=" 📋 战队协同交互 Memo (AI 会话轨底座配置 / 可一键复制) ",
-            bg="#0f172a",
-            fg="#38bdf8",
+            bg=COLOR_SURFACE_ALT,
+            fg=COLOR_INFO,
             font=self.font_bold,
             padx=12,
             pady=8,
@@ -1166,7 +1229,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
         self.memo_frame.pack(fill=tk.X, pady=(6, 8))
 
-        memo_top_row = tk.Frame(self.memo_frame, bg="#0f172a")
+        memo_top_row = tk.Frame(self.memo_frame, bg=COLOR_SURFACE_ALT)
         memo_top_row.pack(fill=tk.X, pady=(0, 6))
 
         self.human_name = "ENTJ指挥官"
@@ -1174,8 +1237,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.lbl_human_display = tk.Label(
             memo_top_row,
             text=f"👤 关联人类: {self.human_name} (从TG群自动获取)",
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE_ALT,
             font=self.font_bold,
         )
         self.lbl_human_display.pack(side=tk.LEFT)
@@ -1183,9 +1246,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.btn_copy_memo = tk.Button(
             memo_top_row,
             text="📋 一键复制 Memo (Copy)",
-            bg="#0284c7",
+            bg=COLOR_PRIMARY,
             fg="#ffffff",
-            activebackground="#0369a1",
+            activebackground=COLOR_PRIMARY_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -1199,8 +1262,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.txt_memo = tk.Text(
             self.memo_frame,
             height=2,
-            bg="#0b0f19",
-            fg="#38bdf8",
+            bg=COLOR_APP_BG,
+            fg=COLOR_INFO,
             font=self.font_mono,
             relief=tk.FLAT,
             bd=4,
@@ -1217,15 +1280,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.lbl_global_group = tk.Label(
             content,
             text="📢 Telegram 协同战队群: 尚未配置 (点击任一席位的 TG 状态按钮进行配置/打卡)",
-            fg="#94a3b8",
-            bg="#0b0f19",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_APP_BG,
             font=self.font_sub,
             anchor="w",
         )
         self.lbl_global_group.pack(fill=tk.X, pady=(4, 2))
 
         # Extra options (Context window synchronization)
-        opt_frame = tk.Frame(content, bg="#0b0f19")
+        opt_frame = tk.Frame(content, bg=COLOR_APP_BG)
         opt_frame.pack(fill=tk.X, pady=(6, 0))
 
         self.var_sync_context = tk.BooleanVar(value=True)
@@ -1233,35 +1296,35 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             opt_frame,
             text="对被 @ 的席位同步最近对话历史 (Context Window):",
             variable=self.var_sync_context,
-            bg="#0b0f19",
-            fg="#38bdf8",
-            selectcolor="#1e293b",
-            activebackground="#0b0f19",
-            activeforeground="#38bdf8",
+            bg=COLOR_APP_BG,
+            fg=COLOR_INFO,
+            selectcolor=COLOR_SURFACE,
+            activebackground=COLOR_APP_BG,
+            activeforeground=COLOR_INFO,
             font=self.font_sub,
             command=self._on_sync_context_toggle,
         )
         self.cb_sync_context.pack(side=tk.LEFT)
 
-        self.entry_cw = tk.Entry(opt_frame, bg="#1e293b", fg="#f8fafc", font=self.font_mono, width=5, relief=tk.FLAT, bd=4)
+        self.entry_cw = tk.Entry(opt_frame, bg=COLOR_SURFACE, fg=COLOR_TEXT, font=self.font_mono, width=5, relief=tk.FLAT, bd=4)
         self.entry_cw.insert(0, "20")
         self.entry_cw.pack(side=tk.LEFT, padx=(4, 6))
 
-        tk.Label(opt_frame, text="条", fg="#94a3b8", bg="#0b0f19", font=self.font_sub).pack(side=tk.LEFT)
+        tk.Label(opt_frame, text="条", fg=COLOR_TEXT_MUTED, bg=COLOR_APP_BG, font=self.font_sub).pack(side=tk.LEFT)
 
         # Internal flag kept for backward compatibility
         self.var_nositu = tk.BooleanVar(value=True)
 
         # Bottom Actions
-        actions = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        actions = tk.Frame(self, bg=COLOR_SURFACE_ALT, padx=20, pady=12)
         actions.pack(fill=tk.X, side=tk.BOTTOM)
 
         btn_save = tk.Button(
             actions,
             text="💾 保存配置 (Save)",
-            bg="#10b981",
+            bg=COLOR_SUCCESS,
             fg="#ffffff",
-            activebackground="#059669",
+            activebackground=COLOR_SUCCESS_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -1275,9 +1338,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         btn_reset = tk.Button(
             actions,
             text="🔄 恢复默认编组 (Reset)",
-            bg="#334155",
-            fg="#cbd5e1",
-            activebackground="#475569",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_CONTROL_HOVER,
             font=self.font_sub,
             relief=tk.FLAT,
             padx=12,
@@ -1290,9 +1353,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         btn_cancel = tk.Button(
             actions,
             text="取消 (Cancel)",
-            bg="#1e293b",
-            fg="#94a3b8",
-            activebackground="#334155",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_CONTROL,
             font=self.font_sub,
             relief=tk.FLAT,
             padx=12,
@@ -1307,15 +1370,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             parent,
             text=f" {title} ",
             fg=color,
-            bg="#1e293b",
+            bg=COLOR_SURFACE,
             font=self.font_bold,
             padx=12,
             pady=8,
             relief=tk.SOLID,
             bd=1,
             highlightthickness=1,
-            highlightbackground="#334155",
-            highlightcolor="#334155",
+            highlightbackground=COLOR_CONTROL,
+            highlightcolor=COLOR_CONTROL,
         )
         card.pack(fill=tk.X, pady=(0, 8))
         self.cards[role_key] = card
@@ -1325,33 +1388,33 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         card.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
         # Card body with two columns: left for seat properties, right for TG in-card drawer
-        card_body = tk.Frame(card, bg="#1e293b")
+        card_body = tk.Frame(card, bg=COLOR_SURFACE)
         card_body.pack(fill=tk.BOTH, expand=True)
         card_body.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
-        card_right = tk.Frame(card_body, bg="#1e293b")
+        card_right = tk.Frame(card_body, bg=COLOR_SURFACE)
         card_right.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
 
-        card_left = tk.Frame(card_body, bg="#1e293b")
+        card_left = tk.Frame(card_body, bg=COLOR_SURFACE)
         card_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         card_left.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
         # Row 1: Engine, Track, and Bot Identity Badge (in card_left)
-        r1 = tk.Frame(card_left, bg="#1e293b")
+        r1 = tk.Frame(card_left, bg=COLOR_SURFACE)
         r1.pack(fill=tk.X, pady=2)
         r1.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
-        lbl_eng = tk.Label(r1, text="执行引擎:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
+        lbl_eng = tk.Label(r1, text="执行引擎:", fg=COLOR_TEXT, bg=COLOR_SURFACE, font=self.font_sub, width=10, anchor="w")
         lbl_eng.pack(side=tk.LEFT)
         lbl_eng.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
         btn_engine = tk.Button(
             r1,
             text="⚪ 未设置 (点击上方按钮指定)",
-            bg="#334155",
-            fg="#94a3b8",
-            activebackground="#475569",
-            activeforeground="#f8fafc",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_CONTROL_HOVER,
+            activeforeground=COLOR_TEXT,
             font=self.font_bold,
             relief=tk.FLAT,
             padx=10,
@@ -1370,9 +1433,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         btn_track = tk.Button(
             r1,
             text="🧭 轨道配置",
-            bg="#0d9488",
+            bg=COLOR_PRIMARY,
             fg="#ffffff",
-            activebackground="#0f766e",
+            activebackground=COLOR_PRIMARY_HOVER,
             activeforeground="#ffffff",
             font=self.font_sub,
             relief=tk.FLAT,
@@ -1390,10 +1453,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             btn_ext_guide = tk.Button(
                 r1,
                 text="🧩 浏览器扩展",
-                bg="#334155",
-                fg="#f8fafc",
-                activebackground="#475569",
-                activeforeground="#ffffff",
+                bg=COLOR_CONTROL,
+                fg=COLOR_TEXT,
+                activebackground=COLOR_CONTROL_HOVER,
+                activeforeground=COLOR_TEXT,
                 font=self.font_sub,
                 relief=tk.FLAT,
                 padx=8,
@@ -1407,9 +1470,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             btn_chat_check = tk.Button(
                 r1,
                 text="🌐 桥接自检",
-                bg="#0284c7",
+                bg=COLOR_PRIMARY,
                 fg="#ffffff",
-                activebackground="#0369a1",
+                activebackground=COLOR_PRIMARY_HOVER,
                 activeforeground="#ffffff",
                 font=self.font_sub,
                 relief=tk.FLAT,
@@ -1425,8 +1488,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         lbl_bot_badge = tk.Label(
             r1,
             text="",
-            fg="#38bdf8",
-            bg="#1e293b",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE,
             font=self.font_bold,
         )
         lbl_bot_badge.pack(side=tk.LEFT, padx=(12, 0))
@@ -1445,19 +1508,19 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         entry_user = tk.Entry(r2)
 
         # Row 2 (visually Row 2 in card_left): Role Assignment Display
-        r3 = tk.Frame(card_left, bg="#1e293b")
+        r3 = tk.Frame(card_left, bg=COLOR_SURFACE)
         r3.pack(fill=tk.X, pady=4)
         r3.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
-        lbl_role_tag = tk.Label(r3, text="席位职能:", fg="#f1f5f9", bg="#1e293b", font=self.font_sub, width=10, anchor="w")
-        lbl_role_tag.pack(side=tk.LEFT)
+        lbl_role_tag = tk.Label(r3, text="席位职能:", fg=COLOR_TEXT, bg=COLOR_SURFACE, font=self.font_sub, anchor="w")
+        lbl_role_tag.pack(side=tk.LEFT, padx=(0, 2))
         lbl_role_tag.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
         lbl_role_badge = tk.Label(
             r3,
             text="【职能配置】",
-            bg="#1e293b",
-            fg="#38bdf8",
+            bg=COLOR_SURFACE,
+            fg=COLOR_INFO,
             font=self.font_bold,
             relief=tk.FLAT,
             padx=2,
@@ -1468,9 +1531,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
         entry_custom = tk.Entry(
             r3,
-            bg="#0f172a",
-            fg="#cbd5e1",
-            insertbackground="#cbd5e1",
+            bg=COLOR_SURFACE_ALT,
+            fg=COLOR_TEXT_SECONDARY,
+            insertbackground=COLOR_TEXT_SECONDARY,
             font=self.font_sub,
             relief=tk.FLAT,
             bd=4,
@@ -1484,15 +1547,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         # In-Card Telegram Collapsible Drawer (in card_right)
         # ======================================================================
         # State A: Collapsed (compact button + status label)
-        drawer_collapsed = tk.Frame(card_right, bg="#1e293b")
+        drawer_collapsed = tk.Frame(card_right, bg=COLOR_SURFACE)
         drawer_collapsed.pack(fill=tk.BOTH, expand=True)
 
         btn_tg_config = tk.Button(
             drawer_collapsed,
             text="✈️ TG设置",
-            bg="#0284c7",
+            bg=COLOR_PRIMARY,
             fg="#ffffff",
-            activebackground="#0369a1",
+            activebackground=COLOR_PRIMARY_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -1507,8 +1570,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         lbl_tg_status = tk.Label(
             drawer_collapsed,
             text="⚪ 待配置",
-            fg="#94a3b8",
-            bg="#1e293b",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_SURFACE,
             font=self.font_sub,
             cursor="hand2",
         )
@@ -1517,21 +1580,21 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self._bind_btn_tooltip(lbl_tg_status, "点击展开右侧 Telegram Bot Token 与战队群快捷设置")
 
         # State B: Expanded (in-card quick binding panel, +100% width)
-        drawer_expanded = tk.Frame(card_right, bg="#0f172a", bd=1, relief=tk.SOLID, padx=12, pady=6)
+        drawer_expanded = tk.Frame(card_right, bg=COLOR_SURFACE_ALT, bd=1, relief=tk.SOLID, padx=12, pady=6)
         # Initially hidden (pack_forget)
 
         # Drawer Row 1: Header
-        dr_head = tk.Frame(drawer_expanded, bg="#0f172a")
+        dr_head = tk.Frame(drawer_expanded, bg=COLOR_SURFACE_ALT)
         dr_head.pack(fill=tk.X, pady=(0, 4))
-        lbl_dr_title = tk.Label(dr_head, text="✈️ TG设置", fg="#38bdf8", bg="#0f172a", font=self.font_bold)
+        lbl_dr_title = tk.Label(dr_head, text="✈️ TG设置", fg=COLOR_INFO, bg=COLOR_SURFACE_ALT, font=self.font_bold)
         lbl_dr_title.pack(side=tk.LEFT)
         btn_dr_close = tk.Button(
             dr_head,
             text="✖ 收起",
-            bg="#1e293b",
-            fg="#94a3b8",
-            activebackground="#334155",
-            activeforeground="#f8fafc",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_CONTROL,
+            activeforeground=COLOR_TEXT,
             font=self.font_sub,
             relief=tk.FLAT,
             padx=8,
@@ -1542,15 +1605,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         btn_dr_close.pack(side=tk.RIGHT)
 
         # Drawer Row 2: Token Input with Eye Toggle (+100% width: width=38)
-        dr_tok_row = tk.Frame(drawer_expanded, bg="#0f172a")
+        dr_tok_row = tk.Frame(drawer_expanded, bg=COLOR_SURFACE_ALT)
         dr_tok_row.pack(fill=tk.X, pady=(0, 4))
-        lbl_dr_tok = tk.Label(dr_tok_row, text="Token:", fg="#cbd5e1", bg="#0f172a", font=self.font_sub)
+        lbl_dr_tok = tk.Label(dr_tok_row, text="Token:", fg=COLOR_TEXT_SECONDARY, bg=COLOR_SURFACE_ALT, font=self.font_sub)
         lbl_dr_tok.pack(side=tk.LEFT, padx=(0, 4))
         entry_dr_tok = tk.Entry(
             dr_tok_row,
-            bg="#1e293b",
-            fg="#f8fafc",
-            insertbackground="#f8fafc",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT,
             font=self.font_mono,
             width=38,
             relief=tk.FLAT,
@@ -1561,9 +1624,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         btn_dr_eye = tk.Button(
             dr_tok_row,
             text="👁️",
-            bg="#334155",
-            fg="#f8fafc",
-            activebackground="#475569",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT,
+            activebackground=COLOR_CONTROL_HOVER,
             font=self.font_sub,
             relief=tk.FLAT,
             padx=6,
@@ -1575,14 +1638,14 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self._bind_btn_tooltip(btn_dr_eye, "切换显示/隐藏明文 Token (好用第一)")
 
         # Drawer Row 3: Action Button + Status
-        dr_act_row = tk.Frame(drawer_expanded, bg="#0f172a")
+        dr_act_row = tk.Frame(drawer_expanded, bg=COLOR_SURFACE_ALT)
         dr_act_row.pack(fill=tk.X)
         btn_dr_join = tk.Button(
             dr_act_row,
             text="🚀 加入TG群",
-            bg="#10b981",
+            bg=COLOR_SUCCESS,
             fg="#ffffff",
-            activebackground="#059669",
+            activebackground=COLOR_SUCCESS_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -1592,7 +1655,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             command=lambda rk=role_key: self._drawer_join_tg(rk),
         )
         btn_dr_join.pack(side=tk.LEFT, padx=(0, 8))
-        lbl_dr_status = tk.Label(dr_act_row, text="⚪ 待配置", fg="#94a3b8", bg="#0f172a", font=self.font_sub)
+        lbl_dr_status = tk.Label(dr_act_row, text="⚪ 待配置", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE_ALT, font=self.font_sub)
         lbl_dr_status.pack(side=tk.LEFT)
 
         self.widgets[role_key] = {
@@ -1628,8 +1691,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
     def _switch_tab(self, tab_name: str):
         self.active_tab = tab_name
         if tab_name == "code":
-            self.btn_tab_code.config(bg="#0284c7", fg="#ffffff")
-            self.btn_tab_chat.config(bg="#1e293b", fg="#94a3b8")
+            self.btn_tab_code.config(bg=COLOR_PRIMARY, fg="#ffffff", highlightbackground=COLOR_PRIMARY)
+            self.btn_tab_chat.config(bg=COLOR_TAB_IDLE, fg=COLOR_TEXT, highlightbackground=COLOR_TAB_BORDER)
             self.tab_frame_chat.pack_forget()
             self.tab_frame_code.pack(fill=tk.BOTH, expand=True)
             if self.selected_role not in ("lead", "builder"):
@@ -1637,8 +1700,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             else:
                 self._select_seat(self.selected_role)
         else:
-            self.btn_tab_code.config(bg="#1e293b", fg="#94a3b8")
-            self.btn_tab_chat.config(bg="#0284c7", fg="#ffffff")
+            self.btn_tab_code.config(bg=COLOR_TAB_IDLE, fg=COLOR_TEXT, highlightbackground=COLOR_TAB_BORDER)
+            self.btn_tab_chat.config(bg=COLOR_PRIMARY, fg="#ffffff", highlightbackground=COLOR_PRIMARY)
             self.tab_frame_code.pack_forget()
             self.tab_frame_chat.pack(fill=tk.BOTH, expand=True)
             self._select_seat("chat")
@@ -1672,17 +1735,17 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self._hide_tooltip()
         tw = tk.Toplevel(self)
         tw.wm_overrideredirect(True)
-        tw.configure(bg="#0f172a", bd=1, relief=tk.SOLID)
+        tw.configure(bg=COLOR_SURFACE_ALT, bd=1, relief=tk.SOLID)
         tw.geometry(f"+{x + 12}+{y + 16}")
 
-        frame = tk.Frame(tw, bg="#0f172a", padx=10, pady=8)
+        frame = tk.Frame(tw, bg=COLOR_SURFACE_ALT, padx=10, pady=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
         tk.Label(
             frame,
             text=text,
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE_ALT,
             font=self.font_sub,
             justify=tk.LEFT,
             wraplength=340,
@@ -1705,15 +1768,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             base_title = self.card_titles[rk]
             if rk == role_key:
                 card.config(
-                    highlightbackground="#38bdf8",
-                    highlightcolor="#38bdf8",
+                    highlightbackground=COLOR_INFO,
+                    highlightcolor=COLOR_INFO,
                     highlightthickness=2,
                     text=f" {base_title} [⭐ 当前选中编排] ",
                 )
             else:
                 card.config(
-                    highlightbackground="#334155",
-                    highlightcolor="#334155",
+                    highlightbackground=COLOR_CONTROL,
+                    highlightcolor=COLOR_CONTROL,
                     highlightthickness=1,
                     text=f" {base_title} ",
                 )
@@ -1728,7 +1791,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             # Custom is non-exclusive
             w = self.widgets[target_role]
             w["is_custom"] = True
-            w["role_badge"].config(text="【✏️ 自定义】", bg="#1e293b", fg="#94a3b8")
+            w["role_badge"].config(text="【✏️ 自定义】", bg=COLOR_SURFACE, fg=COLOR_TEXT_MUTED)
             w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
             w["custom_entry"].focus_set()
         else:
@@ -1738,14 +1801,14 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                     if not other_w["is_custom"] and other_w["desc_var"].get() == preset["desc_text"]:
                         other_w["is_custom"] = True
                         other_w["desc_var"].set("")
-                        other_w["role_badge"].config(text="【✏️ 自定义】", bg="#1e293b", fg="#94a3b8")
+                        other_w["role_badge"].config(text="【✏️ 自定义】", bg=COLOR_SURFACE, fg=COLOR_TEXT_MUTED)
                         other_w["custom_entry"].delete(0, tk.END)
                         other_w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
             w = self.widgets[target_role]
             w["is_custom"] = False
             w["desc_var"].set(preset["desc_text"])
-            w["role_badge"].config(text=f"【{preset['btn_label']}】", bg="#1e293b", fg="#38bdf8")
+            w["role_badge"].config(text=f"【{preset['btn_label']}】", bg=COLOR_SURFACE, fg=COLOR_INFO)
             w["custom_entry"].pack_forget()
 
     def _on_engine_badge_click(self, role_key: str):
@@ -1777,9 +1840,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
     def _on_sync_context_toggle(self):
         if self.var_sync_context.get():
-            self.entry_cw.config(state="normal", bg="#1e293b", fg="#f8fafc")
+            self.entry_cw.config(state="normal", bg=COLOR_SURFACE, fg=COLOR_TEXT)
         else:
-            self.entry_cw.config(state="disabled", bg="#0f172a", fg="#64748b")
+            self.entry_cw.config(state="disabled", bg=COLOR_SURFACE_ALT, fg=COLOR_TEXT_SOFT)
 
     def _open_chat_ai_webpage(self):
         """Open the webpage for the currently selected Chat AI engine (Item 2)."""
@@ -1804,6 +1867,43 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             )
         except Exception as e:
             messagebox.showerror("打开网页失败", f"无法打开浏览器: {e}", parent=self)
+
+    def _ensure_and_seed_extension_token(self, ext_path: Path | None = None) -> str:
+        """Ensure a valid 18765 bridge bearer token exists and seed seed_token.json into the extension directory."""
+        import secrets
+        import json
+        runtime_root = Path(os.environ.get("LOCALAPPDATA", "")) / "FoldedHostLocalBridge"
+        token_file = runtime_root / "bridge.token"
+        token_str = ""
+        if token_file.is_file():
+            try:
+                tok = token_file.read_text(encoding="utf-8").strip()
+                if len(tok) >= 32:
+                    token_str = tok
+            except Exception:
+                pass
+
+        if not token_str:
+            runtime_root.mkdir(parents=True, exist_ok=True)
+            token_str = secrets.token_urlsafe(32)
+            try:
+                token_file.write_text(token_str, encoding="utf-8")
+            except Exception:
+                pass
+
+        payload = json.dumps({"endpoint": "http://127.0.0.1:18765", "token": token_str}, indent=2)
+        target_dirs = [REPO_ROOT / "browser-extension", REPO_ROOT / "assets" / "browser-extension"]
+        if ext_path and ext_path not in target_dirs:
+            target_dirs.append(ext_path)
+
+        for d in target_dirs:
+            if d and d.is_dir():
+                try:
+                    (d / "seed_token.json").write_text(payload, encoding="utf-8")
+                except Exception:
+                    pass
+
+        return token_str
 
     def _open_browser_extension_guide(self):
         """Locate and open the browser extension directory and guide the user through installation (Item 1)."""
@@ -1834,6 +1934,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             ext_path = (REPO_ROOT / "browser-extension").resolve()
             ext_path.mkdir(parents=True, exist_ok=True)
 
+        # Automatically seed the token into extension directory so user never needs manual entry
+        self._ensure_and_seed_extension_token(ext_path)
+
         try:
             self.clipboard_clear()
             self.clipboard_append(str(ext_path))
@@ -1854,7 +1957,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             "2. 开启右上角【开发者模式】(Developer Mode) 开关；\n"
             "3. 点击左上角【加载已解压的扩展程序】(Load unpacked)；\n"
             "4. 选择已打开的文件夹即可完成安装！\n\n"
-            "安装完成后，点击扩展图标即可确认状态。"
+            "✨ 零配置免填：安装包已自动植入鉴权令牌 (seed_token.json)，插件加载后自动握手连接，无需手动配置！"
         )
         messagebox.showinfo("浏览器扩展安装指引", msg, parent=self)
 
@@ -1864,7 +1967,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         eng_raw = (w["engine"].get().strip().lower() if w else "") or "chatgpt"
         eng = eng_raw.upper()
 
-        # 1. Automatically launch webpage for the selected engine (merged per directive)
+        # 1. Automatically refresh and seed the token to ensure the latest token is present
+        self._ensure_and_seed_extension_token()
+
+        # 2. Automatically launch webpage for the selected engine (merged per directive)
         urls = {
             "chatgpt": "https://chatgpt.com",
             "gemini": "https://gemini.google.com",
@@ -1881,7 +1987,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         except Exception:
             pass
 
-        # 2. Check ports
+        # 3. Check ports
         is_bridge_listening = is_port_listening(18765)
         is_cockpit_listening = is_port_listening(8765)
 
@@ -1907,6 +2013,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 f"{web_notice}"
                 f"✅ 本地 Web 桥接网关正常运行 (Port 18765 已连接)！\n\n"
                 f"• 桥接通信通道正常；{active_info}\n"
+                f"• 鉴权令牌已自动植入浏览器扩展，无需手动填写；\n"
                 f"• 当前席位引擎: {eng}\n"
                 f"• 您可在 TG 战队群中 @Bot 发送测试消息验证端到端回传。",
                 parent=self,
@@ -1950,7 +2057,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 if tok_from_env:
                     w["drawer_token_entry"].delete(0, tk.END)
                     w["drawer_token_entry"].insert(0, tok_from_env)
-                    w["drawer_status_lbl"].config(text="🟢 Token已就位", fg="#10b981")
+                    w["drawer_status_lbl"].config(text="🟢 Token已就位", fg=COLOR_SUCCESS)
             w["drawer_token_entry"].focus_set()
         self._select_seat(role_key)
 
@@ -1985,17 +2092,17 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             token = (os.environ.get(env_var) or "").strip()
 
         if not token:
-            w["drawer_status_lbl"].config(text="❌ 请输入Token", fg="#ef4444")
+            w["drawer_status_lbl"].config(text="❌ 请输入Token", fg=COLOR_DANGER)
             messagebox.showerror("缺少 Token", "请先填入 Telegram Bot Token！", parent=self)
             return
 
-        w["drawer_status_lbl"].config(text="🔄 验证Token...", fg="#facc15")
+        w["drawer_status_lbl"].config(text="🔄 验证Token...", fg=COLOR_WARNING)
         self.update_idletasks()
 
         ver_res = verify_bot_token(token)
         ok, bot_id, uname, err = ver_res[0], ver_res[1], ver_res[2], ver_res[3]
         if not ok or not bot_id:
-            w["drawer_status_lbl"].config(text=f"❌ {err or '无效'}", fg="#ef4444")
+            w["drawer_status_lbl"].config(text=f"❌ {err or '无效'}", fg=COLOR_DANGER)
             messagebox.showerror("Token 校验失败", f"Bot Token 校验失败: {err}", parent=self)
             return
 
@@ -2046,7 +2153,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 )
                 if sent_ok:
                     group_disp = self.global_group_name or target_chat_id
-                    w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
+                    w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg=COLOR_SUCCESS)
                     self._update_seat_tg_capsule(role_key)
                     self._update_global_group_banner()
                     self._collapse_tg_drawer(role_key)
@@ -2097,7 +2204,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         if not is_daemon:
             broker.start_temporary_poller()
 
-        w["drawer_status_lbl"].config(text="📡 正在监听加群...", fg="#facc15")
+        w["drawer_status_lbl"].config(text="📡 正在监听加群...", fg=COLOR_WARNING)
         self.after(500, lambda rk=role_key: self._poll_drawer_broker(rk))
 
         try:
@@ -2126,7 +2233,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 self._update_seat_tg_capsule(role_key)
                 w = self.widgets.get(role_key, {})
                 if "drawer_status_lbl" in w:
-                    w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
+                    w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg=COLOR_SUCCESS)
                 broker.stop_temporary_poller()
                 self._collapse_tg_drawer(role_key)
                 if self.on_save_callback:
@@ -2135,7 +2242,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             elif ev_type == "CONFLICT_409":
                 w = self.widgets.get(role_key, {})
                 if "drawer_status_lbl" in w:
-                    w["drawer_status_lbl"].config(text="⚠️ 端口/Bot冲突(409)", fg="#ef4444")
+                    w["drawer_status_lbl"].config(text="⚠️ 端口/Bot冲突(409)", fg=COLOR_DANGER)
                 broker.stop_temporary_poller()
                 return
 
@@ -2166,9 +2273,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         w["lbl_env_tag"].config(text=f"({env_var})")
 
         if token_val:
-            w["lbl_tg_status"].config(text="🟢 已就位", fg="#10b981")
+            w["lbl_tg_status"].config(text="🟢 已就位", fg=COLOR_SUCCESS)
             if "drawer_status_lbl" in w:
-                w["drawer_status_lbl"].config(text="🟢 已就位", fg="#10b981")
+                w["drawer_status_lbl"].config(text="🟢 已就位", fg=COLOR_SUCCESS)
             bot_name = w["name"].get().strip()
             clean_u = user if (user.startswith("@") or not user) else f"@{user}"
             if bot_name:
@@ -2176,11 +2283,11 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             else:
                 badge_text = f"🏷️ {clean_u}" if clean_u else ""
             if "lbl_bot_badge" in w:
-                w["lbl_bot_badge"].config(text=badge_text, fg="#38bdf8")
+                w["lbl_bot_badge"].config(text=badge_text, fg=COLOR_INFO)
         else:
-            w["lbl_tg_status"].config(text="⚪ 待配置", fg="#94a3b8")
+            w["lbl_tg_status"].config(text="⚪ 待配置", fg=COLOR_TEXT_MUTED)
             if "drawer_status_lbl" in w:
-                w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
+                w["drawer_status_lbl"].config(text="⚪ 待配置", fg=COLOR_TEXT_MUTED)
             if "lbl_bot_badge" in w:
                 w["lbl_bot_badge"].config(text="")
 
@@ -2202,7 +2309,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             name_part = f"【{self.global_group_name}】" if self.global_group_name else ""
             self.lbl_global_group.config(
                 text=f"📢 Telegram 协同战队群: {name_part} Chat ID: {self.global_chat_id} (全席位共用)",
-                fg="#38bdf8",
+                fg=COLOR_INFO,
             )
         else:
             has_token = False
@@ -2214,12 +2321,12 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             if has_token:
                 self.lbl_global_group.config(
                     text="📢 Telegram 协同战队群: ⚪ 待入群发言自动绑定 (在群内发一条消息或点击席位【TG设置】即可锁定)",
-                    fg="#facc15",
+                    fg=COLOR_WARNING,
                 )
             else:
                 self.lbl_global_group.config(
                     text="📢 Telegram 协同战队群: 尚未配置 (点击任一席位的 TG 状态按钮进行配置/打卡)",
-                    fg="#94a3b8",
+                    fg=COLOR_TEXT_MUTED,
                 )
 
     def _open_antigravity_tracks(self):
@@ -2280,7 +2387,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 if (desc == p["desc_text"] or desc == p["btn_label"]) and p["desc_text"] not in used_preset_texts:
                     w["desc_var"].set(p["desc_text"])
                     w["is_custom"] = False
-                    w["role_badge"].config(text=f"【{p['btn_label']}】", bg="#1e293b", fg="#38bdf8")
+                    w["role_badge"].config(text=f"【{p['btn_label']}】", bg=COLOR_SURFACE, fg=COLOR_INFO)
                     w["custom_entry"].pack_forget()
                     used_preset_texts.add(p["desc_text"])
                     matched = True
@@ -2288,7 +2395,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             if not matched:
                 w["desc_var"].set(desc)
                 w["is_custom"] = True
-                w["role_badge"].config(text="【✏️ 自定义】", bg="#1e293b", fg="#94a3b8")
+                w["role_badge"].config(text="【✏️ 自定义】", bg=COLOR_SURFACE, fg=COLOR_TEXT_MUTED)
                 w["custom_entry"].delete(0, tk.END)
                 w["custom_entry"].insert(0, desc)
                 w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
@@ -2300,16 +2407,16 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 masked = "••••••••" + (env_val[-4:] if len(env_val) >= 4 else env_val)
                 w["token"].insert(0, masked)
                 hint_str = f"末4位: ...{env_val[-4:]}" if len(env_val) >= 4 else "已设置"
-                w["hint"].config(text=hint_str, fg="#10b981")
+                w["hint"].config(text=hint_str, fg=COLOR_SUCCESS)
                 if "drawer_token_entry" in w:
                     w["drawer_token_entry"].delete(0, tk.END)
                     w["drawer_token_entry"].insert(0, env_val)
                 if "drawer_status_lbl" in w:
-                    w["drawer_status_lbl"].config(text="🟢 Token已就位", fg="#10b981")
+                    w["drawer_status_lbl"].config(text="🟢 Token已就位", fg=COLOR_SUCCESS)
             else:
-                w["hint"].config(text="未配置", fg="#ef4444")
+                w["hint"].config(text="未配置", fg=COLOR_DANGER)
                 if "drawer_status_lbl" in w:
-                    w["drawer_status_lbl"].config(text="⚪ 待配置", fg="#94a3b8")
+                    w["drawer_status_lbl"].config(text="⚪ 待配置", fg=COLOR_TEXT_MUTED)
 
             self._update_seat_tg_capsule(role_key)
 
@@ -2331,8 +2438,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.update_idletasks()
 
         orig_text = "📋 一键复制 Memo (Copy)"
-        self.btn_copy_memo.configure(text="✅ 已复制到剪贴板！", bg="#10b981")
-        self.after(2000, lambda: self.btn_copy_memo.configure(text=orig_text, bg="#0284c7"))
+        self.btn_copy_memo.configure(text="✅ 已复制到剪贴板！", bg=COLOR_SUCCESS)
+        self.after(2000, lambda: self.btn_copy_memo.configure(text=orig_text, bg=COLOR_PRIMARY))
 
         show_floating_toast(
             parent=self,
@@ -2578,8 +2685,8 @@ def show_floating_toast(
     message: str = "",
     icon: str = "🎉",
     duration_ms: int = 2800,
-    bg_color: str = "#0f172a",
-    border_color: str = "#10b981",
+    bg_color: str = COLOR_SURFACE_ALT,
+    border_color: str = COLOR_SUCCESS,
 ):
     """Display an upward-floating, non-blocking toast notification over the parent window."""
     try:
@@ -2613,7 +2720,7 @@ def show_floating_toast(
         tk.Label(
             inner,
             text=message,
-            fg="#cbd5e1",
+            fg=COLOR_TEXT_SECONDARY,
             bg=bg_color,
             font=tkfont.Font(family="Segoe UI", size=9),
             justify=tk.LEFT,
@@ -2692,7 +2799,8 @@ class AntigravityTracksDialog(tk.Toplevel):
         self.title("Antigravity 轨道管理与会话绑定 — PocketFleet")
         self.geometry("960x650")
         self.minsize(860, 560)
-        self.configure(bg="#0b0f19")
+        self.configure(bg=COLOR_APP_BG)
+        apply_windows_titlebar_theme(self)
         self.transient(parent)
         self.grab_set()
 
@@ -2728,59 +2836,59 @@ class AntigravityTracksDialog(tk.Toplevel):
 
     def _build_ui(self):
         # Header banner
-        header = tk.Frame(self, bg="#0f172a", padx=20, pady=12)
+        header = tk.Frame(self, bg=COLOR_TITLE_BAR, padx=20, pady=12)
         header.pack(fill=tk.X)
         tk.Label(
             header,
             text="🧭 Antigravity 对话轨发现与一键绑定 (Track Selector)",
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_TEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_title,
         ).pack(anchor="w")
 
         self.lbl_bound_status = tk.Label(
             header,
             text="当前绑定的对话轨: 正在检查...",
-            fg="#f8fafc",
-            bg="#0f172a",
+            fg=COLOR_TITLE_SUBTEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_sub,
         )
         self.lbl_bound_status.pack(anchor="w", pady=(3, 0))
 
         # Compact instruction bar (replaces cumbersome 3-step guide box)
-        tip_bar = tk.Frame(self, bg="#1e293b", padx=16, pady=6)
+        tip_bar = tk.Frame(self, bg=COLOR_SURFACE, padx=16, pady=6)
         tip_bar.pack(fill=tk.X, padx=16, pady=(10, 6))
         tk.Label(
             tip_bar,
             text="💡 提示：鼠标悬停在任意行上可预览完整末轮对话。选中目标会话后（包括 IDE 正在进行的对话），直接点击下方【🔗 绑定为对话轨】即可一键秒级绑定！",
-            fg="#38bdf8",
-            bg="#1e293b",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE,
             font=self.font_sub,
         ).pack(anchor="w")
 
         # Treeview table Frame
-        table_frame = tk.Frame(self, bg="#0b0f19", padx=16, pady=4)
+        table_frame = tk.Frame(self, bg=COLOR_APP_BG, padx=16, pady=4)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure(
             "Tracks.Treeview",
-            background="#1e293b",
-            foreground="#f8fafc",
-            fieldbackground="#1e293b",
+            background=COLOR_SURFACE,
+            foreground=COLOR_TEXT,
+            fieldbackground=COLOR_SURFACE,
             rowheight=26,
             font=("Segoe UI", 9),
         )
         style.configure(
             "Tracks.Treeview.Heading",
-            background="#334155",
-            foreground="#f1f5f9",
+            background=COLOR_CONTROL,
+            foreground=COLOR_TEXT,
             font=("Segoe UI", 9, "bold"),
         )
         style.map(
             "Tracks.Treeview",
-            background=[("selected", "#0284c7")],
+            background=[("selected", COLOR_PRIMARY)],
             foreground=[("selected", "#ffffff")],
         )
 
@@ -2816,16 +2924,16 @@ class AntigravityTracksDialog(tk.Toplevel):
         self.tree.bind("<Double-1>", lambda e: self._on_bind_click())
 
         # Bottom toolbar
-        bar = tk.Frame(self, bg="#0b0f19", padx=16, pady=12)
+        bar = tk.Frame(self, bg=COLOR_APP_BG, padx=16, pady=12)
         bar.pack(fill=tk.X)
 
         btn_refresh = tk.Button(
             bar,
             text="🔄 刷新列表",
-            bg="#334155",
-            fg="#f8fafc",
-            activebackground="#475569",
-            activeforeground="#ffffff",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT,
+            activebackground=COLOR_CONTROL_HOVER,
+            activeforeground=COLOR_TEXT,
             font=self.font_bold,
             relief=tk.FLAT,
             padx=12,
@@ -2840,11 +2948,11 @@ class AntigravityTracksDialog(tk.Toplevel):
             text="显示全部 (<512KB 小轨)",
             variable=self.show_all_var,
             command=self.refresh_tracks,
-            bg="#0b0f19",
-            fg="#94a3b8",
-            activebackground="#0b0f19",
-            activeforeground="#f8fafc",
-            selectcolor="#1e293b",
+            bg=COLOR_APP_BG,
+            fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_APP_BG,
+            activeforeground=COLOR_TEXT,
+            selectcolor=COLOR_SURFACE,
             font=self.font_sub,
         )
         chk_show_all.pack(side=tk.LEFT, padx=(0, 20))
@@ -2853,9 +2961,9 @@ class AntigravityTracksDialog(tk.Toplevel):
         self.btn_bind = tk.Button(
             bar,
             text="🔗 绑定为对话轨 (Bind Track)",
-            bg="#10b981",
+            bg=COLOR_SUCCESS,
             fg="#ffffff",
-            activebackground="#059669",
+            activebackground=COLOR_SUCCESS_HOVER,
             activeforeground="#ffffff",
             font=tkfont.Font(family="Segoe UI", size=10, weight="bold"),
             relief=tk.FLAT,
@@ -2869,10 +2977,10 @@ class AntigravityTracksDialog(tk.Toplevel):
         btn_close = tk.Button(
             bar,
             text="关闭",
-            bg="#475569",
-            fg="#ffffff",
-            activebackground="#64748b",
-            activeforeground="#ffffff",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT,
+            activebackground=COLOR_CONTROL_HOVER,
+            activeforeground=COLOR_TEXT,
             font=self.font_sub,
             relief=tk.FLAT,
             padx=14,
@@ -2907,11 +3015,11 @@ class AntigravityTracksDialog(tk.Toplevel):
 
         tw = tk.Toplevel(self)
         tw.wm_overrideredirect(True)
-        tw.configure(bg="#0f172a", bd=1, relief=tk.SOLID)
+        tw.configure(bg=COLOR_SURFACE_ALT, bd=1, relief=tk.SOLID)
         # Position slightly offset from cursor
         tw.geometry(f"+{x + 18}+{y + 12}")
 
-        frame = tk.Frame(tw, bg="#0f172a", padx=12, pady=10)
+        frame = tk.Frame(tw, bg=COLOR_SURFACE_ALT, padx=12, pady=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
         # Header tag
@@ -2919,8 +3027,8 @@ class AntigravityTracksDialog(tk.Toplevel):
         tk.Label(
             frame,
             text=f"📌 {src_tag}",
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE_ALT,
             font=self.font_bold,
             anchor="w",
         ).pack(fill=tk.X, pady=(0, 4))
@@ -2934,16 +3042,16 @@ class AntigravityTracksDialog(tk.Toplevel):
             tk.Label(
                 frame,
                 text="👤 用户指令 (已回溯至最新有效发言):",
-                fg="#f1f5f9",
-                bg="#0f172a",
+                fg=COLOR_TEXT,
+                bg=COLOR_SURFACE_ALT,
                 font=self.font_bold,
                 anchor="w",
             ).pack(fill=tk.X, pady=(2, 0))
             tk.Label(
                 frame,
                 text=f"“{clean_user}”",
-                fg="#7dd3fc",
-                bg="#0f172a",
+                fg=COLOR_INFO,
+                bg=COLOR_SURFACE_ALT,
                 font=self.font_sub,
                 justify=tk.LEFT,
                 wraplength=480,
@@ -2953,8 +3061,8 @@ class AntigravityTracksDialog(tk.Toplevel):
             tk.Label(
                 frame,
                 text="💡 提示: 此会话未检测到人类独立提问，仅包含助手执行:",
-                fg="#fbbf24",
-                bg="#0f172a",
+                fg=COLOR_WARNING,
+                bg=COLOR_SURFACE_ALT,
                 font=self.font_sub,
                 anchor="w",
             ).pack(fill=tk.X, pady=(2, 4))
@@ -2962,8 +3070,8 @@ class AntigravityTracksDialog(tk.Toplevel):
             tk.Label(
                 frame,
                 text="📌 空白新会话 (暂无任何交互记录)",
-                fg="#94a3b8",
-                bg="#0f172a",
+                fg=COLOR_TEXT_MUTED,
+                bg=COLOR_SURFACE_ALT,
                 font=self.font_sub,
                 anchor="w",
             ).pack(fill=tk.X, pady=(2, 6))
@@ -2973,16 +3081,16 @@ class AntigravityTracksDialog(tk.Toplevel):
             tk.Label(
                 frame,
                 text="🤖 助手最新回复:",
-                fg="#94a3b8",
-                bg="#0f172a",
+                fg=COLOR_TEXT_MUTED,
+                bg=COLOR_SURFACE_ALT,
                 font=self.font_bold,
                 anchor="w",
             ).pack(fill=tk.X, pady=(2, 0))
             tk.Label(
                 frame,
                 text=f"{clean_resp}",
-                fg="#cbd5e1",
-                bg="#0f172a",
+                fg=COLOR_TEXT_SECONDARY,
+                bg=COLOR_SURFACE_ALT,
                 font=self.font_sub,
                 justify=tk.LEFT,
                 wraplength=480,
@@ -2995,8 +3103,8 @@ class AntigravityTracksDialog(tk.Toplevel):
         tk.Label(
             frame,
             text=meta_str,
-            fg="#64748b",
-            bg="#0f172a",
+            fg=COLOR_TEXT_SOFT,
+            bg=COLOR_SURFACE_ALT,
             font=self.font_mono,
             anchor="w",
         ).pack(fill=tk.X, pady=(4, 0))
@@ -3025,12 +3133,12 @@ class AntigravityTracksDialog(tk.Toplevel):
             origin_type = "IDE 原生轨" if ide_db.is_file() else "CLI 外勤轨"
             self.lbl_bound_status.config(
                 text=f"当前绑定的对话轨: {bound_id} ({origin_type}，已同步至项目 .env)",
-                fg="#38bdf8",
+                fg=COLOR_INFO,
             )
         else:
             self.lbl_bound_status.config(
                 text="当前未绑定持久轨 (默认以全新独立会话启动)",
-                fg="#94a3b8",
+                fg=COLOR_TEXT_MUTED,
             )
         return bound_id
 
@@ -3482,7 +3590,8 @@ class PocketFleetControlApp:
         self.root.geometry("860x720")
         self.root.minsize(800, 640)
 
-        self.root.configure(bg="#0b0f19")
+        self.root.configure(bg=COLOR_APP_BG)
+        apply_windows_titlebar_theme(self.root)
 
         # Thread-safe log queue
         self.log_queue = queue.Queue()
@@ -3531,6 +3640,7 @@ class PocketFleetControlApp:
             "detail_c": "Offline",
             "detail_a": "Triad: Initializing...",
         }
+        self._tray_status_color = None
         threading.Thread(target=self._background_status_loop, daemon=True).start()
 
         # Start drain log loop on main thread (low priority, 1s interval)
@@ -3548,21 +3658,27 @@ class PocketFleetControlApp:
 
     def _drain_log_queue(self) -> None:
         has_items = False
-        while not self.log_queue.empty():
+        drained = 0
+        while drained < 80 and not self.log_queue.empty():
             try:
                 msg = self.log_queue.get_nowait()
                 if not has_items:
                     self.log_text.config(state=tk.NORMAL)
                     has_items = True
                 self.log_text.insert(tk.END, msg)
+                drained += 1
             except Exception:
                 break
         if has_items:
+            line_count = int(self.log_text.index("end-1c").split(".", 1)[0])
+            if line_count > 1200:
+                self.log_text.delete("1.0", f"{line_count - 1000}.0")
             self.log_text.see(tk.END)
             self.log_text.config(state=tk.DISABLED)
 
         if not self.is_quitting:
-            self.root.after(1000, self._drain_log_queue)
+            delay_ms = 80 if not self.log_queue.empty() else 750
+            self.root.after(delay_ms, self._drain_log_queue)
 
     def _background_status_loop(self) -> None:
         """Background worker performing asynchronous socket/disk probes to prevent UI thread lag."""
@@ -3610,9 +3726,10 @@ class PocketFleetControlApp:
                 detail=cache.get("detail_a", "Triad: ..."),
             )
 
-            if self.tray_icon:
-                color = "green" if (is_d and is_c) else ("cyan" if (is_d or is_c) else "yellow")
+            color = "green" if (is_d and is_c) else ("cyan" if (is_d or is_c) else "yellow")
+            if self.tray_icon and color != self._tray_status_color:
                 self.tray_icon.icon = create_tray_image(color)
+                self._tray_status_color = color
         except Exception:
             pass
 
@@ -3620,14 +3737,14 @@ class PocketFleetControlApp:
             self.root.after(1000, self._refresh_status)
 
     def _build_header(self) -> None:
-        header = tk.Frame(self.root, bg="#0f172a", height=70)
+        header = tk.Frame(self.root, bg=COLOR_TITLE_BAR, height=70)
         header.pack(fill=tk.X)
 
         title_lbl = tk.Label(
             header,
             text="🚀 PocketFleet Control Panel (Solo Hacker Edition)",
-            fg="#38bdf8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_TEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_title,
         )
         title_lbl.pack(anchor="w", padx=18, pady=(12, 2))
@@ -3635,23 +3752,23 @@ class PocketFleetControlApp:
         sub_lbl = tk.Label(
             header,
             text="AI STARFLEET COMMUNICATION HUB | XAMPP-STYLE TRAY CONTROLLER | v0.2.0",
-            fg="#94a3b8",
-            bg="#0f172a",
+            fg=COLOR_TITLE_SUBTEXT,
+            bg=COLOR_TITLE_BAR,
             font=self.font_sub,
         )
         sub_lbl.pack(anchor="w", padx=18, pady=(0, 10))
 
     def _build_table(self) -> None:
-        table_card = tk.Frame(self.root, bg="#1e293b", bd=1, relief=tk.SOLID)
+        table_card = tk.Frame(self.root, bg=COLOR_SURFACE, bd=1, relief=tk.SOLID)
         table_card.pack(fill=tk.X, padx=16, pady=12)
 
-        header_row = tk.Frame(table_card, bg="#334155", height=28)
+        header_row = tk.Frame(table_card, bg=COLOR_CONTROL, height=28)
         header_row.pack(fill=tk.X)
-        tk.Label(header_row, text="Status", fg="#f1f5f9", bg="#334155", font=self.font_bold, width=8).pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Service Name", fg="#f1f5f9", bg="#334155", font=self.font_bold, width=24, anchor="w").pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Runtime / Port / PID Details", fg="#f1f5f9", bg="#334155", font=self.font_bold, width=32, anchor="w").pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Action", fg="#f1f5f9", bg="#334155", font=self.font_bold, width=12).pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Shortcut", fg="#f1f5f9", bg="#334155", font=self.font_bold, width=12).pack(side=tk.LEFT, padx=6)
+        tk.Label(header_row, text="Status", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=8).pack(side=tk.LEFT, padx=6)
+        tk.Label(header_row, text="Service Name", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=24, anchor="w").pack(side=tk.LEFT, padx=6)
+        tk.Label(header_row, text="Runtime / Port / PID Details", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=32, anchor="w").pack(side=tk.LEFT, padx=6)
+        tk.Label(header_row, text="Action", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=12).pack(side=tk.LEFT, padx=6)
+        tk.Label(header_row, text="Shortcut", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=12).pack(side=tk.LEFT, padx=6)
 
         # Row 1: Telegram Daemon
         self.row_daemon = self._create_service_row(
@@ -3687,29 +3804,29 @@ class PocketFleetControlApp:
     def _create_service_row(
         self, parent, name: str, on_start, on_stop, aux_text: str, aux_cmd, is_readonly: bool = False
     ) -> dict:
-        row = tk.Frame(parent, bg="#1e293b", height=42)
+        row = tk.Frame(parent, bg=COLOR_SURFACE, height=42)
         row.pack(fill=tk.X, pady=2)
 
-        canvas = tk.Canvas(row, width=24, height=24, bg="#1e293b", highlightthickness=0)
+        canvas = tk.Canvas(row, width=24, height=24, bg=COLOR_SURFACE, highlightthickness=0)
         canvas.pack(side=tk.LEFT, padx=12)
-        light = canvas.create_oval(4, 4, 20, 20, fill="#ef4444", outline="")
+        light = canvas.create_oval(4, 4, 20, 20, fill=COLOR_DANGER, outline="")
 
-        name_lbl = tk.Label(row, text=name, fg="#f8fafc", bg="#1e293b", font=self.font_bold, width=24, anchor="w")
+        name_lbl = tk.Label(row, text=name, fg=COLOR_TEXT, bg=COLOR_SURFACE, font=self.font_bold, width=24, anchor="w")
         name_lbl.pack(side=tk.LEFT, padx=6)
 
-        detail_lbl = tk.Label(row, text="Probing...", fg="#94a3b8", bg="#1e293b", font=self.font_mono, width=32, anchor="w")
+        detail_lbl = tk.Label(row, text="Probing...", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_mono, width=32, anchor="w")
         detail_lbl.pack(side=tk.LEFT, padx=6)
 
-        btn_frame = tk.Frame(row, bg="#1e293b", width=12)
+        btn_frame = tk.Frame(row, bg=COLOR_SURFACE, width=12)
         btn_frame.pack(side=tk.LEFT, padx=6)
 
         if not is_readonly:
             action_btn = tk.Button(
                 btn_frame,
                 text="Start",
-                bg="#10b981",
+                bg=COLOR_SUCCESS,
                 fg="#ffffff",
-                activebackground="#059669",
+                activebackground=COLOR_SUCCESS_HOVER,
                 activeforeground="#ffffff",
                 font=self.font_bold,
                 relief=tk.FLAT,
@@ -3718,16 +3835,16 @@ class PocketFleetControlApp:
             )
             action_btn.pack()
         else:
-            action_btn = tk.Label(btn_frame, text="Auto/Local", fg="#64748b", bg="#1e293b", font=self.font_regular, width=8)
+            action_btn = tk.Label(btn_frame, text="Auto/Local", fg=COLOR_TEXT_SOFT, bg=COLOR_SURFACE, font=self.font_regular, width=8)
             action_btn.pack()
 
         aux_btn = tk.Button(
             row,
             text=aux_text,
-            bg="#334155",
-            fg="#f8fafc",
-            activebackground="#475569",
-            activeforeground="#ffffff",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT,
+            activebackground=COLOR_CONTROL_HOVER,
+            activeforeground=COLOR_TEXT,
             font=self.font_regular,
             relief=tk.FLAT,
             width=11,
@@ -3747,26 +3864,26 @@ class PocketFleetControlApp:
         }
 
     def _build_three_seats_panel(self) -> None:
-        card = tk.Frame(self.root, bg="#1e293b", bd=1, relief=tk.SOLID)
+        card = tk.Frame(self.root, bg=COLOR_SURFACE, bd=1, relief=tk.SOLID)
         card.pack(fill=tk.X, padx=16, pady=(0, 10))
 
-        hdr = tk.Frame(card, bg="#1e293b", padx=12, pady=6)
+        hdr = tk.Frame(card, bg=COLOR_SURFACE, padx=12, pady=6)
         hdr.pack(fill=tk.X)
 
         tk.Label(
             hdr,
             text="👥 Fleet Triad Seats (三席位战队独立编排):",
-            fg="#38bdf8",
-            bg="#1e293b",
+            fg=COLOR_INFO,
+            bg=COLOR_SURFACE,
             font=self.font_bold,
         ).pack(side=tk.LEFT)
 
         btn_cfg = tk.Button(
             hdr,
             text="⚙️ 配置三席位 (Configure Seats)",
-            bg="#0284c7",
+            bg=COLOR_PRIMARY,
             fg="#ffffff",
-            activebackground="#0369a1",
+            activebackground=COLOR_PRIMARY_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -3778,7 +3895,7 @@ class PocketFleetControlApp:
         btn_cfg.pack(side=tk.RIGHT)
 
         # Container for the 3 seat cards
-        self.seats_container = tk.Frame(card, bg="#0f172a", padx=10, pady=8)
+        self.seats_container = tk.Frame(card, bg=COLOR_SURFACE_ALT, padx=10, pady=8)
         self.seats_container.pack(fill=tk.X, padx=8, pady=(0, 8))
         self.seats_container.columnconfigure(0, weight=1)
         self.seats_container.columnconfigure(1, weight=1)
@@ -3796,27 +3913,27 @@ class PocketFleetControlApp:
         bound_summary = f"{bound_id[:8]}...{bound_id[-4:]}" if bound_id else "未绑定"
 
         seat_roles = [
-            ("chat", "💬 人类交互席 (Chat)", "#38bdf8"),
-            ("lead", "🎖️ 规划席·CTO (Lead)", "#10b981"),
-            ("builder", "🛠️ 执行席·主力 (Builder)", "#f59e0b"),
+            ("chat", "💬 人类交互席 (Chat)", COLOR_INFO),
+            ("lead", "🎖️ 规划席·CTO (Lead)", COLOR_SUCCESS),
+            ("builder", "🛠️ 执行席·主力 (Builder)", COLOR_WARNING),
         ]
 
         # Dynamically append any extended code seats if configured
         for rk, s_cfg in seats_cfg.seats.items():
             if rk not in ("chat", "lead", "builder"):
-                seat_roles.append((rk, f"⚙️ 扩展席位 ({rk})", "#a855f7"))
+                seat_roles.append((rk, f"⚙️ 扩展席位 ({rk})", COLOR_TEXT_MUTED))
 
         for col, (role_key, role_label, accent_color) in enumerate(seat_roles):
             self.seats_container.columnconfigure(col, weight=1)
             seat = seats_cfg.seats.get(role_key)
-            card_sub = tk.Frame(self.seats_container, bg="#1e293b", bd=1, relief=tk.RIDGE, padx=10, pady=8)
+            card_sub = tk.Frame(self.seats_container, bg=COLOR_SURFACE, bd=1, relief=tk.RIDGE, padx=10, pady=8)
             card_sub.grid(row=0, column=col, sticky="nsew", padx=4)
 
             tk.Label(
                 card_sub,
                 text=role_label,
                 fg=accent_color,
-                bg="#1e293b",
+                bg=COLOR_SURFACE,
                 font=self.font_bold,
                 anchor="w",
             ).pack(fill=tk.X)
@@ -3831,8 +3948,8 @@ class PocketFleetControlApp:
             tk.Label(
                 card_sub,
                 text=f"代号: {name_text}",
-                fg="#f8fafc",
-                bg="#1e293b",
+                fg=COLOR_TEXT,
+                bg=COLOR_SURFACE,
                 font=self.font_bold,
                 anchor="w",
             ).pack(fill=tk.X, pady=(4, 0))
@@ -3840,8 +3957,8 @@ class PocketFleetControlApp:
             tk.Label(
                 card_sub,
                 text=f"引擎: {eng_text}",
-                fg="#38bdf8",
-                bg="#1e293b",
+                fg=COLOR_INFO,
+                bg=COLOR_SURFACE,
                 font=self.font_sub,
                 anchor="w",
             ).pack(fill=tk.X)
@@ -3850,19 +3967,19 @@ class PocketFleetControlApp:
                 tk.Label(
                     card_sub,
                     text="轨道: 🟢 已就绪" if bound_id else "轨道: ⚪ 待绑定",
-                    fg="#10b981" if bound_id else "#94a3b8",
-                    bg="#1e293b",
+                    fg=COLOR_SUCCESS if bound_id else COLOR_TEXT_MUTED,
+                    bg=COLOR_SURFACE,
                     font=self.font_sub,
                     anchor="w",
                 ).pack(fill=tk.X)
 
             tg_status_text = f"TG: 🟢 {user}" if (token_val and user) else "TG: 🔴 待配置"
-            tg_status_color = "#10b981" if (token_val and user) else "#ef4444"
+            tg_status_color = COLOR_SUCCESS if (token_val and user) else COLOR_DANGER
             tk.Label(
                 card_sub,
                 text=tg_status_text,
                 fg=tg_status_color,
-                bg="#1e293b",
+                bg=COLOR_SURFACE,
                 font=self.font_sub,
                 anchor="w",
             ).pack(fill=tk.X)
@@ -3871,8 +3988,8 @@ class PocketFleetControlApp:
                 tk.Label(
                     card_sub,
                     text=f"职责: {desc}",
-                    fg="#64748b",
-                    bg="#1e293b",
+                    fg=COLOR_TEXT_SOFT,
+                    bg=COLOR_SURFACE,
                     font=self.font_sub,
                     anchor="w",
                 ).pack(fill=tk.X, pady=(2, 0))
@@ -3893,15 +4010,15 @@ class PocketFleetControlApp:
 
     def _build_toolbar(self) -> None:
 
-        toolbar = tk.Frame(self.root, bg="#0b0f19")
+        toolbar = tk.Frame(self.root, bg=COLOR_APP_BG)
         toolbar.pack(fill=tk.X, padx=16, pady=4)
 
         btn_start_all = tk.Button(
             toolbar,
             text="🚀 Start All Services",
-            bg="#10b981",
+            bg=COLOR_SUCCESS,
             fg="#ffffff",
-            activebackground="#059669",
+            activebackground=COLOR_SUCCESS_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -3915,9 +4032,9 @@ class PocketFleetControlApp:
         btn_stop_all = tk.Button(
             toolbar,
             text="🛑 Stop All Services",
-            bg="#ef4444",
+            bg=COLOR_DANGER,
             fg="#ffffff",
-            activebackground="#dc2626",
+            activebackground=COLOR_DANGER_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -3931,9 +4048,9 @@ class PocketFleetControlApp:
         btn_tray = tk.Button(
             toolbar,
             text="⬇ Minimize to Tray",
-            bg="#38bdf8",
-            fg="#0f172a",
-            activebackground="#0284c7",
+            bg=COLOR_INFO,
+            fg=COLOR_SURFACE_ALT,
+            activebackground=COLOR_PRIMARY,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
@@ -3945,18 +4062,18 @@ class PocketFleetControlApp:
         btn_tray.pack(side=tk.RIGHT)
 
     def _build_log_console(self) -> None:
-        console_frame = tk.Frame(self.root, bg="#0b0f19")
+        console_frame = tk.Frame(self.root, bg=COLOR_APP_BG)
         console_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(8, 16))
 
-        hdr = tk.Frame(console_frame, bg="#1e293b", height=26)
+        hdr = tk.Frame(console_frame, bg=COLOR_SURFACE, height=26)
         hdr.pack(fill=tk.X)
-        tk.Label(hdr, text="Live Console Output & Bridge Activity", fg="#94a3b8", bg="#1e293b", font=self.font_bold).pack(side=tk.LEFT, padx=8)
+        tk.Label(hdr, text="Live Console Output & Bridge Activity", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_bold).pack(side=tk.LEFT, padx=8)
 
         btn_clear = tk.Button(
             hdr,
             text="Clear",
-            bg="#334155",
-            fg="#cbd5e1",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_SECONDARY,
             font=self.font_sub,
             relief=tk.FLAT,
             padx=6,
@@ -3966,10 +4083,10 @@ class PocketFleetControlApp:
 
         self.log_text = tk.Text(
             console_frame,
-            bg="#030712",
-            fg="#38bdf8",
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_INFO,
             font=self.font_mono,
-            insertbackground="#38bdf8",
+            insertbackground=COLOR_INFO,
             relief=tk.FLAT,
             bd=4,
             state=tk.DISABLED,
@@ -4061,24 +4178,28 @@ class PocketFleetControlApp:
         self.root.after(0, self.root.destroy)
 
     def _update_row(self, row: dict, is_running: bool, detail: str) -> None:
+        next_state = (is_running, detail)
+        if row.get("state") == next_state:
+            return
         row["detail"].config(text=detail)
-        fill_color = "#10b981" if is_running else "#ef4444"
+        fill_color = COLOR_SUCCESS if is_running else COLOR_DANGER
         row["canvas"].itemconfig(row["light"], fill=fill_color)
         if row.get("button") and row.get("on_start"):
             if is_running:
                 row["button"].config(
                     text="Stop",
-                    bg="#ef4444",
-                    activebackground="#dc2626",
+                    bg=COLOR_DANGER,
+                    activebackground=COLOR_DANGER_HOVER,
                     command=row["on_stop"],
                 )
             else:
                 row["button"].config(
                     text="Start",
-                    bg="#10b981",
-                    activebackground="#059669",
+                    bg=COLOR_SUCCESS,
+                    activebackground=COLOR_SUCCESS_HOVER,
                     command=row["on_start"],
                 )
+        row["state"] = next_state
 
 
 def main():

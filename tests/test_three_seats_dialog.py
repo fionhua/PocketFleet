@@ -12,7 +12,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pocketfleet.control_panel import FleetManager, ThreeSeatsConfigDialog, ROLE_PRESETS
+from pocketfleet.control_panel import (
+    COLOR_PRIMARY,
+    COLOR_SURFACE,
+    COLOR_SURFACE_ALT,
+    COLOR_TAB_IDLE,
+    FleetManager,
+    ThreeSeatsConfigDialog,
+    ROLE_PRESETS,
+)
 from pocketfleet.core import get_default_seats_config
 
 
@@ -173,6 +181,8 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(dialog.active_tab, "code")
             self.assertTrue(is_packed(dialog.tab_frame_code))
             self.assertFalse(is_packed(dialog.tab_frame_chat))
+            self.assertEqual(dialog.btn_tab_code.cget("bg"), COLOR_PRIMARY)
+            self.assertEqual(dialog.btn_tab_chat.cget("bg"), COLOR_TAB_IDLE)
 
             # 2. Test 5 code buttons on selected seat (lead)
             dialog._select_seat("lead")
@@ -198,6 +208,8 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(dialog.selected_role, "chat")
             self.assertFalse(is_packed(dialog.tab_frame_code))
             self.assertTrue(is_packed(dialog.tab_frame_chat))
+            self.assertEqual(dialog.btn_tab_code.cget("bg"), COLOR_TAB_IDLE)
+            self.assertEqual(dialog.btn_tab_chat.cget("bg"), COLOR_PRIMARY)
 
             # 5. Test 3 chat buttons
             dialog._apply_chat_engine("chatgpt")
@@ -336,14 +348,14 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(w_lead["engine"].get(), "antigravity")
             self.assertIn("🪐 Antigravity", btn_lead.cget("text"))
             self.assertIn("❌", btn_lead.cget("text"))
-            self.assertEqual(btn_lead.cget("bg"), "#0f172a")
+            self.assertEqual(btn_lead.cget("bg"), COLOR_SURFACE_ALT)
 
             # 2. Click lead's engine badge -> clears to unset
             dialog._on_engine_badge_click("lead")
             self.assertEqual(w_lead["engine"].get(), "")
             self.assertEqual(w_lead["cmd_var"].get(), "")
             self.assertIn("未设置", btn_lead.cget("text"))
-            self.assertEqual(btn_lead.cget("bg"), "#1e293b")
+            self.assertEqual(btn_lead.cget("bg"), COLOR_SURFACE)
 
             # 3. Attempting to save with unset engine prompts error and aborts
             with mock.patch("tkinter.messagebox.showerror") as mock_err:
@@ -357,7 +369,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(w_lead["engine"].get(), "codex")
             self.assertIn("⚡ OpenAI Codex", btn_lead.cget("text"))
             self.assertIn("❌", btn_lead.cget("text"))
-            self.assertEqual(btn_lead.cget("bg"), "#0f172a")
+            self.assertEqual(btn_lead.cget("bg"), COLOR_SURFACE_ALT)
             self.assertEqual(w_lead["cmd_var"].get(), "codex")
 
             # 5. Click top button 'aider' -> paints Aider badge
@@ -365,7 +377,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(w_lead["engine"].get(), "aider")
             self.assertIn("🛠️ Aider", btn_lead.cget("text"))
             self.assertIn("❌", btn_lead.cget("text"))
-            self.assertEqual(btn_lead.cget("bg"), "#0f172a")
+            self.assertEqual(btn_lead.cget("bg"), COLOR_SURFACE_ALT)
             self.assertEqual(w_lead["cmd_var"].get(), "aider")
 
             # 6. Click engine badge again -> clears to unset
@@ -386,7 +398,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             # 1. Prominent TG settings button exists with correct text and styling
             btn_tg = w_lead["btn_tg_config"]
             self.assertEqual(btn_tg.cget("text"), "✈️ TG设置")
-            self.assertEqual(btn_tg.cget("bg"), "#0284c7")
+            self.assertEqual(btn_tg.cget("bg"), COLOR_PRIMARY)
 
             # 2. Status label initially displays waiting/unconfigured if no env token
             lbl_status = w_lead["lbl_tg_status"]

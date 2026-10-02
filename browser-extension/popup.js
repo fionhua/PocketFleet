@@ -34,10 +34,26 @@ async function ensureContentBridge(tab) {
 }
 
 async function load() {
-  const stored = await chrome.storage.local.get({
+  let stored = await chrome.storage.local.get({
     endpoint: "http://127.0.0.1:18765",
     token: "",
   });
+  if (!stored.token) {
+    try {
+      const res = await fetch(chrome.runtime.getURL("seed_token.json"));
+      if (res.ok) {
+        const seed = await res.json();
+        if (seed?.token) {
+          stored.token = seed.token.trim();
+          if (seed.endpoint) stored.endpoint = seed.endpoint.trim();
+          await chrome.storage.local.set({
+            endpoint: stored.endpoint,
+            token: stored.token,
+          });
+        }
+      }
+    } catch {}
+  }
   endpoint.value = stored.endpoint;
   token.value = stored.token;
 }

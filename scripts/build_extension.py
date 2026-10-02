@@ -66,6 +66,7 @@ def build_extension() -> int:
         "popup.html",
         "popup.js",
         "adapter_profiles.js",
+        "seed_token.json",
     ]
     for fn in core_files:
         p = SRC_DIR / fn

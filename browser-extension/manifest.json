@@ -67,5 +67,11 @@
       "16": "icons/robot-16.png",
       "32": "icons/robot-32.png"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["seed_token.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

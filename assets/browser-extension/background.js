@@ -28,15 +28,28 @@ async function claimExclusiveDoubaoTab(tabId, track) {
 }
 
 async function settings() {
-  return chrome.storage.local.get({
+  let current = await chrome.storage.local.get({
     endpoint: DEFAULT_ENDPOINT,
     token: "",
-    thetaToken: "",
-    doubaoToken: "",
-    xingtuToken: "",
-    motinToken: "",
     autoRun: false,
   });
+  if (!current.token) {
+    try {
+      const res = await fetch(chrome.runtime.getURL("seed_token.json"));
+      if (res.ok) {
+        const seed = await res.json();
+        if (seed?.token) {
+          current.token = seed.token.trim();
+          if (seed.endpoint) current.endpoint = seed.endpoint.trim();
+          await chrome.storage.local.set({
+            endpoint: current.endpoint,
+            token: current.token,
+          });
+        }
+      }
+    } catch {}
+  }
+  return current;
 }
 
 async function bridgeFetch(path, options = {}, principal = "folded-host-chatgpt-web") {
