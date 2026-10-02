@@ -1482,7 +1482,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 command=self._verify_chat_ai_bridge,
             )
             btn_chat_check.pack(side=tk.LEFT, padx=(6, 0))
-            self._bind_btn_tooltip(btn_chat_check, "自动打开 AI 网页并自检本地 Web 桥接连通性")
+            self._bind_btn_tooltip(btn_chat_check, "只检查本地 Web 桥接连通性，不会自动打开网页")
 
         # Bot identity badge (auto-populated from getMe or seat config)
         lbl_bot_badge = tk.Label(
@@ -1930,32 +1930,15 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         messagebox.showinfo("浏览器扩展安装指引", msg, parent=self)
 
     def _verify_chat_ai_bridge(self):
-        """Perform end-to-end handshake verification for Chat AI bridge and auto-launch webpage (Item 3)."""
+        """Verify the Chat AI bridge without producing browser side effects."""
         w = self.widgets.get("chat")
         eng_raw = (w["engine"].get().strip().lower() if w else "") or "chatgpt"
         eng = eng_raw.upper()
 
-        # 1. Automatically refresh and seed the token to ensure the latest token is present
+        # Refresh the extension token before checking local bridge state.
         self._ensure_and_seed_extension_token()
 
-        # 2. Automatically launch webpage for the selected engine (merged per directive)
-        urls = {
-            "chatgpt": "https://chatgpt.com",
-            "gemini": "https://gemini.google.com",
-            "claude": "https://claude.ai",
-            "deepseek": "https://chat.deepseek.com",
-            "kimi": "https://kimi.moonshot.cn",
-            "qwen": "https://chat.qwen.ai",
-        }
-        url = urls.get(eng_raw, "https://chatgpt.com")
-        opened_web = False
-        try:
-            webbrowser.open(url)
-            opened_web = True
-        except Exception:
-            pass
-
-        # 3. Check ports and auto-start 18765 bridge daemon if not running
+        # Check ports and auto-start the local bridge daemon if needed.
         is_bridge_listening = is_port_listening(18765)
         if not is_bridge_listening:
             try:
@@ -1968,8 +1951,6 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 pass
 
         is_cockpit_listening = is_port_listening(8765)
-
-        web_notice = f"🌐 已在浏览器中打开 {eng} 对话页面！\n\n" if opened_web else ""
 
         if is_bridge_listening:
             active_info = ""
@@ -1991,7 +1972,6 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             if has_active_sessions:
                 status_title = "对话席位自检: 全链路就绪"
                 status_body = (
-                    f"{web_notice}"
                     f"✅ 本地网关与浏览器会话全链路连接成功 (Port 18765 已连接)！\n\n"
                     f"• 本地 Web 网关: Port 18765 运行中{active_info}\n"
                     f"• 鉴权令牌: 已自动植入扩展并握手验证\n"
@@ -2001,7 +1981,6 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             else:
                 status_title = "对话席位自检: 本地网关已就绪 (等待页面接入)"
                 status_body = (
-                    f"{web_notice}"
                     f"ℹ️ 本地网关运行正常 (Port 18765 已连接)。\n\n"
                     f"• 状态分层: 本机网关已就绪，当前正在等待浏览器扩展或 AI 对话页面接入；\n"
                     f"• 请确认：\n"
@@ -2014,7 +1993,6 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         elif is_cockpit_listening:
             messagebox.showinfo(
                 "Web Cockpit 就绪 (未检测到 18765 扩展网关)",
-                f"{web_notice}"
                 f"ℹ️ PocketFleet 本地 Cockpit (Port 8765) 运行正常。\n\n"
                 f"若对话席位需使用浏览器 Web 会话（如 ChatGPT/Gemini）：\n"
                 f"1. 请确认已点击【🧩 浏览器扩展】安装 Chrome 扩展；\n"
@@ -2025,7 +2003,6 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         else:
             messagebox.showwarning(
                 "本地服务尚未启动",
-                f"{web_notice}"
                 "⚠️ 本地网关服务尚未启动。\n\n"
                 "请在 PocketFleet 主控制面板中点击【🚀 Start All Services】启动服务，"
                 "启动后服务将自动就绪。",
@@ -2336,6 +2313,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
     def _load_values(self):
         cfg = self.mgr.load_seats_config()
+        self.current_cfg = cfg
         self._populate_fields(cfg)
 
     def _populate_fields(self, cfg: FleetSeatsConfig):
@@ -2394,7 +2372,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
             # Masked token and last 4 characters hint (never full plaintext echo)
-            env_val = (os.environ.get(seat.bot_token_env) or "").strip()
+            env_val = (seat.get_token() or os.environ.get(seat.bot_token_env) or "").strip()
             w["token"].delete(0, tk.END)
             if env_val:
                 masked = "••••••••" + (env_val[-4:] if len(env_val) >= 4 else env_val)
@@ -2571,26 +2549,20 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             cmd = w["cmd_var"].get().strip() or get_default_command_for_engine(engine)
             token_val = w["token"].get().strip()
 
-            # Plaintext token check (fail loud)
-            if ":" in env_var or " " in env_var:
-                messagebox.showerror(
-                    "安全违规 (Plain Token Detected)",
-                    f"【安全违规】席位 '{role_key}' 检测到明文 Token！\n\n"
-                    "配置层严禁写入任何明文 Token，只能填写环境变量名称（例如 TELEGRAM_BOT_JUDGE_TOKEN）。\n"
-                    "实际 Token 请写入本地 .env 文件。",
-                    parent=self,
-                )
-                w["env"].focus_set()
-                return
-
-            if not env_var:
-                messagebox.showerror("缺失配置", f"席位 '{role_key}' 必须指定环境变量名 (Token变量)！", parent=self)
-                return
-
+            # Token and ENV resolution: allow direct token or auto-fill env_var
             tok_dr = ""
             if "drawer_token_entry" in w:
                 tok_dr = w["drawer_token_entry"].get().strip()
             effective_tok = tok_dr or token_val
+
+            if ":" in env_var:
+                if not effective_tok:
+                    effective_tok = env_var
+                env_var = f"TELEGRAM_BOT_{role_key.upper()}_TOKEN"
+                w["env"].delete(0, tk.END)
+                w["env"].insert(0, env_var)
+            elif not env_var:
+                env_var = f"TELEGRAM_BOT_{role_key.upper()}_TOKEN"
 
             # Auto-resolve username if empty but token is provided
             if not user and effective_tok and not effective_tok.startswith("•"):
@@ -2604,15 +2576,20 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 messagebox.showerror("缺失配置", f"席位 '{role_key}' 必须指定 Bot 用户名！", parent=self)
                 return
 
-            # If user entered a fresh token (not the masked placeholder), safely write to .env
+            # Direct token persistence: store token into seat config, sync to process env, best-effort .env
+            seat_bot_token = ""
             if effective_tok and not effective_tok.startswith("•") and not effective_tok.endswith("••••"):
+                seat_bot_token = effective_tok
+                if env_var:
+                    os.environ[env_var] = effective_tok
                 try:
                     env_file = REPO_ROOT / ".env"
                     save_token_to_env(effective_tok, env_path=env_file, var_name=env_var)
-                    os.environ[env_var] = effective_tok
-                except Exception as e:
-                    messagebox.showerror("写入.env失败", f"无法写入 Token 到 .env: {e}", parent=self)
-                    return
+                except Exception:
+                    pass
+            else:
+                old_seat = self.current_cfg.seats.get(role_key) if getattr(self, "current_cfg", None) else None
+                seat_bot_token = old_seat.bot_token if old_seat else ""
 
             seat_cfg = SeatConfig(
                 role=role_key,
@@ -2623,6 +2600,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 description=desc,
                 command=cmd,
                 read_watermark=0,
+                bot_token=seat_bot_token,
             )
             seats_dict[role_key] = seat_cfg
 
@@ -3589,8 +3567,17 @@ class FleetManager:
     def _load_credentials(self) -> tuple[str | None, set[int] | None, str | None]:
         seats_cfg = self.load_seats_config()
         lead_seat = seats_cfg.seats.get("lead")
-        token_env = lead_seat.bot_token_env if lead_seat else "TELEGRAM_BOT_JUDGE_TOKEN"
-        tok = os.environ.get(token_env) or os.environ.get("POCKETFLEET_BOT_TOKEN")
+        tok = None
+        if lead_seat:
+            tok = lead_seat.get_token() or None
+        if not tok:
+            token_env = lead_seat.bot_token_env if lead_seat else "TELEGRAM_BOT_JUDGE_TOKEN"
+            tok = (
+                os.environ.get(token_env)
+                or os.environ.get("TELEGRAM_BOT_LEAD_TOKEN")
+                or os.environ.get("POCKETFLEET_BOT_TOKEN")
+                or None
+            )
 
         # Authoritative single source for whitelist: POCKETFLEET_AUTHORIZED_USER_IDS env var has highest priority
         env_auth_str = os.environ.get("POCKETFLEET_AUTHORIZED_USER_IDS")
@@ -3839,8 +3826,8 @@ class PocketFleetControlApp:
             name="1. Telegram Bridge Daemon",
             on_start=self._action_start_daemon,
             on_stop=lambda: threading.Thread(target=self.mgr.stop_daemon, daemon=True).start(),
-            aux_text="Configure Seats",
-            aux_cmd=self.open_three_seats_dialog,
+            aux_text="Open TG",
+            aux_cmd=self._action_open_tg,
         )
 
         # Row 2: Local Web Cockpit
@@ -3859,8 +3846,8 @@ class PocketFleetControlApp:
             name="3. Web Extension Bridge",
             on_start=lambda: threading.Thread(target=self.mgr.start_bridge, daemon=True).start(),
             on_stop=lambda: threading.Thread(target=self.mgr.stop_bridge, daemon=True).start(),
-            aux_text="Configure",
-            aux_cmd=self.open_three_seats_dialog,
+            aux_text="Install Ext",
+            aux_cmd=self._action_install_ext,
         )
 
         # Row 4: Coding Agent Target
@@ -4016,7 +4003,7 @@ class PocketFleetControlApp:
             token_env = seat.bot_token_env if seat else ""
             desc = seat.description if seat else ""
             user = seat.bot_username if seat else ""
-            token_val = (os.environ.get(token_env) or "").strip() if token_env else ""
+            token_val = (seat.get_token() or os.environ.get(token_env) or "").strip() if seat else ""
 
             tk.Label(
                 card_sub,
@@ -4180,13 +4167,57 @@ class PocketFleetControlApp:
         else:
             webbrowser.open("http://127.0.0.1:8765")
 
+    def _action_open_tg(self) -> None:
+        """Open Telegram Web or Bot in browser / desktop client."""
+        cfg = self.mgr.load_seats_config()
+        lead = cfg.seats.get("lead")
+        if lead and lead.bot_username:
+            uname = lead.bot_username.lstrip("@")
+            webbrowser.open(f"https://t.me/{uname}")
+        elif cfg.telegram_chat_id:
+            webbrowser.open("https://web.telegram.org/")
+        else:
+            webbrowser.open("https://web.telegram.org/")
+
+    def _action_install_ext(self) -> None:
+        """Locate extension directory, seed token, and guide browser installation."""
+        ext_dir = REPO_ROOT / "browser-extension"
+        if not ext_dir.is_dir():
+            ext_dir = REPO_ROOT / "assets" / "browser-extension"
+        if ext_dir.is_dir():
+            from pocketfleet.bridge_server import seed_extension_token
+            seed_extension_token(repo_root=REPO_ROOT, ext_path=ext_dir)
+            try:
+                os.startfile(str(ext_dir))
+            except Exception:
+                pass
+            messagebox.showinfo(
+                "浏览器扩展安装指引",
+                f"已为您自动打开浏览器扩展目录：\n{ext_dir}\n\n"
+                "【Chrome / Edge 安装两步法】：\n"
+                "1. 打开浏览器并访问 chrome://extensions 页面；\n"
+                "2. 打开右上角【开发者模式】，点击【加载已解压的扩展程序】，选择当前打开的文件夹即可！\n\n"
+                "（通信令牌已由 PocketFleet 自动配置就绪，无需手动复制）",
+                parent=self.root,
+            )
+
     def _action_start_daemon(self) -> None:
         def _task():
             ok = self.mgr.start_daemon()
             if not ok:
-                # Open wizard dialog smoothly on the main UI thread
-                self.root.after(0, self.open_setup_wizard)
+                self.root.after(0, self._on_daemon_start_failed)
         threading.Thread(target=_task, daemon=True).start()
+
+    def _on_daemon_start_failed(self) -> None:
+        token, _, _ = self.mgr._load_credentials()
+        if not token:
+            messagebox.showwarning(
+                "启动提示: 缺少 Bot Token",
+                "未能启动 Telegram Bridge Daemon：未检测到有效的 Telegram Bot Token。\n\n"
+                "已为您打开【配置三席位】，请在席位中填入您的 Bot Token 并点击保存后再启动！",
+                parent=self.root,
+            )
+        self.open_three_seats_dialog()
 
     def action_start_all(self) -> None:
         self.append_log("Starting all PocketFleet services...")

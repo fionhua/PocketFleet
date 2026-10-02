@@ -667,7 +667,13 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
         from pocketfleet.transport.telegram import BotVerificationResult
 
         with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
-             mock.patch.dict(os.environ, {"TELEGRAM_BOT_LEAD_TOKEN": ""}):
+             mock.patch.dict(
+                 os.environ,
+                 {
+                     "TELEGRAM_BOT_LEAD_TOKEN": "",
+                     "TELEGRAM_BOT_JUDGE_TOKEN": "",
+                 },
+             ):
             dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
             w_lead = dialog.widgets["lead"]
 
@@ -747,28 +753,21 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(name, "ENTJ指挥官")
 
     def test_chat_ai_open_webpage(self):
-        """Test Item 3: Auto-launch Chat AI webpage during bridge check."""
+        """Opening a Chat AI webpage requires an explicit user action."""
         with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
-             mock.patch("webbrowser.open") as mock_wb, \
-             mock.patch("tkinter.messagebox.showinfo"):
+             mock.patch("webbrowser.open") as mock_wb:
             dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
-            
-            # 1. Default or ChatGPT
+
             dialog.widgets["chat"]["engine"].set("chatgpt")
-            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=True):
-                dialog._verify_chat_ai_bridge()
+            dialog._open_chat_ai_webpage()
             mock_wb.assert_called_with("https://chatgpt.com")
-            
-            # 2. Switch to Gemini
+
             dialog.widgets["chat"]["engine"].set("gemini")
-            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=True):
-                dialog._verify_chat_ai_bridge()
+            dialog._open_chat_ai_webpage()
             mock_wb.assert_called_with("https://gemini.google.com")
 
-            # 3. Switch to DeepSeek
             dialog.widgets["chat"]["engine"].set("deepseek")
-            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=True):
-                dialog._verify_chat_ai_bridge()
+            dialog._open_chat_ai_webpage()
             mock_wb.assert_called_with("https://chat.deepseek.com")
 
             dialog.destroy()
@@ -801,6 +800,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
     def test_verify_chat_ai_bridge_states(self):
         """Test Item 3: Probe 18765 bridge port and handle Cockpit/Bridge status."""
         with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
+             mock.patch("webbrowser.open") as mock_wb, \
              mock.patch("tkinter.messagebox.showinfo") as mock_info, \
              mock.patch("tkinter.messagebox.showwarning") as mock_warn:
             dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
@@ -826,6 +826,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
                 dialog._verify_chat_ai_bridge()
                 mock_warn.assert_called()
 
+            mock_wb.assert_not_called()
             dialog.destroy()
 
     def test_chat_sentinel_persistence(self):

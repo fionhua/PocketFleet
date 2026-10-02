@@ -4,6 +4,7 @@ Zero external dependency dataclasses defining tasks, messages, and state machine
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -139,14 +140,23 @@ class SeatConfig:
     role: str
     name: str
     engine: str
-    bot_token_env: str
-    bot_username: str
-    description: str
+    bot_token_env: str = ""
+    bot_username: str = ""
+    description: str = ""
     command: str = ""
     read_watermark: int = 0
+    bot_token: str = ""
+
+    def get_token(self) -> str:
+        """Resolve the effective bot token, checking direct bot_token first, then environment variable."""
+        if self.bot_token:
+            return self.bot_token
+        if self.bot_token_env:
+            return (os.environ.get(self.bot_token_env) or "").strip()
+        return ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "role": self.role,
             "name": self.name,
             "engine": self.engine,
@@ -156,6 +166,9 @@ class SeatConfig:
             "command": self.command,
             "read_watermark": self.read_watermark,
         }
+        if self.bot_token:
+            d["bot_token"] = self.bot_token
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> SeatConfig:
@@ -170,6 +183,7 @@ class SeatConfig:
             description=str(data.get("description", "")).strip(),
             command=cmd,
             read_watermark=int(data.get("read_watermark", 0)),
+            bot_token=str(data.get("bot_token") or data.get("token") or "").strip(),
         )
 
 
@@ -299,9 +313,9 @@ def validate_seats_config(config: FleetSeatsConfig) -> None:
                     f"Invalid code engine '{seat.engine}' for seat '{role_name}'. Allowed: {', '.join(ALLOWED_CODE_ENGINES)}"
                 )
 
-        # Token ENV security validation: forbid plain-text tokens
-        token_env = seat.bot_token_env.strip()
-        if not token_env:
+        # Token ENV security validation: forbid plain-text tokens in bot_token_env
+        token_env = (seat.bot_token_env or "").strip()
+        if not token_env and not seat.bot_token:
             raise ValueError(f"Seat '{role_name}' must specify a bot_token_env.")
 
         if ":" in token_env or not _ENV_VAR_PATTERN.match(token_env):
