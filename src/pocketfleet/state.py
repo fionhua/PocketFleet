@@ -263,18 +263,20 @@ class StateStore:
 
     # --- Watermark Management ---
 
-    def get_watermark(self) -> Optional[int]:
+    def get_watermark(self, bot_id: Optional[str] = None) -> Optional[int]:
+        key = f"last_update_id_{bot_id}" if bot_id else "last_update_id"
         with self._get_connection() as conn:
-            cur = conn.execute("SELECT value FROM meta WHERE key = 'last_update_id'")
+            cur = conn.execute("SELECT value FROM meta WHERE key = ?", (key,))
             row = cur.fetchone()
             return int(row["value"]) if row else None
 
-    def set_watermark(self, update_id: int) -> None:
+    def set_watermark(self, update_id: int, bot_id: Optional[str] = None) -> None:
+        key = f"last_update_id_{bot_id}" if bot_id else "last_update_id"
         with self._get_connection() as conn:
             conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('last_update_id', ?) "
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (str(update_id),),
+                (key, str(update_id)),
             )
 
     def get_meta(self, key: str, default: str = "") -> str:

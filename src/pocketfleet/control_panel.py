@@ -3295,12 +3295,16 @@ class FleetManager:
                     try:
                         self.log(f"📨 [BRIDGE] Outbound from {sender}: {text[:60]}...")
                         chats = getattr(self.dispatch_loop, "allowed_chat_ids", None)
-                        if chats and hasattr(self.dispatch_loop, "transport"):
+                        if chats:
                             from pocketfleet.core import OutboundMessage
                             target_chat = list(chats)[0]
-                            self.dispatch_loop.transport.send_message(
-                                OutboundMessage(chat_id=target_chat, text=text)
+                            trans = (
+                                self.dispatch_loop.secondary_transports.get("chat")
+                                if getattr(self.dispatch_loop, "secondary_transports", None) and "chat" in self.dispatch_loop.secondary_transports
+                                else getattr(self.dispatch_loop, "transport", None)
                             )
+                            if trans:
+                                trans.send_message(OutboundMessage(chat_id=target_chat, text=text))
                     except Exception as ex:
                         self.log(f"[WARN] Failed to forward web bridge message: {ex}")
 

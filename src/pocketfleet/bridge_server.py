@@ -6,6 +6,8 @@ Enables instant handshake, zero-config token verification, and seamless bidirect
 """
 from __future__ import annotations
 
+import collections
+import hashlib
 import hmac
 import json
 import logging
@@ -13,9 +15,10 @@ import os
 import socket
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger("pocketfleet.bridge_server")
 
@@ -69,6 +72,59 @@ def seed_extension_token(repo_root: Optional[Path] = None, ext_path: Optional[Pa
     return token
 
 
+_CODEAI_LOCK = threading.Lock()
+_CODEAI_QUEUE: collections.deque[dict[str, Any]] = collections.deque()
+_CODEAI_IN_FLIGHT: dict[str, dict[str, Any]] = {}
+
+
+def enqueue_codeai_message(
+    content: str,
+    filename: str = "Telegram_collab.txt",
+    raw: bool = True,
+    channel: str = "duty-wake",
+    source: str = "telegram",
+    target: str = "chat",
+) -> str:
+    """Thread-safe enqueue a message for the browser extension to pull into ChatGPT Web."""
+    delivery_id = str(uuid.uuid4())
+    sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    item = {
+        "ok": True,
+        "pending": True,
+        "delivery_id": delivery_id,
+        "filename": filename,
+        "content": content,
+        "sha256": sha,
+        "raw": raw,
+        "channel": channel,
+        "source": source,
+        "target": target,
+        "enqueued_at": time.time(),
+    }
+    with _CODEAI_LOCK:
+        _CODEAI_QUEUE.append(item)
+    logger.info("Enqueued CodeAI message %s (length %d bytes)", delivery_id[:8], len(content))
+    return delivery_id
+
+
+def pop_codeai_message() -> Optional[dict[str, Any]]:
+    """Pop the next pending message and mark in-flight."""
+    with _CODEAI_LOCK:
+        if _CODEAI_QUEUE:
+            item = _CODEAI_QUEUE.popleft()
+            _CODEAI_IN_FLIGHT[item["delivery_id"]] = item
+            return item
+    return None
+
+
+def ack_codeai_message(delivery_id: Optional[str]) -> bool:
+    """Acknowledge receipt and finish lease for delivery_id."""
+    if not delivery_id:
+        return False
+    with _CODEAI_LOCK:
+        return _CODEAI_IN_FLIGHT.pop(delivery_id, None) is not None
+
+
 class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
     """HTTP request handler for PocketFleet browser extension bridge protocol."""
 
@@ -118,6 +174,20 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self._record_client_activity()
         path = self.path.split("?")[0]
+        if path in ("/api/v1/codeai/pull", "/api/v1/theta/pull"):
+            if not self._verify_auth():
+                self._send_json_response(401, {"error": "bearer token denied"})
+                return
+            if getattr(self.server, "kill_switch_active", False):
+                self._send_json_response(503, {"ok": False, "status": "PAUSED", "error": "Bridge execution paused"})
+                return
+            pending_item = pop_codeai_message()
+            if pending_item:
+                self._send_json_response(200, pending_item)
+            else:
+                self._send_json_response(200, {"ok": True, "pending": False, "status": "IDLE"})
+            return
+
         if path == "/api/v1/status":
             if not self._verify_auth():
                 self._send_json_response(401, {"error": "bearer token denied"})
@@ -132,9 +202,9 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
                     "capabilities": {
                         "telegram_post": True,
                         "control_switch": True,
-                        "codeai_pull": False,
-                        "codeai_post": False,
-                        "codeai_ack": False,
+                        "codeai_pull": True,
+                        "codeai_post": True,
+                        "codeai_ack": True,
                     },
                     "codeai_allowed_recipients": [
                         "@AiSoulJudgeBot",
@@ -180,6 +250,28 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
                 body = json.loads(body_bytes.decode("utf-8"))
             except Exception:
                 pass
+
+        if path in ("/api/v1/codeai/ack", "/api/v1/theta/ack"):
+            if not self._verify_auth():
+                self._send_json_response(401, {"error": "bearer token denied"})
+                return
+            delivery_id = body.get("delivery_id")
+            ack_codeai_message(delivery_id)
+            self._send_json_response(200, {"ok": True, "status": "ACKNOWLEDGED", "delivery_id": delivery_id})
+            return
+
+        if path in ("/api/v1/codeai/post", "/api/v1/theta/post"):
+            if not self._verify_auth():
+                self._send_json_response(401, {"error": "bearer token denied"})
+                return
+            on_post = getattr(self.server, "on_telegram_post", None)
+            if on_post and callable(on_post):
+                try:
+                    on_post(body)
+                except Exception as ex:
+                    logger.error("Error dispatching codeai post: %s", ex)
+            self._send_json_response(200, {"ok": True, "delivered": True})
+            return
 
         if path == "/api/v1/control/pause":
             if not self._verify_auth():

@@ -118,6 +118,23 @@ class DispatchLoop:
             authorized_user_ids=list(self.authorized_user_ids),
         )
 
+        # Multi-seat secondary transports for seats with dedicated bot tokens (e.g. chat seat / 结算主机)
+        self.secondary_transports: dict[str, Any] = {}
+        primary_tok = bot_token
+        if self.seats_config and getattr(self.seats_config, "seats", None):
+            for role_k, s_cfg in self.seats_config.seats.items():
+                s_tok = s_cfg.get_token() if hasattr(s_cfg, "get_token") else getattr(s_cfg, "bot_token", "")
+                if s_tok and s_tok != primary_tok and role_k not in self.secondary_transports:
+                    try:
+                        from .transport.telegram import TelegramTransport
+                        self.secondary_transports[role_k] = TelegramTransport(
+                            bot_token=s_tok,
+                            state_store=self.state_store,
+                        )
+                        logger.info("Initialized secondary Telegram transport for seat '%s' (%s)", role_k, s_cfg.bot_username or s_cfg.name)
+                    except Exception as trans_err:
+                        logger.warning("Could not initialize secondary transport for seat %s: %s", role_k, trans_err)
+
     def get_available_workers(self) -> List[WorkerType]:
         available = []
         for w_type, executor in self.executors.items():
@@ -320,7 +337,7 @@ class DispatchLoop:
         except Exception as e:
             logger.warning("Failed to persist telegram_chat_id to config file: %s", e)
 
-    def handle_message(self, msg: InboundMessage) -> Optional[Task]:
+    def handle_message(self, msg: InboundMessage, forced_seat: Optional[str] = None) -> Optional[Task]:
         # --- [IRON GATE 2: Role-based Gating] ---
         # Allow internal fleet bots for Bot-to-Bot collaboration; drop external unknown bots
         if msg.is_bot:
@@ -386,7 +403,9 @@ class DispatchLoop:
             except Exception:
                 pass
 
-        raw_text = msg.text.strip()
+        raw_text = (msg.text or "").strip()
+        if not raw_text:
+            return None
         # Detect bot mention before stripping to auto-route to designated seat
         import re
         mentioned_worker: WorkerType | None = None
@@ -408,8 +427,50 @@ class DispatchLoop:
 
         text = re.sub(r"@[a-zA-Z0-9_]+bot\b", "", raw_text, flags=re.IGNORECASE).strip()
         if not text:
-            return None
+            text = raw_text
 
+        # Route Chat AI seat (e.g. 结算主机 / ChatGPT Web via Port 18765 Web Bridge)
+        is_chat_seat = (forced_seat == "chat")
+        if not is_chat_seat and self.seats_config and getattr(self.seats_config, "seats", None):
+            chat_seat = self.seats_config.seats.get("chat")
+            if chat_seat:
+                c_uname = (chat_seat.bot_username or "").lower().strip()
+                if c_uname and match_bot and ("@" + match_bot.group(1).lower()) == c_uname:
+                    is_chat_seat = True
+                elif match_bot and ("@" + match_bot.group(1).lower()) == "@aisoulsettlementbot":
+                    is_chat_seat = True
+                elif not match_bot and (text.startswith("/chat") or raw_text.startswith("/chat")):
+                    is_chat_seat = True
+
+        if is_chat_seat:
+            if self.state_store.is_message_processed(msg.message_id, chat_id=msg.chat_id):
+                logger.info("Skipped already processed message ID %s in chat %s", msg.message_id, msg.chat_id)
+                return None
+
+            clean_prompt = text[5:].strip() if text.startswith("/chat") else text
+            if not clean_prompt:
+                clean_prompt = raw_text
+
+            from .bridge_server import enqueue_codeai_message
+            enqueue_codeai_message(
+                content=clean_prompt,
+                filename=f"Telegram_to_chat_{msg.message_id}.txt",
+                raw=True,
+                channel="duty-wake",
+                source=f"telegram:{msg.chat_id}:{msg.message_id}",
+                target="chat",
+            )
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, clean_prompt, "chatgpt_web")
+            logger.info("Enqueued message %s for Chat AI / 结算主机 to Web Bridge (Port 18765)", msg.message_id)
+
+            ack_text = f"⏳ [结算主机] 收到指令，已递交至 ChatGPT 网页端网桥处理...\n`{clean_prompt[:60]}...`"
+            reply_transport = (
+                self.secondary_transports.get("chat")
+                if (getattr(self, "secondary_transports", None) and "chat" in self.secondary_transports)
+                else self.transport
+            )
+            reply_transport.send_message(OutboundMessage(chat_id=msg.chat_id, text=ack_text, reply_to_message_id=msg.message_id))
+            return None
 
         # --- Instant Non-Blocking System Commands (P0-1 Fix) ---
         if text == "/status":
@@ -844,11 +905,11 @@ class DispatchLoop:
             logger.warning("Event report error: %s", rep_err)
 
         # 3. Poll incoming Telegram messages
+        messages = []
         try:
-            messages = self.transport.poll_messages(timeout_sec=5)
+            messages = self.transport.poll_messages(timeout_sec=3)
         except Exception as exc:
             logger.warning("Error during transport poll tick: %s", exc)
-            return 0
 
         count = 0
         for msg in messages:
@@ -858,6 +919,22 @@ class DispatchLoop:
                     count += 1
             except Exception as task_exc:
                 logger.error("Error handling message %s: %s", getattr(msg, "message_id", "unknown"), task_exc)
+
+        # 4. Poll secondary transports for other configured seats (e.g. chat seat / 结算主机)
+        if getattr(self, "secondary_transports", None):
+            for s_role, s_trans in self.secondary_transports.items():
+                try:
+                    s_msgs = s_trans.poll_messages(timeout_sec=1)
+                    for sm in s_msgs:
+                        try:
+                            task = self.handle_message(sm, forced_seat=s_role)
+                            if task:
+                                count += 1
+                        except Exception as s_task_exc:
+                            logger.error("Error handling secondary message %s on seat %s: %s", getattr(sm, "message_id", "unknown"), s_role, s_task_exc)
+                except Exception as s_exc:
+                    logger.debug("Secondary transport %s poll error: %s", s_role, s_exc)
+
         return count
 
     def run_forever(self, poll_interval: float = 1.0) -> None:

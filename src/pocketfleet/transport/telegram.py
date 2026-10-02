@@ -33,7 +33,8 @@ class TelegramTransport(BaseTransport):
         self.bot_token = bot_token.strip()
         self.api_url = f"{api_base_url}/bot{self.bot_token}"
         self.state_store = state_store
-        self.last_update_id: int | None = self.state_store.get_watermark() if self.state_store else None
+        self.bot_id = self.bot_token.split(":")[0] if ":" in self.bot_token else ""
+        self.last_update_id: int | None = self.state_store.get_watermark(bot_id=self.bot_id) if self.state_store else None
 
         # Token-based lock file (PF-03R7)
         import hashlib
@@ -95,8 +96,8 @@ class TelegramTransport(BaseTransport):
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code == 409:
-                logger.error("HTTP 409 Conflict: Bot Token is occupied by an external consumer!")
-                raise
+                logger.warning("HTTP 409 Conflict: Bot Token is occupied by an external consumer! Retrying later.")
+                return []
             logger.warning("Telegram poll HTTP error: %s", exc)
             return []
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -114,7 +115,7 @@ class TelegramTransport(BaseTransport):
             if upd_id is not None:
                 self.last_update_id = max(self.last_update_id or 0, upd_id)
                 if self.state_store:
-                    self.state_store.set_watermark(self.last_update_id)
+                    self.state_store.set_watermark(self.last_update_id, bot_id=self.bot_id)
 
             msg_obj = upd.get("message") or upd.get("channel_post")
             if not msg_obj:
