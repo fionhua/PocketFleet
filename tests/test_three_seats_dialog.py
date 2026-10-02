@@ -731,27 +731,40 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertEqual(name, "ENTJ指挥官")
 
     def test_chat_ai_open_webpage(self):
-        """Test Item 2: Open Chat AI webpage dynamically based on engine."""
+        """Test Item 3: Auto-launch Chat AI webpage during bridge check."""
         with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
              mock.patch("webbrowser.open") as mock_wb, \
-             mock.patch("pocketfleet.control_panel.show_floating_toast") as mock_toast:
+             mock.patch("tkinter.messagebox.showinfo"):
             dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
             
             # 1. Default or ChatGPT
             dialog.widgets["chat"]["engine"].set("chatgpt")
-            dialog._open_chat_ai_webpage()
+            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=True):
+                dialog._verify_chat_ai_bridge()
             mock_wb.assert_called_with("https://chatgpt.com")
             
             # 2. Switch to Gemini
             dialog.widgets["chat"]["engine"].set("gemini")
-            dialog._open_chat_ai_webpage()
+            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=True):
+                dialog._verify_chat_ai_bridge()
             mock_wb.assert_called_with("https://gemini.google.com")
 
             # 3. Switch to DeepSeek
             dialog.widgets["chat"]["engine"].set("deepseek")
-            dialog._open_chat_ai_webpage()
+            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=True):
+                dialog._verify_chat_ai_bridge()
             mock_wb.assert_called_with("https://chat.deepseek.com")
 
+            dialog.destroy()
+
+    def test_role_badge_is_label(self):
+        """Test Item 2: Seat role badges are tk.Label, not tk.Button."""
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file):
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+            for role_key in ("lead", "builder", "chat"):
+                badge = dialog.widgets[role_key]["role_badge"]
+                self.assertIsInstance(badge, tk.Label, f"Seat {role_key} role badge should be tk.Label")
+                self.assertNotIsInstance(badge, tk.Button)
             dialog.destroy()
 
     def test_browser_extension_guide(self):

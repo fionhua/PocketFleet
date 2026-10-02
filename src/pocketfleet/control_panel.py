@@ -80,7 +80,19 @@ load_env_file(REPO_ROOT / ".env")
 logger = logging.getLogger(__name__)
 
 
-def is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
+def get_ui_font_family() -> str:
+    """Return a clean default sans-serif font family, avoiding FangSong/KaiTi fallbacks."""
+    try:
+        available = tkfont.families()
+        for candidate in ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"):
+            if candidate in available:
+                return candidate
+    except Exception:
+        pass
+    return ""
+
+
+def is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.05) -> bool:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -845,9 +857,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
-        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
-        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        ui_fam = get_ui_font_family()
+        self.font_title = tkfont.Font(family=ui_fam, size=13, weight="bold")
+        self.font_sub = tkfont.Font(family=ui_fam, size=9)
+        self.font_bold = tkfont.Font(family=ui_fam, size=9, weight="bold")
         self.font_mono = tkfont.Font(family="Consolas", size=9)
 
         # Center on parent
@@ -1281,12 +1294,12 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         card_body.pack(fill=tk.BOTH, expand=True)
         card_body.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
+        card_right = tk.Frame(card_body, bg="#1e293b")
+        card_right.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+
         card_left = tk.Frame(card_body, bg="#1e293b")
         card_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         card_left.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
-
-        card_right = tk.Frame(card_body, bg="#1e293b")
-        card_right.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
 
         # Row 1: Engine, Track, and Bot Identity Badge (in card_left)
         r1 = tk.Frame(card_left, bg="#1e293b")
@@ -1334,29 +1347,11 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             command=self._open_antigravity_tracks,
         )
 
-        btn_open_web = None
         btn_ext_guide = None
         btn_chat_check = None
 
-        # Chat AI action buttons (Items 1, 2, 3)
+        # Chat AI action buttons (Items 1, 3 - merged with open web)
         if role_key == "chat":
-            btn_open_web = tk.Button(
-                r1,
-                text="🔗 打开AI网页",
-                bg="#334155",
-                fg="#f8fafc",
-                activebackground="#475569",
-                activeforeground="#ffffff",
-                font=self.font_sub,
-                relief=tk.FLAT,
-                padx=8,
-                pady=1,
-                cursor="hand2",
-                command=self._open_chat_ai_webpage,
-            )
-            btn_open_web.pack(side=tk.LEFT, padx=(6, 0))
-            self._bind_btn_tooltip(btn_open_web, "在浏览器中一键打开当前选中的 AI 对话网页")
-
             btn_ext_guide = tk.Button(
                 r1,
                 text="🧩 浏览器扩展",
@@ -1389,7 +1384,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 command=self._verify_chat_ai_bridge,
             )
             btn_chat_check.pack(side=tk.LEFT, padx=(6, 0))
-            self._bind_btn_tooltip(btn_chat_check, "自检本地 Web 桥接与浏览器会话连通性")
+            self._bind_btn_tooltip(btn_chat_check, "自动打开 AI 网页并自检本地 Web 桥接连通性")
 
         # Bot identity badge (auto-populated from getMe or seat config)
         lbl_bot_badge = tk.Label(
@@ -1423,21 +1418,18 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         lbl_role_tag.pack(side=tk.LEFT)
         lbl_role_tag.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
-        btn_role_badge = tk.Button(
+        lbl_role_badge = tk.Label(
             r3,
             text="【职能配置】",
             bg="#334155",
             fg="#f8fafc",
-            activebackground="#475569",
-            activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
             padx=12,
-            pady=2,
-            cursor="hand2",
-            command=lambda rk=role_key: self._select_seat(rk),
+            pady=3,
         )
-        btn_role_badge.pack(side=tk.LEFT, padx=(0, 8))
+        lbl_role_badge.pack(side=tk.LEFT, padx=(0, 8))
+        lbl_role_badge.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
 
         entry_custom = tk.Entry(
             r3,
@@ -1574,7 +1566,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             "engine": engine_adapter,
             "btn_engine": btn_engine,
             "btn_track": btn_track,
-            "btn_open_web": btn_open_web,
+            "btn_open_web": None,
             "btn_ext_guide": btn_ext_guide,
             "btn_chat_check": btn_chat_check,
             "btn_tg_config": btn_tg_config,
@@ -1585,7 +1577,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             "token": entry_token,
             "hint": lbl_hint,
             "user": entry_user,
-            "role_badge": btn_role_badge,
+            "role_badge": lbl_role_badge,
             "custom_entry": entry_custom,
             "cmd_var": cmd_var,
             "desc_var": desc_var,
@@ -1821,12 +1813,33 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         messagebox.showinfo("浏览器扩展安装指引", msg, parent=self)
 
     def _verify_chat_ai_bridge(self):
-        """Perform end-to-end handshake verification for Chat AI bridge and browser session (Item 3)."""
+        """Perform end-to-end handshake verification for Chat AI bridge and auto-launch webpage (Item 3)."""
+        w = self.widgets.get("chat")
+        eng_raw = (w["engine"].get().strip().lower() if w else "") or "chatgpt"
+        eng = eng_raw.upper()
+
+        # 1. Automatically launch webpage for the selected engine (merged per directive)
+        urls = {
+            "chatgpt": "https://chatgpt.com",
+            "gemini": "https://gemini.google.com",
+            "claude": "https://claude.ai",
+            "deepseek": "https://chat.deepseek.com",
+            "kimi": "https://kimi.moonshot.cn",
+            "qwen": "https://chat.qwen.ai",
+        }
+        url = urls.get(eng_raw, "https://chatgpt.com")
+        opened_web = False
+        try:
+            webbrowser.open(url)
+            opened_web = True
+        except Exception:
+            pass
+
+        # 2. Check ports
         is_bridge_listening = is_port_listening(18765)
         is_cockpit_listening = is_port_listening(8765)
 
-        w = self.widgets.get("chat")
-        eng = (w["engine"].get().strip().upper() if w else "") or "CHAT AI"
+        web_notice = f"🌐 已在浏览器中打开 {eng} 对话页面！\n\n" if opened_web else ""
 
         if is_bridge_listening:
             active_info = ""
@@ -1845,6 +1858,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
             messagebox.showinfo(
                 "对话席位自检通过",
+                f"{web_notice}"
                 f"✅ 本地 Web 桥接网关正常运行 (Port 18765 已连接)！\n\n"
                 f"• 桥接通信通道正常；{active_info}\n"
                 f"• 当前席位引擎: {eng}\n"
@@ -1854,16 +1868,18 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         elif is_cockpit_listening:
             messagebox.showinfo(
                 "Web Cockpit 就绪 (未检测到 18765 扩展网关)",
+                f"{web_notice}"
                 f"ℹ️ PocketFleet 本地 Cockpit (Port 8765) 运行正常。\n\n"
                 f"若对话席位需使用浏览器 Web 会话（如 ChatGPT/Gemini）：\n"
                 f"1. 请确认已点击【🧩 浏览器扩展】安装 Chrome 扩展；\n"
-                f"2. 请点击【🔗 打开AI网页】在浏览器中打开并登录会话；\n"
+                f"2. 请在已打开的 {eng} 页面中保持登录；\n"
                 f"3. 扩展将自动与本地服务建立连接。",
                 parent=self,
             )
         else:
             messagebox.showwarning(
                 "本地服务尚未启动",
+                f"{web_notice}"
                 "⚠️ 本地网关服务尚未启动。\n\n"
                 "请在 PocketFleet 主控制面板中点击【🚀 Start All Services】启动服务，"
                 "启动后服务将自动就绪。",
@@ -2632,9 +2648,10 @@ class AntigravityTracksDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        self.font_title = tkfont.Font(family="Segoe UI", size=13, weight="bold")
-        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
-        self.font_bold = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        ui_fam = get_ui_font_family()
+        self.font_title = tkfont.Font(family=ui_fam, size=13, weight="bold")
+        self.font_sub = tkfont.Font(family=ui_fam, size=9)
+        self.font_bold = tkfont.Font(family=ui_fam, size=9, weight="bold")
         self.font_mono = tkfont.Font(family="Consolas", size=9)
 
         # Center on parent
@@ -3423,10 +3440,11 @@ class PocketFleetControlApp:
         self.log_queue = queue.Queue()
 
         # Fonts
-        self.font_title = tkfont.Font(family="Segoe UI", size=15, weight="bold")
-        self.font_sub = tkfont.Font(family="Segoe UI", size=9)
-        self.font_bold = tkfont.Font(family="Segoe UI", size=10, weight="bold")
-        self.font_regular = tkfont.Font(family="Segoe UI", size=9)
+        ui_fam = get_ui_font_family()
+        self.font_title = tkfont.Font(family=ui_fam, size=15, weight="bold")
+        self.font_sub = tkfont.Font(family=ui_fam, size=9)
+        self.font_bold = tkfont.Font(family=ui_fam, size=10, weight="bold")
+        self.font_regular = tkfont.Font(family=ui_fam, size=9)
         self.font_mono = tkfont.Font(family="Consolas", size=9)
 
         # Logic
@@ -3457,10 +3475,20 @@ class PocketFleetControlApp:
 
         self.append_log("🚀 PocketFleet Control Panel initialized. Ready to command.")
 
-        # Start drain log loop on main thread
-        self.root.after(100, self._drain_log_queue)
+        # Cached probe status for zero-latency UI responsiveness (fixes drag lag)
+        self._status_cache = {
+            "is_d": False,
+            "is_c": False,
+            "detail_d": "Stopped",
+            "detail_c": "Offline",
+            "detail_a": "Triad: Initializing...",
+        }
+        threading.Thread(target=self._background_status_loop, daemon=True).start()
 
-        # Start periodic status refresh on main thread
+        # Start drain log loop on main thread (throttled to 250ms)
+        self.root.after(250, self._drain_log_queue)
+
+        # Start periodic status refresh on main thread (reads from cache only)
         self.root.after(500, self._refresh_status)
 
         # Auto-start Web Cockpit after mainloop starts (zero-poll, web UI only)
@@ -3471,47 +3499,68 @@ class PocketFleetControlApp:
         self.log_queue.put(f"[{ts}] {text}\n")
 
     def _drain_log_queue(self) -> None:
+        has_items = False
         while not self.log_queue.empty():
             try:
                 msg = self.log_queue.get_nowait()
-                self.log_text.config(state=tk.NORMAL)
+                if not has_items:
+                    self.log_text.config(state=tk.NORMAL)
+                    has_items = True
                 self.log_text.insert(tk.END, msg)
-                self.log_text.see(tk.END)
-                self.log_text.config(state=tk.DISABLED)
             except Exception:
                 break
+        if has_items:
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+
         if not self.is_quitting:
-            self.root.after(100, self._drain_log_queue)
+            self.root.after(250, self._drain_log_queue)
+
+    def _background_status_loop(self) -> None:
+        """Background worker performing asynchronous socket/disk probes to prevent UI thread lag."""
+        while not self.is_quitting:
+            try:
+                is_d = self.mgr.is_daemon_running()
+                is_c = self.mgr.is_cockpit_running()
+                seats_cfg = self.mgr.load_seats_config()
+                lead_s = seats_cfg.seats.get("lead")
+                builder_s = seats_cfg.seats.get("builder")
+                chat_s = seats_cfg.seats.get("chat")
+                l_info = f"{lead_s.name} ({lead_s.engine})" if lead_s else "Lead"
+                b_info = f"{builder_s.name} ({builder_s.engine})" if builder_s else "Builder"
+                c_info = f"{chat_s.name} ({chat_s.engine})" if chat_s else "Chat"
+                self._status_cache = {
+                    "is_d": is_d,
+                    "is_c": is_c,
+                    "detail_d": "Active (Polling Telegram)" if is_d else "Stopped",
+                    "detail_c": "Listening on http://127.0.0.1:8765" if is_c else "Offline",
+                    "detail_a": f"Triad: {l_info} ↔ {b_info} ↔ {c_info}",
+                }
+            except Exception:
+                pass
+            time.sleep(1.5)
 
     def _refresh_status(self) -> None:
+        """Ultra-fast UI update reading purely from memory cache without blocking sockets/disk."""
         try:
-            is_d = self.mgr.is_daemon_running()
+            cache = getattr(self, "_status_cache", None) or {}
+            is_d = cache.get("is_d", False)
+            is_c = cache.get("is_c", False)
             self._update_row(
                 self.row_daemon,
                 is_running=is_d,
-                detail="Active (Polling Telegram)" if is_d else "Stopped",
+                detail=cache.get("detail_d", "Stopped"),
             )
-
-            is_c = self.mgr.is_cockpit_running()
             self._update_row(
                 self.row_cockpit,
                 is_running=is_c,
-                detail="Listening on http://127.0.0.1:8765" if is_c else "Offline",
+                detail=cache.get("detail_c", "Offline"),
             )
-
-            seats_cfg = self.mgr.load_seats_config()
-            lead_s = seats_cfg.seats.get("lead")
-            builder_s = seats_cfg.seats.get("builder")
-            chat_s = seats_cfg.seats.get("chat")
-            l_info = f"{lead_s.name} ({lead_s.engine})" if lead_s else "Lead"
-            b_info = f"{builder_s.name} ({builder_s.engine})" if builder_s else "Builder"
-            c_info = f"{chat_s.name} ({chat_s.engine})" if chat_s else "Chat"
             self._update_row(
                 self.row_agent,
                 is_running=True,
-                detail=f"Triad: {l_info} ↔ {b_info} ↔ {c_info}",
+                detail=cache.get("detail_a", "Triad: ..."),
             )
-
 
             if self.tray_icon:
                 color = "green" if (is_d and is_c) else ("cyan" if (is_d or is_c) else "yellow")
