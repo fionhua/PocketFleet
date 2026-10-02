@@ -198,9 +198,10 @@ class FleetSeatsConfig:
     sync_context_window: bool = True
     chat_sentinel_enabled: bool = False
     chat_sentinel_interval: int = 15
+    antigravity_conversation_id: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "context_window": self.context_window,
             "no_situ": self.no_situ,
             "authorized_user_ids": self.authorized_user_ids,
@@ -211,6 +212,9 @@ class FleetSeatsConfig:
             "chat_sentinel_interval": self.chat_sentinel_interval,
             "seats": {role: seat.to_dict() for role, seat in self.seats.items()},
         }
+        if self.antigravity_conversation_id:
+            d["antigravity_conversation_id"] = self.antigravity_conversation_id
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> FleetSeatsConfig:
@@ -231,6 +235,7 @@ class FleetSeatsConfig:
         if not isinstance(uids, list):
             uids = []
         uids_clean = [int(u) for u in uids if str(u).lstrip("-").isdigit()]
+        cid = str(data.get("antigravity_conversation_id") or data.get("conversation_id") or "").strip()
 
         config = cls(
             seats=seats,
@@ -242,6 +247,7 @@ class FleetSeatsConfig:
             sync_context_window=bool(data.get("sync_context_window", True)),
             chat_sentinel_enabled=bool(data.get("chat_sentinel_enabled", False)),
             chat_sentinel_interval=int(data.get("chat_sentinel_interval", 15)),
+            antigravity_conversation_id=cid,
         )
         validate_seats_config(config)
         return config

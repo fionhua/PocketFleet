@@ -871,11 +871,22 @@ class AntigravityTrackController:
 
         return dossier_path, notified
 
-    def get_current_bound_id(self) -> str | None:
-        """Get currently configured Antigravity conversation ID from env or .env file."""
+    def get_current_bound_id(self, auto_fallback: bool = True) -> str | None:
+        """Get currently configured Antigravity conversation ID from env, .env file, pocketfleet.json, or auto-detect."""
         val = os.environ.get("POCKETFLEET_ANTIGRAVITY_CONVERSATION_ID")
         if val and is_valid_uuid(val):
             return val.lower().strip()
+
+        cfg_file = self.workspace_cwd / "pocketfleet.json"
+        if cfg_file.is_file():
+            try:
+                data = json.loads(cfg_file.read_text(encoding="utf-8"))
+                cid = data.get("antigravity_conversation_id") or data.get("conversation_id")
+                if cid and is_valid_uuid(str(cid)):
+                    return str(cid).lower().strip()
+            except Exception:
+                pass
+
         if self.env_path.is_file():
             try:
                 for line in self.env_path.read_text(encoding="utf-8-sig").splitlines():
@@ -886,6 +897,25 @@ class AntigravityTrackController:
                             return part.lower().strip()
             except Exception:
                 pass
+
+        if auto_fallback:
+            try:
+                candidates = self.scan_tracks()
+                if candidates:
+                    latest = candidates[0].conversation_id
+                    if is_valid_uuid(latest):
+                        os.environ["POCKETFLEET_ANTIGRAVITY_CONVERSATION_ID"] = latest.lower().strip()
+                        if cfg_file.is_file():
+                            try:
+                                d = json.loads(cfg_file.read_text(encoding="utf-8"))
+                                d["antigravity_conversation_id"] = latest.lower().strip()
+                                cfg_file.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+                            except Exception:
+                                pass
+                        return latest.lower().strip()
+            except Exception:
+                pass
+
         return None
 
     def scan_tracks(

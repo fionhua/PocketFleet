@@ -3423,6 +3423,7 @@ class FleetManager:
         load_env_file(REPO_ROOT / ".env", override=True)
 
         cfg = self.load_fleet_config()
+        seats_cfg = self.load_seats_config()
         roles = cfg.get("role_assignment", {"lead": "antigravity", "builder": "codex"})
         token, allowed_ids, configured_executor = self._load_credentials()
 
@@ -4217,7 +4218,13 @@ class PocketFleetControlApp:
                 "已为您打开【配置三席位】，请在席位中填入您的 Bot Token 并点击保存后再启动！",
                 parent=self.root,
             )
-        self.open_three_seats_dialog()
+            self.open_three_seats_dialog()
+        else:
+            messagebox.showerror(
+                "启动失败",
+                "未能启动 Telegram Bridge Daemon，请查看下方日志控制台获取详细报错信息。",
+                parent=self.root,
+            )
 
     def action_start_all(self) -> None:
         self.append_log("Starting all PocketFleet services...")
