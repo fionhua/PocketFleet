@@ -12,6 +12,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Callable, Optional
@@ -23,7 +24,7 @@ DEFAULT_HOST = "127.0.0.1"
 
 
 def get_active_bridge_token() -> str:
-    """Read or generate active bridge token."""
+    """SSOT: Read or generate active bridge token from canonical local appdata path."""
     import secrets
 
     runtime_root = Path(os.environ.get("LOCALAPPDATA", "")) / "FoldedHostLocalBridge"
@@ -45,6 +46,29 @@ def get_active_bridge_token() -> str:
     return new_tok
 
 
+def seed_extension_token(repo_root: Optional[Path] = None, ext_path: Optional[Path] = None) -> str:
+    """SSOT: Seed active bridge token into all known extension directories."""
+    token = get_active_bridge_token()
+    payload = json.dumps({"endpoint": f"http://{DEFAULT_HOST}:{DEFAULT_PORT}", "token": token}, indent=2)
+
+    dirs_to_seed = []
+    if repo_root:
+        dirs_to_seed.extend([
+            repo_root / "browser-extension",
+            repo_root / "assets" / "browser-extension",
+        ])
+    if ext_path and ext_path not in dirs_to_seed:
+        dirs_to_seed.append(ext_path)
+
+    for d in dirs_to_seed:
+        if d and d.is_dir():
+            try:
+                (d / "seed_token.json").write_text(payload, encoding="utf-8")
+            except Exception:
+                pass
+    return token
+
+
 class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
     """HTTP request handler for PocketFleet browser extension bridge protocol."""
 
@@ -53,6 +77,11 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:
         # Suppress noisy default stdlib logging to stderr
         logger.debug("%s - - [%s] %s", self.address_string(), self.log_date_time_string(), format % args)
+
+    def _record_client_activity(self) -> None:
+        principal = self.headers.get("X-Folded-Host-Principal", "").strip()
+        if principal and hasattr(self.server, "active_clients"):
+            self.server.active_clients[principal] = time.time()
 
     def _send_cors_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -87,6 +116,7 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        self._record_client_activity()
         path = self.path.split("?")[0]
         if path == "/api/v1/status":
             if not self._verify_auth():
@@ -100,9 +130,11 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
                     "principal": "PocketFleet-Local-Bridge",
                     "kill_switch_active": kill_switch,
                     "capabilities": {
-                        "codeai_pull": True,
-                        "codeai_post": True,
-                        "codeai_ack": True,
+                        "telegram_post": True,
+                        "control_switch": True,
+                        "codeai_pull": False,
+                        "codeai_post": False,
+                        "codeai_ack": False,
                     },
                     "codeai_allowed_recipients": [
                         "@AiSoulJudgeBot",
@@ -116,12 +148,17 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/v1/sessions":
+            active_map = getattr(self.server, "active_clients", {})
+            now = time.time()
+            active_list = [p for p, ts in active_map.items() if (now - ts) < 90]
             self._send_json_response(
                 200,
                 {
                     "ok": True,
-                    "sessions": ["chatgpt", "claude", "gemini", "deepseek"],
-                    "active_sessions": ["chatgpt", "claude", "gemini"],
+                    "active_clients": active_list,
+                    "sessions": active_list,
+                    "count": len(active_list),
+                    "last_seen_ts": max(active_map.values()) if active_map else None,
                 },
             )
             return
@@ -133,6 +170,7 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
         self._send_json_response(404, {"error": f"Not found: {path}"})
 
     def do_POST(self) -> None:
+        self._record_client_activity()
         path = self.path.split("?")[0]
         content_len = int(self.headers.get("Content-Length", 0))
         body_bytes = self.rfile.read(content_len) if content_len > 0 else b""
@@ -193,6 +231,7 @@ class PocketFleetBridgeServer:
         self.port = port
         self.token = token or get_active_bridge_token()
         self.on_telegram_post = on_telegram_post
+        self.active_clients: dict[str, float] = {}
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -216,6 +255,7 @@ class PocketFleetBridgeServer:
             setattr(self._server, "expected_token", self.token)
             setattr(self._server, "kill_switch_active", False)
             setattr(self._server, "on_telegram_post", self.on_telegram_post)
+            setattr(self._server, "active_clients", self.active_clients)
             self._running = True
 
             def _serve():

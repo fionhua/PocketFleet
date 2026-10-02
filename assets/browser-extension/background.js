@@ -52,7 +52,7 @@ async function settings() {
   return current;
 }
 
-async function bridgeFetch(path, options = {}, principal = "folded-host-chatgpt-web") {
+async function bridgeFetch(path, options = {}, principal = "folded-host-chatgpt-web", isRetry = false) {
   const current = await settings();
   const activeToken = (current.token || "").trim();
   if (!activeToken) {
@@ -68,6 +68,22 @@ async function bridgeFetch(path, options = {}, principal = "folded-host-chatgpt-
       ...(options.headers || {}),
     },
   });
+
+  if (response.status === 401 && !isRetry) {
+    // 自动自愈：当遭遇 401 令牌失配时，主动重读 seed_token.json 并热重试一次
+    try {
+      const res = await fetch(chrome.runtime.getURL("seed_token.json"), { cache: "no-store" });
+      if (res.ok) {
+        const seed = await res.json();
+        const freshToken = seed?.token?.trim();
+        if (freshToken && freshToken !== activeToken) {
+          await chrome.storage.local.set({ token: freshToken });
+          return bridgeFetch(path, options, principal, true);
+        }
+      }
+    } catch {}
+  }
+
   const body = await response.json().catch(() => ({ error: "invalid JSON response" }));
   if (!response.ok) {
     throw new Error(body.error || `Bridge returned HTTP ${response.status}`);

@@ -246,14 +246,10 @@ async function refreshStatus() {
   try {
     const current = await send({ type: "bridge-status" });
     killSwitchActive = current.kill_switch_active;
-    const hasCodeAiCaps = current.capabilities?.codeai_pull && current.capabilities?.codeai_post && current.capabilities?.codeai_ack;
-
     if (current.kill_switch_active) {
       setConnection("控制链在线，工具执行已暂停", "warning");
-    } else if (hasCodeAiCaps) {
-      setConnection("控制链在线，工具可以执行", "connected");
     } else {
-      setConnection("控制链在线，工具可以执行 | VERSION_MISMATCH / RESTART_REQUIRED", "warning");
+      setConnection("控制链在线，协同网桥已就绪", "connected");
     }
   } catch (error) {
     killSwitchActive = null;

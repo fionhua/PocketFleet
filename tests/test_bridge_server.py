@@ -52,13 +52,25 @@ class TestPocketFleetBridgeServer(unittest.TestCase):
             self.assertIn("@AiSoulJudgeBot", data.get("codeai_allowed_recipients", []))
 
     def test_sessions_list(self) -> None:
+        url_status = f"http://127.0.0.1:{self.port}/api/v1/status"
+        req_status = urllib.request.Request(
+            url_status,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "X-Folded-Host-Principal": "folded-host-chatgpt-web",
+            },
+        )
+        with urllib.request.urlopen(req_status) as resp:
+            self.assertEqual(resp.status, 200)
+
         url = f"http://127.0.0.1:{self.port}/api/v1/sessions"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data.get("ok"))
-            self.assertIn("chatgpt", data.get("sessions", []))
+            self.assertIn("folded-host-chatgpt-web", data.get("active_clients", []))
+            self.assertIn("folded-host-chatgpt-web", data.get("sessions", []))
 
     def test_control_pause_and_resume(self) -> None:
         # 1. Pause

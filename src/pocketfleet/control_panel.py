@@ -1869,41 +1869,9 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             messagebox.showerror("打开网页失败", f"无法打开浏览器: {e}", parent=self)
 
     def _ensure_and_seed_extension_token(self, ext_path: Path | None = None) -> str:
-        """Ensure a valid 18765 bridge bearer token exists and seed seed_token.json into the extension directory."""
-        import secrets
-        import json
-        runtime_root = Path(os.environ.get("LOCALAPPDATA", "")) / "FoldedHostLocalBridge"
-        token_file = runtime_root / "bridge.token"
-        token_str = ""
-        if token_file.is_file():
-            try:
-                tok = token_file.read_text(encoding="utf-8").strip()
-                if len(tok) >= 32:
-                    token_str = tok
-            except Exception:
-                pass
-
-        if not token_str:
-            runtime_root.mkdir(parents=True, exist_ok=True)
-            token_str = secrets.token_urlsafe(32)
-            try:
-                token_file.write_text(token_str, encoding="utf-8")
-            except Exception:
-                pass
-
-        payload = json.dumps({"endpoint": "http://127.0.0.1:18765", "token": token_str}, indent=2)
-        target_dirs = [REPO_ROOT / "browser-extension", REPO_ROOT / "assets" / "browser-extension"]
-        if ext_path and ext_path not in target_dirs:
-            target_dirs.append(ext_path)
-
-        for d in target_dirs:
-            if d and d.is_dir():
-                try:
-                    (d / "seed_token.json").write_text(payload, encoding="utf-8")
-                except Exception:
-                    pass
-
-        return token_str
+        """Ensure a valid 18765 bridge bearer token exists and seed seed_token.json using unified SSOT helper."""
+        from pocketfleet.bridge_server import seed_extension_token
+        return seed_extension_token(repo_root=REPO_ROOT, ext_path=ext_path)
 
     def _open_browser_extension_guide(self):
         """Locate and open the browser extension directory and guide the user through installation (Item 1)."""
@@ -2005,6 +1973,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
         if is_bridge_listening:
             active_info = ""
+            has_active_sessions = False
             try:
                 import urllib.request
                 import json
@@ -2012,22 +1981,36 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 with urllib.request.urlopen(req, timeout=1.5) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
-                        sessions = data.get("sessions") or data.get("active_sessions") or []
+                        sessions = data.get("active_clients") or data.get("sessions") or []
                         if sessions:
+                            has_active_sessions = True
                             active_info = f"\n• 检测到活跃会话: {', '.join(str(s) for s in sessions)}"
             except Exception:
                 pass
 
-            messagebox.showinfo(
-                "对话席位自检通过",
-                f"{web_notice}"
-                f"✅ 本地 Web 桥接网关正常运行 (Port 18765 已连接)！\n\n"
-                f"• 桥接通信通道正常（已自动激活后台守护网关）；{active_info}\n"
-                f"• 鉴权令牌已自动植入浏览器扩展，无需手动填写；\n"
-                f"• 当前席位引擎: {eng}\n"
-                f"• 您可在 TG 战队群中 @Bot 发送测试消息验证端到端回传。",
-                parent=self,
-            )
+            if has_active_sessions:
+                status_title = "对话席位自检: 全链路就绪"
+                status_body = (
+                    f"{web_notice}"
+                    f"✅ 本地网关与浏览器会话全链路连接成功 (Port 18765 已连接)！\n\n"
+                    f"• 本地 Web 网关: Port 18765 运行中{active_info}\n"
+                    f"• 鉴权令牌: 已自动植入扩展并握手验证\n"
+                    f"• 当前席位引擎: {eng}\n"
+                    f"• 您可在 TG 战队群中 @Bot 发送测试消息验证端到端回传。"
+                )
+            else:
+                status_title = "对话席位自检: 本地网关已就绪 (等待页面接入)"
+                status_body = (
+                    f"{web_notice}"
+                    f"ℹ️ 本地网关运行正常 (Port 18765 已连接)。\n\n"
+                    f"• 状态分层: 本机网关已就绪，当前正在等待浏览器扩展或 AI 对话页面接入；\n"
+                    f"• 请确认：\n"
+                    f"  1. 已在 Chrome / Edge 中安装加载扩展；\n"
+                    f"  2. 已打开的 {eng} 对话页面处于登录状态；\n"
+                    f"• 扩展将在检测到 AI 页面后自动建立通信链路，无需手动配置！"
+                )
+
+            messagebox.showinfo(status_title, status_body, parent=self)
         elif is_cockpit_listening:
             messagebox.showinfo(
                 "Web Cockpit 就绪 (未检测到 18765 扩展网关)",
