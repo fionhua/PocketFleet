@@ -685,7 +685,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
 
             memo_text = dialog.txt_memo.get("1.0", tk.END).strip()
             self.assertIn("[来自TG多AI协作];[人类用户:ENTJ指挥官];参与者:", memo_text)
-            self.assertIn("回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}", memo_text)
+            self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", memo_text)
             self.assertIn("裁决者", memo_text)
             self.assertIn("泥蛇", memo_text)
 

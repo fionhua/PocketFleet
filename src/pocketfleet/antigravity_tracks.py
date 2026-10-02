@@ -124,8 +124,8 @@ def clean_dialogue_snippet(text: str, max_chars: int = 100) -> str:
     if not text:
         return ""
     # Extract inner user request if wrapped in envelope
-    if "回复格式要求:以[Telegram]" in text:
-        sub = text.split("回复格式要求:以[Telegram]", 1)[1]
+    if "回复格式要求:以" in text:
+        sub = text.split("回复格式要求:以", 1)[1]
         lines = sub.strip().split("\n", 1)
         text = lines[1] if len(lines) > 1 else text
     elif "【指挥官外勤任务正文】" in text:

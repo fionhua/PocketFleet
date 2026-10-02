@@ -221,7 +221,7 @@ class DispatchLoop:
 
         return (
             f"[来自TG多AI协作];[人类用户:{human}];参与者:[{p_str}]\n"
-            "回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}\n\n"
+            "回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。\n\n"
             f"{prompt}"
         )
 

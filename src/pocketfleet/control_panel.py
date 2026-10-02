@@ -2110,7 +2110,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
         p_str = ";".join(participants)
         memo_line1 = f"[来自TG多AI协作];[人类用户:{human}];参与者:[{p_str}]"
-        memo_line2 = "回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}"
+        memo_line2 = "回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。"
         memo_content = f"{memo_line1}\n{memo_line2}"
 
         if hasattr(self, "txt_memo"):

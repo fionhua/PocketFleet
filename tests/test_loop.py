@@ -302,7 +302,7 @@ class TestDispatchLoop(unittest.TestCase):
             chat_title="AI星舰战队·战役室",
         )
         self.assertIn("[来自TG多AI协作];[人类用户:指挥官];参与者:[裁决者;泥蛇]", env)
-        self.assertIn("回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}", env)
+        self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", env)
         self.assertIn("帮我构建网关", env)
 
     def test_mention_routing_to_designated_worker(self) -> None:
@@ -344,7 +344,7 @@ class TestDispatchLoop(unittest.TestCase):
         self.assertEqual(task.raw_prompt, "帮我写单元测试")
         self.assertEqual(task.display_prompt, "帮我写单元测试")
         self.assertIn("[来自TG多AI协作];[人类用户:Commander];参与者:[裁决者;泥蛇]", task.prompt)
-        self.assertIn("回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}", task.prompt)
+        self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", task.prompt)
         self.assertIn("帮我写单元测试", task.prompt)
 
 
