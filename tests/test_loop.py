@@ -301,7 +301,7 @@ class TestDispatchLoop(unittest.TestCase):
             sender_id=777,
             chat_title="AI星舰战队·战役室",
         )
-        self.assertIn("[来自TG多AI协作];[人类用户:指挥官];参与者:[裁决者;泥蛇]", env)
+        self.assertIn("[来自TG多AI协作];[人类用户:指挥官];参与者:[@AiSoulJudgeBot;@AiSoulMudSnakeBot]", env)
         self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", env)
         self.assertIn("帮我构建网关", env)
 
@@ -343,9 +343,56 @@ class TestDispatchLoop(unittest.TestCase):
         self.assertEqual(task.worker, WorkerType.CODEX)
         self.assertEqual(task.raw_prompt, "帮我写单元测试")
         self.assertEqual(task.display_prompt, "帮我写单元测试")
-        self.assertIn("[来自TG多AI协作];[人类用户:Commander];参与者:[裁决者;泥蛇]", task.prompt)
+        self.assertIn("[来自TG多AI协作];[人类用户:Commander];参与者:[@AiSoulJudgeBot;@AiSoulMudSnakeBot]", task.prompt)
         self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", task.prompt)
         self.assertIn("帮我写单元测试", task.prompt)
+
+    def test_fleet_bot_to_bot_message_allowed(self) -> None:
+        from pocketfleet.core import FleetSeatsConfig, SeatConfig
+        self.loop.seats_config = FleetSeatsConfig(
+            seats={
+                "lead": SeatConfig(
+                    role="lead",
+                    name="裁决者",
+                    engine="antigravity",
+                    bot_token_env="TOKEN_A",
+                    bot_username="@AiSoulJudgeBot",
+                    description="规划席",
+                ),
+                "builder": SeatConfig(
+                    role="builder",
+                    name="泥蛇",
+                    engine="codex",
+                    bot_token_env="TOKEN_B",
+                    bot_username="@AiSoulMudSnakeBot",
+                    description="执行席",
+                ),
+            }
+        )
+        # Message from internal fleet bot @AiSoulJudgeBot to @AiSoulMudSnakeBot
+        bot_msg = InboundMessage(
+            message_id=2001,
+            chat_id=111,
+            sender_id=999,
+            sender_name="AiSoulJudgeBot",
+            text="@AiSoulMudSnakeBot [Telegram][mailto:@AiSoulMudSnakeBot] 请开工",
+            is_bot=True,
+        )
+        task = self.loop.handle_message(bot_msg)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.worker, WorkerType.CODEX)
+
+        # Message from external unknown bot is dropped
+        ext_bot_msg = InboundMessage(
+            message_id=2002,
+            chat_id=111,
+            sender_id=888,
+            sender_name="UnknownSpamBot",
+            text="@AiSoulMudSnakeBot spam",
+            is_bot=True,
+        )
+        ext_task = self.loop.handle_message(ext_bot_msg)
+        self.assertIsNone(ext_task)
 
 
 if __name__ == "__main__":

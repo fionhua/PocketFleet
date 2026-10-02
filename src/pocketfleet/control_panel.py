@@ -934,10 +934,14 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
         self.btn_tab_chat.pack(side=tk.LEFT)
 
+        # Dedicated container for tab pages so tab switching stays isolated above memo_frame
+        self.tab_container = tk.Frame(content, bg="#0b0f19")
+        self.tab_container.pack(fill=tk.BOTH, expand=True)
+
         # ======================================================================
         # Tab 1: 代码 AI (Code AI)
         # ======================================================================
-        self.tab_frame_code = tk.Frame(content, bg="#0b0f19")
+        self.tab_frame_code = tk.Frame(self.tab_container, bg="#0b0f19")
 
         # Top Engine Quick Bar (Row of 5 mainstream overseas Code AIs)
         engine_bar_code = tk.Frame(self.tab_frame_code, bg="#1e293b", padx=12, pady=8)
@@ -991,7 +995,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         # ======================================================================
         # Tab 2: 对话 AI (Chat AI)
         # ======================================================================
-        self.tab_frame_chat = tk.Frame(content, bg="#0b0f19")
+        self.tab_frame_chat = tk.Frame(self.tab_container, bg="#0b0f19")
 
         # Top Engine Quick Bar (Row of mainstream Chat AIs)
         engine_bar_chat = tk.Frame(self.tab_frame_chat, bg="#1e293b", padx=12, pady=8)
@@ -1057,36 +1061,16 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         memo_top_row = tk.Frame(self.memo_frame, bg="#0f172a")
         memo_top_row.pack(fill=tk.X, pady=(0, 6))
 
-        tk.Label(
+        self.human_name = "ENTJ指挥官"
+
+        self.lbl_human_display = tk.Label(
             memo_top_row,
-            text="👤 人类用户昵称:",
-            fg="#cbd5e1",
+            text=f"👤 关联人类: {self.human_name} (从TG群自动获取)",
+            fg="#38bdf8",
             bg="#0f172a",
             font=self.font_bold,
-        ).pack(side=tk.LEFT)
-
-        self.entry_human_name = tk.Entry(
-            memo_top_row,
-            bg="#1e293b",
-            fg="#f8fafc",
-            font=self.font_mono,
-            width=16,
-            relief=tk.FLAT,
-            bd=4,
-            insertbackground="#ffffff",
         )
-        self.entry_human_name.insert(0, "ENTJ指挥官")
-        self.entry_human_name.pack(side=tk.LEFT, padx=(6, 8))
-        self.entry_human_name.bind("<KeyRelease>", lambda e: self._refresh_memo())
-
-        self.lbl_human_sync_status = tk.Label(
-            memo_top_row,
-            text="🔄 自动关联 TG 群",
-            fg="#10b981",
-            bg="#0f172a",
-            font=self.font_sub,
-        )
-        self.lbl_human_sync_status.pack(side=tk.LEFT, padx=(0, 10))
+        self.lbl_human_display.pack(side=tk.LEFT)
 
         self.btn_copy_memo = tk.Button(
             memo_top_row,
@@ -2092,7 +2076,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
 
     def _refresh_memo(self):
-        human = self.entry_human_name.get().strip() if hasattr(self, "entry_human_name") else "ENTJ指挥官"
+        human = getattr(self, "human_name", "ENTJ指挥官")
         if not human:
             human = "人类用户"
 
@@ -2101,12 +2085,19 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             w = self.widgets.get(r_key)
             if not w:
                 continue
-            name = w["name"].get().strip()
-            if name and name not in participants:
-                participants.append(name)
+            bot_tag = w["user"].get().strip() if "user" in w else ""
+            if bot_tag:
+                if not bot_tag.startswith("@"):
+                    bot_tag = "@" + bot_tag
+                if bot_tag not in participants:
+                    participants.append(bot_tag)
+            else:
+                name = w["name"].get().strip()
+                if name and name not in participants:
+                    participants.append(name)
 
         if not participants:
-            participants = ["裁决者", "泥蛇", "地球Sandbox"]
+            participants = ["@AiSoulJudgeBot", "@AiSoulMudSnakeBot", "@AiSoulAlphaSandboxBot"]
 
         p_str = ";".join(participants)
         memo_line1 = f"[来自TG多AI协作];[人类用户:{human}];参与者:[{p_str}]"
@@ -2166,11 +2157,10 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             threading.Thread(target=_fetch, daemon=True).start()
 
     def _apply_detected_human_name(self, name: str, source_label: str = ""):
-        if hasattr(self, "entry_human_name") and name:
-            self.entry_human_name.delete(0, tk.END)
-            self.entry_human_name.insert(0, name)
-            if hasattr(self, "lbl_human_sync_status") and source_label:
-                self.lbl_human_sync_status.configure(text=f"✅ {source_label}: {name}")
+        if name:
+            self.human_name = name.strip()
+            if hasattr(self, "lbl_human_display"):
+                self.lbl_human_display.configure(text=f"👤 关联人类: {self.human_name} (从TG群自动获取)")
             self._refresh_memo()
 
     def _reset_defaults(self):

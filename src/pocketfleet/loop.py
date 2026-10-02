@@ -211,11 +211,18 @@ class DispatchLoop:
         if self.seats_config and getattr(self.seats_config, "seats", None):
             for r_key in ["lead", "builder", "chat"]:
                 seat = self.seats_config.seats.get(r_key)
-                if seat and seat.name and seat.name not in participants:
-                    participants.append(seat.name)
+                if seat:
+                    bot_u = (seat.bot_username or "").strip()
+                    if bot_u:
+                        if not bot_u.startswith("@"):
+                            bot_u = "@" + bot_u
+                        if bot_u not in participants:
+                            participants.append(bot_u)
+                    elif seat.name and seat.name not in participants:
+                        participants.append(seat.name)
 
         if not participants:
-            participants = ["裁决者", "泥蛇", "地球Sandbox"]
+            participants = ["@AiSoulJudgeBot", "@AiSoulMudSnakeBot", "@AiSoulAlphaSandboxBot"]
 
         p_str = ";".join(participants)
 
@@ -315,10 +322,22 @@ class DispatchLoop:
 
     def handle_message(self, msg: InboundMessage) -> Optional[Task]:
         # --- [IRON GATE 2: Role-based Gating] ---
-        # Never process messages originating from bots
+        # Allow internal fleet bots for Bot-to-Bot collaboration; drop external unknown bots
         if msg.is_bot:
-            logger.debug("Ignored bot message ID %s from %s", msg.message_id, msg.sender_name)
-            return None
+            allow_bot = False
+            fleet_bot_handles = set()
+            if self.seats_config and getattr(self.seats_config, "seats", None):
+                for s in self.seats_config.seats.values():
+                    if s.bot_username:
+                        fleet_bot_handles.add(s.bot_username.lower().lstrip("@"))
+
+            s_name = (msg.sender_name or "").lower().lstrip("@")
+            if s_name in fleet_bot_handles:
+                allow_bot = True
+
+            if not allow_bot:
+                logger.debug("Ignored external bot message ID %s from %s", msg.message_id, msg.sender_name)
+                return None
 
         # --- [IRON GATE 2.5: TelegramUpdateBroker Onboarding & Ephemeral Binding] ---
         if hasattr(self, "broker"):

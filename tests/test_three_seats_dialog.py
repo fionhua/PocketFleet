@@ -678,30 +678,27 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
         with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file):
             dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
             
-            # Initial human entry
-            dialog.entry_human_name.delete(0, tk.END)
-            dialog.entry_human_name.insert(0, "ENTJ指挥官")
-            dialog._refresh_memo()
+            # Initial human state
+            dialog._apply_detected_human_name("ENTJ指挥官")
 
             memo_text = dialog.txt_memo.get("1.0", tk.END).strip()
             self.assertIn("[来自TG多AI协作];[人类用户:ENTJ指挥官];参与者:", memo_text)
             self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", memo_text)
-            self.assertIn("裁决者", memo_text)
-            self.assertIn("泥蛇", memo_text)
+            self.assertIn("@AiSoulJudgeBot", memo_text)
+            self.assertIn("@AiSoulMudSnakeBot", memo_text)
 
-            # Test changing human name updates memo
-            dialog.entry_human_name.delete(0, tk.END)
-            dialog.entry_human_name.insert(0, "泥蛇结算闭环者")
-            dialog._refresh_memo()
+            # Test detected human name update
+            dialog._apply_detected_human_name("泥蛇结算闭环者")
             updated_text = dialog.txt_memo.get("1.0", tk.END).strip()
             self.assertIn("[人类用户:泥蛇结算闭环者]", updated_text)
+            self.assertIn("泥蛇结算闭环者", dialog.lbl_human_display.cget("text"))
 
-            # Test changing seat nickname updates memo
-            dialog.widgets["lead"]["name"].delete(0, tk.END)
-            dialog.widgets["lead"]["name"].insert(0, "裁决者🌈")
+            # Test changing seat bot username updates memo
+            dialog.widgets["lead"]["user"].delete(0, tk.END)
+            dialog.widgets["lead"]["user"].insert(0, "@NewJudgeBot")
             dialog._refresh_memo()
             updated_ai_text = dialog.txt_memo.get("1.0", tk.END).strip()
-            self.assertIn("裁决者🌈", updated_ai_text)
+            self.assertIn("@NewJudgeBot", updated_ai_text)
 
             dialog.destroy()
 
