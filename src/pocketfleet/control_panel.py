@@ -1039,6 +1039,66 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             engine_choices=list(ALLOWED_CHAT_ENGINES),
         )
 
+        # Chat AI Sentinel & Scheduled Inspection Row (Item 4)
+        self.sentinel_enabled_var = tk.BooleanVar(value=False)
+        self.sentinel_interval_var = tk.StringVar(value="15")
+
+        sentinel_frame = tk.LabelFrame(
+            self.tab_frame_chat,
+            text=" 🛡️ 战队巡检哨兵配置 (Inspector Sentinel) ",
+            bg="#0f172a",
+            fg="#38bdf8",
+            font=self.font_bold,
+            padx=12,
+            pady=8,
+            relief=tk.GROOVE,
+            bd=1,
+        )
+        sentinel_frame.pack(fill=tk.X, pady=(10, 0))
+
+        s_row = tk.Frame(sentinel_frame, bg="#0f172a")
+        s_row.pack(fill=tk.X)
+
+        self.chk_sentinel = tk.Checkbutton(
+            s_row,
+            text="启用战队定时巡检哨兵",
+            variable=self.sentinel_enabled_var,
+            fg="#f8fafc",
+            bg="#0f172a",
+            selectcolor="#1e293b",
+            activebackground="#0f172a",
+            activeforeground="#38bdf8",
+            font=self.font_bold,
+        )
+        self.chk_sentinel.pack(side=tk.LEFT)
+
+        tk.Label(s_row, text="每隔", fg="#cbd5e1", bg="#0f172a", font=self.font_bold).pack(side=tk.LEFT, padx=(12, 4))
+
+        self.spn_sentinel_interval = tk.Spinbox(
+            s_row,
+            from_=1,
+            to=120,
+            textvariable=self.sentinel_interval_var,
+            width=4,
+            bg="#1e293b",
+            fg="#f8fafc",
+            font=self.font_mono,
+            relief=tk.FLAT,
+            bd=2,
+            insertbackground="#ffffff",
+        )
+        self.spn_sentinel_interval.pack(side=tk.LEFT)
+
+        tk.Label(s_row, text="分钟向对话席位发起一次任务看板巡检与催办请求", fg="#cbd5e1", bg="#0f172a", font=self.font_bold).pack(side=tk.LEFT, padx=(4, 0))
+
+        tk.Label(
+            sentinel_frame,
+            text="💡 开启后，系统将定时向对话 AI 注入外勤任务看板；若有停滞未办结任务，由对话 AI 负责 [mailto:@Bot] 催办。",
+            fg="#94a3b8",
+            bg="#0f172a",
+            font=self.font_sub,
+        ).pack(anchor="w", pady=(6, 0))
+
         # Initially pack code tab
         self.tab_frame_code.pack(fill=tk.BOTH, expand=True)
 
@@ -1274,12 +1334,49 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             command=self._open_antigravity_tracks,
         )
 
-        # Chat AI verification & launch button
+        btn_open_web = None
+        btn_ext_guide = None
         btn_chat_check = None
+
+        # Chat AI action buttons (Items 1, 2, 3)
         if role_key == "chat":
+            btn_open_web = tk.Button(
+                r1,
+                text="🔗 打开AI网页",
+                bg="#334155",
+                fg="#f8fafc",
+                activebackground="#475569",
+                activeforeground="#ffffff",
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=8,
+                pady=1,
+                cursor="hand2",
+                command=self._open_chat_ai_webpage,
+            )
+            btn_open_web.pack(side=tk.LEFT, padx=(6, 0))
+            self._bind_btn_tooltip(btn_open_web, "在浏览器中一键打开当前选中的 AI 对话网页")
+
+            btn_ext_guide = tk.Button(
+                r1,
+                text="🧩 浏览器扩展",
+                bg="#334155",
+                fg="#f8fafc",
+                activebackground="#475569",
+                activeforeground="#ffffff",
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=8,
+                pady=1,
+                cursor="hand2",
+                command=self._open_browser_extension_guide,
+            )
+            btn_ext_guide.pack(side=tk.LEFT, padx=(6, 0))
+            self._bind_btn_tooltip(btn_ext_guide, "打开浏览器扩展目录并弹出 Chrome 加载安装向导")
+
             btn_chat_check = tk.Button(
                 r1,
-                text="🌐 启动/自检",
+                text="🌐 桥接自检",
                 bg="#0284c7",
                 fg="#ffffff",
                 activebackground="#0369a1",
@@ -1291,7 +1388,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 cursor="hand2",
                 command=self._verify_chat_ai_bridge,
             )
-            btn_chat_check.pack(side=tk.LEFT, padx=(8, 0))
+            btn_chat_check.pack(side=tk.LEFT, padx=(6, 0))
+            self._bind_btn_tooltip(btn_chat_check, "自检本地 Web 桥接与浏览器会话连通性")
 
         # Bot identity badge (auto-populated from getMe or seat config)
         lbl_bot_badge = tk.Label(
@@ -1476,6 +1574,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             "engine": engine_adapter,
             "btn_engine": btn_engine,
             "btn_track": btn_track,
+            "btn_open_web": btn_open_web,
+            "btn_ext_guide": btn_ext_guide,
             "btn_chat_check": btn_chat_check,
             "btn_tg_config": btn_tg_config,
             "btn_tg_capsule": btn_tg_config,
@@ -1654,22 +1754,119 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         else:
             self.entry_cw.config(state="disabled", bg="#0f172a", fg="#64748b")
 
+    def _open_chat_ai_webpage(self):
+        """Open the webpage for the currently selected Chat AI engine (Item 2)."""
+        w = self.widgets.get("chat")
+        eng = (w["engine"].get().strip().lower() if w else "") or "chatgpt"
+        urls = {
+            "chatgpt": "https://chatgpt.com",
+            "gemini": "https://gemini.google.com",
+            "claude": "https://claude.ai",
+            "deepseek": "https://chat.deepseek.com",
+            "kimi": "https://kimi.moonshot.cn",
+            "qwen": "https://chat.qwen.ai",
+        }
+        url = urls.get(eng, "https://chatgpt.com")
+        try:
+            webbrowser.open(url)
+            show_floating_toast(
+                parent=self,
+                title="已打开 AI 网页",
+                message=f"🌐 已在浏览器中打开 {eng.upper()} 对话页面，请确保处于登录状态！",
+                duration_ms=2200,
+            )
+        except Exception as e:
+            messagebox.showerror("打开网页失败", f"无法打开浏览器: {e}", parent=self)
+
+    def _open_browser_extension_guide(self):
+        """Locate and open the browser extension directory and guide the user through installation (Item 1)."""
+        candidates = [
+            REPO_ROOT / "assets" / "browser-extension",
+            REPO_ROOT / "browser-extension",
+            Path(__file__).resolve().parent.parent.parent / "assets" / "browser-extension",
+            Path("D:/workSpace/ChatAi-Local-Bridge/browser-extension"),
+        ]
+        ext_path = None
+        for c in candidates:
+            if c.is_dir() and (c / "manifest.json").is_file():
+                ext_path = c.resolve()
+                break
+
+        if not ext_path:
+            ext_path = (REPO_ROOT / "assets" / "browser-extension").resolve()
+            ext_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(str(ext_path))
+        except Exception:
+            pass
+
+        try:
+            os.startfile(str(ext_path))
+        except Exception:
+            pass
+
+        msg = (
+            "【🧩 PocketFleet 浏览器扩展安装向导】\n\n"
+            f"已为您在文件资源管理器中打开扩展所在目录（路径已自动复制到剪贴板）：\n"
+            f"👉 {ext_path}\n\n"
+            "请按以下 4 步在 Chrome / Edge 中完成加载：\n"
+            "1. 打开 Chrome 浏览器，在地址栏输入：chrome://extensions\n"
+            "2. 开启右上角【开发者模式】(Developer Mode) 开关；\n"
+            "3. 点击左上角【加载已解压的扩展程序】(Load unpacked)；\n"
+            "4. 选择已打开的文件夹即可完成安装！\n\n"
+            "安装完成后，点击扩展图标即可确认状态。"
+        )
+        messagebox.showinfo("浏览器扩展安装指引", msg, parent=self)
+
     def _verify_chat_ai_bridge(self):
-        is_listening = is_port_listening(8765)
-        if is_listening:
+        """Perform end-to-end handshake verification for Chat AI bridge and browser session (Item 3)."""
+        is_bridge_listening = is_port_listening(18765)
+        is_cockpit_listening = is_port_listening(8765)
+
+        w = self.widgets.get("chat")
+        eng = (w["engine"].get().strip().upper() if w else "") or "CHAT AI"
+
+        if is_bridge_listening:
+            active_info = ""
+            try:
+                import urllib.request
+                import json
+                req = urllib.request.Request("http://127.0.0.1:18765/api/v1/sessions", headers={"User-Agent": "PocketFleet"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        sessions = data.get("sessions") or data.get("active_sessions") or []
+                        if sessions:
+                            active_info = f"\n• 检测到活跃会话: {', '.join(str(s) for s in sessions)}"
+            except Exception:
+                pass
+
             messagebox.showinfo(
-                "对话席位自检成功",
-                "✅ 对话席位 Web 桥接网关正常运行 (Port 8765 已就绪)！\n\n"
-                "• 浏览器插件 / Web 桥接已连接；\n"
-                "• 您可在 TG 协同群中发送 '@Bot 你好' 测试端到端连通性。",
+                "对话席位自检通过",
+                f"✅ 本地 Web 桥接网关正常运行 (Port 18765 已连接)！\n\n"
+                f"• 桥接通信通道正常；{active_info}\n"
+                f"• 当前席位引擎: {eng}\n"
+                f"• 您可在 TG 战队群中 @Bot 发送测试消息验证端到端回传。",
+                parent=self,
+            )
+        elif is_cockpit_listening:
+            messagebox.showinfo(
+                "Web Cockpit 就绪 (未检测到 18765 扩展网关)",
+                f"ℹ️ PocketFleet 本地 Cockpit (Port 8765) 运行正常。\n\n"
+                f"若对话席位需使用浏览器 Web 会话（如 ChatGPT/Gemini）：\n"
+                f"1. 请确认已点击【🧩 浏览器扩展】安装 Chrome 扩展；\n"
+                f"2. 请点击【🔗 打开AI网页】在浏览器中打开并登录会话；\n"
+                f"3. 扩展将自动与本地服务建立连接。",
                 parent=self,
             )
         else:
             messagebox.showwarning(
-                "Web 网关未启动",
-                "⚠️ 本地 Web 桥接网关 (Port 8765) 尚未启动。\n\n"
+                "本地服务尚未启动",
+                "⚠️ 本地网关服务尚未启动。\n\n"
                 "请在 PocketFleet 主控制面板中点击【🚀 Start All Services】启动服务，"
-                "启动后 Web 网关将自动监听。",
+                "启动后服务将自动就绪。",
                 parent=self,
             )
 
@@ -2052,6 +2249,11 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
             self._update_seat_tg_capsule(role_key)
 
+        if hasattr(self, "sentinel_enabled_var"):
+            self.sentinel_enabled_var.set(getattr(cfg, "chat_sentinel_enabled", False))
+        if hasattr(self, "sentinel_interval_var"):
+            self.sentinel_interval_var.set(str(getattr(cfg, "chat_sentinel_interval", 15)))
+
         self._update_global_group_banner()
         self._refresh_memo()
         self._auto_detect_human_nickname()
@@ -2260,6 +2462,12 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             )
             seats_dict[role_key] = seat_cfg
 
+        sentinel_enabled = self.sentinel_enabled_var.get() if hasattr(self, "sentinel_enabled_var") else False
+        try:
+            sentinel_interval = int(self.sentinel_interval_var.get().strip()) if hasattr(self, "sentinel_interval_var") else 15
+        except ValueError:
+            sentinel_interval = 15
+
         new_fleet_cfg = FleetSeatsConfig(
             seats=seats_dict,
             context_window=cw_val,
@@ -2267,6 +2475,8 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             telegram_chat_id=self.global_chat_id,
             telegram_group_name=self.global_group_name,
             sync_context_window=self.var_sync_context.get(),
+            chat_sentinel_enabled=sentinel_enabled,
+            chat_sentinel_interval=sentinel_interval,
         )
 
         try:

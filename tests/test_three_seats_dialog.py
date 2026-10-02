@@ -314,14 +314,14 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
                 with mock.patch("tkinter.messagebox.showinfo") as mock_info:
                     dialog._verify_chat_ai_bridge()
                     self.assertTrue(mock_info.called)
-                    self.assertIn("对话席位自检成功", mock_info.call_args[0][0])
+                    self.assertIn("自检", mock_info.call_args[0][0])
 
             # 2. When port 8765 not listening
             with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=False):
                 with mock.patch("tkinter.messagebox.showwarning") as mock_warn:
                     dialog._verify_chat_ai_bridge()
                     self.assertTrue(mock_warn.called)
-                    self.assertIn("Web 网关未启动", mock_warn.call_args[0][0])
+                    self.assertIn("尚未启动", mock_warn.call_args[0][0])
 
             dialog.destroy()
 
@@ -730,9 +730,108 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             name = fetch_group_human_nickname("fake_token", -1004309197838)
             self.assertEqual(name, "ENTJ指挥官")
 
+    def test_chat_ai_open_webpage(self):
+        """Test Item 2: Open Chat AI webpage dynamically based on engine."""
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
+             mock.patch("webbrowser.open") as mock_wb, \
+             mock.patch("pocketfleet.control_panel.show_floating_toast") as mock_toast:
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+            
+            # 1. Default or ChatGPT
+            dialog.widgets["chat"]["engine"].set("chatgpt")
+            dialog._open_chat_ai_webpage()
+            mock_wb.assert_called_with("https://chatgpt.com")
+            
+            # 2. Switch to Gemini
+            dialog.widgets["chat"]["engine"].set("gemini")
+            dialog._open_chat_ai_webpage()
+            mock_wb.assert_called_with("https://gemini.google.com")
+
+            # 3. Switch to DeepSeek
+            dialog.widgets["chat"]["engine"].set("deepseek")
+            dialog._open_chat_ai_webpage()
+            mock_wb.assert_called_with("https://chat.deepseek.com")
+
+            dialog.destroy()
+
+    def test_browser_extension_guide(self):
+        """Test Item 1: Open browser extension guide and copy path."""
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
+             mock.patch("os.startfile") as mock_startfile, \
+             mock.patch("tkinter.messagebox.showinfo") as mock_info:
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+            dialog._open_browser_extension_guide()
+
+            mock_startfile.assert_called_once()
+            opened_path = mock_startfile.call_args[0][0]
+            self.assertIn("browser-extension", opened_path)
+            self.assertTrue(Path(opened_path).exists())
+            mock_info.assert_called_once()
+            dialog.destroy()
+
+    def test_verify_chat_ai_bridge_states(self):
+        """Test Item 3: Probe 18765 bridge port and handle Cockpit/Bridge status."""
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
+             mock.patch("tkinter.messagebox.showinfo") as mock_info, \
+             mock.patch("tkinter.messagebox.showwarning") as mock_warn:
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+
+            # Case A: Bridge 18765 listening
+            with mock.patch("pocketfleet.control_panel.is_port_listening", side_effect=lambda p: p == 18765):
+                dialog._verify_chat_ai_bridge()
+                mock_info.assert_called()
+                args, _ = mock_info.call_args
+                self.assertIn("18765 已连接", args[1])
+
+            # Case B: Only Cockpit 8765 listening
+            mock_info.reset_mock()
+            with mock.patch("pocketfleet.control_panel.is_port_listening", side_effect=lambda p: p == 8765):
+                dialog._verify_chat_ai_bridge()
+                mock_info.assert_called()
+                args, _ = mock_info.call_args
+                self.assertIn("Port 8765", args[1])
+                self.assertIn("未检测到 18765", args[0])
+
+            # Case C: Neither listening
+            with mock.patch("pocketfleet.control_panel.is_port_listening", return_value=False):
+                dialog._verify_chat_ai_bridge()
+                mock_warn.assert_called()
+
+            dialog.destroy()
+
+    def test_chat_sentinel_persistence(self):
+        """Test Item 4: Sentinel checkbox and interval persistence in UI and config."""
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file):
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+
+            # Check initial state
+            self.assertFalse(dialog.sentinel_enabled_var.get())
+            self.assertEqual(dialog.sentinel_interval_var.get(), "15")
+
+            # Change in UI
+            dialog.sentinel_enabled_var.set(True)
+            dialog.sentinel_interval_var.set("25")
+
+            # Save
+            with mock.patch("pocketfleet.control_panel.show_floating_toast"):
+                dialog._save_seats()
+
+            # Verify saved to config_file
+            from pocketfleet.core import FleetSeatsConfig
+            saved_cfg = FleetSeatsConfig.load_from_file(self.config_file)
+            self.assertTrue(saved_cfg.chat_sentinel_enabled)
+            self.assertEqual(saved_cfg.chat_sentinel_interval, 25)
+
+            # Re-open in a fresh dialog and verify fields are populated from saved config
+            dialog2 = ThreeSeatsConfigDialog(self.root, self.mgr)
+            self.assertTrue(dialog2.sentinel_enabled_var.get())
+            self.assertEqual(dialog2.sentinel_interval_var.get(), "25")
+            dialog2.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

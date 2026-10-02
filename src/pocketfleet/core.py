@@ -182,6 +182,8 @@ class FleetSeatsConfig:
     telegram_chat_id: str = ""
     telegram_group_name: str = ""
     sync_context_window: bool = True
+    chat_sentinel_enabled: bool = False
+    chat_sentinel_interval: int = 15
 
     def to_dict(self) -> dict:
         return {
@@ -191,6 +193,8 @@ class FleetSeatsConfig:
             "telegram_chat_id": self.telegram_chat_id,
             "telegram_group_name": self.telegram_group_name,
             "sync_context_window": self.sync_context_window,
+            "chat_sentinel_enabled": self.chat_sentinel_enabled,
+            "chat_sentinel_interval": self.chat_sentinel_interval,
             "seats": {role: seat.to_dict() for role, seat in self.seats.items()},
         }
 
@@ -222,6 +226,8 @@ class FleetSeatsConfig:
             telegram_chat_id=str(data.get("telegram_chat_id", "")).strip(),
             telegram_group_name=str(data.get("telegram_group_name", "")).strip(),
             sync_context_window=bool(data.get("sync_context_window", True)),
+            chat_sentinel_enabled=bool(data.get("chat_sentinel_enabled", False)),
+            chat_sentinel_interval=int(data.get("chat_sentinel_interval", 15)),
         )
         validate_seats_config(config)
         return config

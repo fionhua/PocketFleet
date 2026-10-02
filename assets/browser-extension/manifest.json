@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "Folded Host Local Bridge",
+  "version": "0.6.43",
+  "description": "Local CodeAi bridge for designated ChatGPT, Qwen, Doubao, Gemini, Copilot, and DeepSeek browser agents.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmmn5RoBeN2OJhkb8afU1nyS6TDVUNBxn4zb+3woZFO3A9+GJdOfpRzDcp3AaQlanGV3PNWAXR2vtcl2VFeZ+py6uOvMfLb3ZWvQNGguMElcTKHSp3pAp9FhuEPJ6vb1cOU7U6DS01J9W8h7rEr3apz5HBXukSrFEEbXfEsRjucOb4xnNxok8cQ8hXw18LTTzmL1Or+PMhVT1H5RKIrFM03lDOBMRTrMtd+HjlV/m7sBNv8BsnMBLrxKIMY1M9WEs8+CVUymZq+hccXFAqFInqllBXBNFXOj2Rf4StsGDgRx6GTPT86LkC1Z09zSrGl6nmLdp44uOCgHj2bmRHAMOGwIDAQAB",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.qwen.ai/*",
+    "https://www.doubao.com/*",
+    "https://chatglm.cn/*",
+    "https://gemini.google.com/*",
+    "https://copilot.com/*",
+    "https://*.copilot.com/*",
+    "https://copilot.microsoft.com/*",
+    "https://chat.deepseek.com/*",
+    "https://kimi.moonshot.cn/*",
+    "https://www.kimi.com/*",
+    "http://127.0.0.1:18765/*",
+    "http://127.0.0.1:18766/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.qwen.ai/*",
+        "https://www.doubao.com/*",
+        "https://chatglm.cn/*",
+        "https://gemini.google.com/*",
+        "https://copilot.com/*",
+        "https://*.copilot.com/*",
+        "https://copilot.microsoft.com/*",
+        "https://chat.deepseek.com/*",
+        "https://kimi.moonshot.cn/*",
+        "https://www.kimi.com/*"
+      ],
+      "js": [
+        "adapter_profiles.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/robot-16.png",
+    "32": "icons/robot-32.png",
+    "48": "icons/robot-48.png",
+    "128": "icons/robot-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Folded Host Local Bridge",
+    "default_icon": {
+      "16": "icons/robot-16.png",
+      "32": "icons/robot-32.png"
+    }
+  }
+}
