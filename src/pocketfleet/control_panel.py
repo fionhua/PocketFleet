@@ -1987,8 +1987,18 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         except Exception:
             pass
 
-        # 3. Check ports
+        # 3. Check ports and auto-start 18765 bridge daemon if not running
         is_bridge_listening = is_port_listening(18765)
+        if not is_bridge_listening:
+            try:
+                from pocketfleet.bridge_server import ensure_bridge_server_running
+                ensure_bridge_server_running()
+                import time
+                time.sleep(0.08)
+                is_bridge_listening = is_port_listening(18765)
+            except Exception:
+                pass
+
         is_cockpit_listening = is_port_listening(8765)
 
         web_notice = f"🌐 已在浏览器中打开 {eng} 对话页面！\n\n" if opened_web else ""
@@ -2012,7 +2022,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 "对话席位自检通过",
                 f"{web_notice}"
                 f"✅ 本地 Web 桥接网关正常运行 (Port 18765 已连接)！\n\n"
-                f"• 桥接通信通道正常；{active_info}\n"
+                f"• 桥接通信通道正常（已自动激活后台守护网关）；{active_info}\n"
                 f"• 鉴权令牌已自动植入浏览器扩展，无需手动填写；\n"
                 f"• 当前席位引擎: {eng}\n"
                 f"• 您可在 TG 战队群中 @Bot 发送测试消息验证端到端回传。",
@@ -3267,6 +3277,8 @@ class FleetManager:
         self.dispatch_loop: DispatchLoop | None = None
         self.loop_thread: threading.Thread | None = None
         self.cockpit_port = 8765
+        self.bridge_port = 18765
+        self.bridge_server = None
         self.session_hub: SessionHub | None = None
         self.lead_worker: SessionWorker | None = None
 
@@ -3275,6 +3287,9 @@ class FleetManager:
 
     def is_cockpit_running(self) -> bool:
         return is_port_listening(self.cockpit_port)
+
+    def is_bridge_running(self) -> bool:
+        return is_port_listening(self.bridge_port)
 
     def start_cockpit(self, port: int = 8765, open_browser: bool = False) -> None:
         self.cockpit_port = port
@@ -3302,6 +3317,49 @@ class FleetManager:
                 pass
             self.cockpit_server = None
             self.log("[COCKPIT] Web Cockpit stopped.")
+
+    def start_bridge(self) -> bool:
+        if self.is_bridge_running():
+            self.log(f"[BRIDGE] Web Bridge already listening on port {self.bridge_port}")
+            return True
+
+        self.log(f"[BRIDGE] Starting Local Web Bridge on port {self.bridge_port}...")
+        try:
+            from pocketfleet.bridge_server import ensure_bridge_server_running, get_global_bridge_server
+
+            def _on_telegram_post(payload: dict) -> None:
+                text = payload.get("text", "")
+                sender = payload.get("sender", "web_chat")
+                if text and self.dispatch_loop and getattr(self.dispatch_loop, "running", False):
+                    try:
+                        self.log(f"📨 [BRIDGE] Outbound from {sender}: {text[:60]}...")
+                        chats = getattr(self.dispatch_loop, "allowed_chat_ids", None)
+                        if chats and hasattr(self.dispatch_loop, "transport"):
+                            from pocketfleet.core import OutboundMessage
+                            target_chat = list(chats)[0]
+                            self.dispatch_loop.transport.send_message(
+                                OutboundMessage(chat_id=target_chat, text=text)
+                            )
+                    except Exception as ex:
+                        self.log(f"[WARN] Failed to forward web bridge message: {ex}")
+
+            ok = ensure_bridge_server_running(on_telegram_post=_on_telegram_post)
+            self.bridge_server = get_global_bridge_server()
+            if ok:
+                self.log(f"[BRIDGE] Local Web Bridge active at http://127.0.0.1:{self.bridge_port}")
+            else:
+                self.log(f"[WARN] Failed to start Local Web Bridge on port {self.bridge_port}")
+            return ok
+        except Exception as e:
+            self.log(f"[ERROR] Failed to start Local Web Bridge: {e}")
+            return False
+
+    def stop_bridge(self) -> None:
+        from pocketfleet.bridge_server import stop_global_bridge_server
+        self.log("[BRIDGE] Stopping Local Web Bridge...")
+        stop_global_bridge_server()
+        self.bridge_server = None
+        self.log("[BRIDGE] Local Web Bridge stopped.")
 
     def load_fleet_config(self) -> dict:
         default_cfg = {
@@ -3447,6 +3505,12 @@ class FleetManager:
             self.lead_worker = self.session_hub.create_worker(seat_id="lead")
             self.lead_worker.start()
             self.log(f"🧭 [SESSION_HUB] Lead SessionWorker active on CLI track '{bound_id[:8]}...{bound_id[-4:]}'.")
+
+            # Ensure Port 18765 Web Bridge is running in background
+            try:
+                self.start_bridge()
+            except Exception:
+                pass
 
             auth_uids = set(seats_cfg.authorized_user_ids) if seats_cfg.authorized_user_ids else None
             transport = TelegramTransport(bot_token=token, state_store=state_store)
@@ -3636,8 +3700,10 @@ class PocketFleetControlApp:
         self._status_cache = {
             "is_d": False,
             "is_c": False,
+            "is_b": False,
             "detail_d": "Stopped",
             "detail_c": "Offline",
+            "detail_b": "Offline",
             "detail_a": "Triad: Initializing...",
         }
         self._tray_status_color = None
@@ -3649,8 +3715,13 @@ class PocketFleetControlApp:
         # Start periodic status refresh on main thread (reads from cache only)
         self.root.after(500, self._refresh_status)
 
-        # Auto-start Web Cockpit after mainloop starts (zero-poll, web UI only)
-        self.root.after(600, lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, open_browser=False), daemon=True).start())
+        # Auto-start Web Cockpit & Web Bridge after mainloop starts (zero-poll, background daemons)
+        self.root.after(600, lambda: threading.Thread(target=self._auto_start_local_servers, daemon=True).start())
+
+    def _auto_start_local_servers(self) -> None:
+        """Silently auto-launch local web bridge (18765) and cockpit (8765) in background."""
+        self.mgr.start_bridge()
+        self.mgr.start_cockpit(8765, open_browser=False)
 
     def append_log(self, text: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
@@ -3686,6 +3757,7 @@ class PocketFleetControlApp:
             try:
                 is_d = self.mgr.is_daemon_running()
                 is_c = self.mgr.is_cockpit_running()
+                is_b = self.mgr.is_bridge_running()
                 seats_cfg = self.mgr.load_seats_config()
                 lead_s = seats_cfg.seats.get("lead")
                 builder_s = seats_cfg.seats.get("builder")
@@ -3696,8 +3768,10 @@ class PocketFleetControlApp:
                 self._status_cache = {
                     "is_d": is_d,
                     "is_c": is_c,
+                    "is_b": is_b,
                     "detail_d": "Active (Polling Telegram)" if is_d else "Stopped",
                     "detail_c": "Listening on http://127.0.0.1:8765" if is_c else "Offline",
+                    "detail_b": "Listening on http://127.0.0.1:18765" if is_b else "Offline",
                     "detail_a": f"Triad: {l_info} ↔ {b_info} ↔ {c_info}",
                 }
             except Exception:
@@ -3710,6 +3784,7 @@ class PocketFleetControlApp:
             cache = getattr(self, "_status_cache", None) or {}
             is_d = cache.get("is_d", False)
             is_c = cache.get("is_c", False)
+            is_b = cache.get("is_b", False)
             self._update_row(
                 self.row_daemon,
                 is_running=is_d,
@@ -3721,12 +3796,17 @@ class PocketFleetControlApp:
                 detail=cache.get("detail_c", "Offline"),
             )
             self._update_row(
+                self.row_bridge,
+                is_running=is_b,
+                detail=cache.get("detail_b", "Offline"),
+            )
+            self._update_row(
                 self.row_agent,
                 is_running=True,
                 detail=cache.get("detail_a", "Triad: ..."),
             )
 
-            color = "green" if (is_d and is_c) else ("cyan" if (is_d or is_c) else "yellow")
+            color = "green" if (is_d and is_c and is_b) else ("cyan" if (is_d or is_c or is_b) else "yellow")
             if self.tray_icon and color != self._tray_status_color:
                 self.tray_icon.icon = create_tray_image(color)
                 self._tray_status_color = color
@@ -3790,10 +3870,20 @@ class PocketFleetControlApp:
             aux_cmd=self._action_open_browser,
         )
 
-        # Row 3: Coding Agent Target
+        # Row 3: Web Extension Bridge
+        self.row_bridge = self._create_service_row(
+            table_card,
+            name="3. Web Extension Bridge",
+            on_start=lambda: threading.Thread(target=self.mgr.start_bridge, daemon=True).start(),
+            on_stop=lambda: threading.Thread(target=self.mgr.stop_bridge, daemon=True).start(),
+            aux_text="Configure",
+            aux_cmd=self.open_three_seats_dialog,
+        )
+
+        # Row 4: Coding Agent Target
         self.row_agent = self._create_service_row(
             table_card,
-            name="3. AI Coding Agent",
+            name="4. AI Coding Agent",
             on_start=None,
             on_stop=None,
             aux_text="Docs",
@@ -4118,6 +4208,7 @@ class PocketFleetControlApp:
     def action_start_all(self) -> None:
         self.append_log("Starting all PocketFleet services...")
         def _run():
+            self.mgr.start_bridge()
             self.mgr.start_cockpit(8765, open_browser=False)
             time.sleep(0.3)
             self._action_start_daemon()
@@ -4128,6 +4219,7 @@ class PocketFleetControlApp:
         def _run():
             self.mgr.stop_daemon()
             self.mgr.stop_cockpit()
+            self.mgr.stop_bridge()
             self.append_log("All services stopped.")
         threading.Thread(target=_run, daemon=True).start()
 
@@ -4173,6 +4265,7 @@ class PocketFleetControlApp:
         self.is_quitting = True
         self.mgr.stop_daemon()
         self.mgr.stop_cockpit()
+        self.mgr.stop_bridge()
         if self.tray_icon:
             self.tray_icon.stop()
         self.root.after(0, self.root.destroy)
