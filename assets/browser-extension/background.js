@@ -41,19 +41,9 @@ async function settings() {
 
 async function bridgeFetch(path, options = {}, principal = "folded-host-chatgpt-web") {
   const current = await settings();
-  // 令牌大归一：优先读取席位专属独立令牌；若留空，100% 自动继承全舰统一主通信令牌 (current.token)
-  let activeToken = (current.token || "").trim();
-  if (principal === "qwen-theta-web" && current.thetaToken?.trim()) {
-    activeToken = current.thetaToken.trim();
-  } else if (principal === "doubao-heart-web" && current.doubaoToken?.trim()) {
-    activeToken = current.doubaoToken.trim();
-  } else if (principal === "glm-xingtu-web" && current.xingtuToken?.trim()) {
-    activeToken = current.xingtuToken.trim();
-  } else if (principal === "kimi-motin-web" && current.motinToken?.trim()) {
-    activeToken = current.motinToken.trim();
-  }
+  const activeToken = (current.token || "").trim();
   if (!activeToken) {
-    throw new Error("星舰全舰通信令牌未在插件中配置，请先在弹窗中填写主令牌。");
+    throw new Error("PocketFleet 通信令牌未在扩展中配置，请先在弹窗中填写。");
   }
   const response = await fetch(`${current.endpoint}${path}`, {
     ...options,

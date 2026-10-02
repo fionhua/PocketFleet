@@ -3,46 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Folded Host Bridge</title>
+    <title>PocketFleet Web Bridge</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main>
-      <h1>Folded Host Bridge</h1>
-      <label>本机端点<input id="endpoint" type="url" /></label>
-      <label>星舰全舰通信令牌（主桥）<input id="token" type="password" autocomplete="off" placeholder="全舰统一通信令牌，全舰对话组通用；运行 copy-token.ps1 粘贴到这里" /></label>
-      <details class="advanced-tokens">
-        <summary>高级：独立席位令牌（可选，留空则自动继承主令牌）</summary>
-        <label>星图令牌（GLM / 智谱清言）<input id="xingtuToken" type="password" autocomplete="off" placeholder="留空则自动继承全舰主令牌" /></label>
-        <label>墨汀令牌（Kimi / 月之暗面 · 预留）<input id="motinToken" type="password" autocomplete="off" placeholder="预留席位，留空则自动继承全舰主令牌" /></label>
-        <label>Theta 令牌（Qwen / 平视）<input id="thetaToken" type="password" autocomplete="off" placeholder="留空则自动继承全舰主令牌" /></label>
-        <label>心机姝令牌（豆包 Web 沙箱）<input id="doubaoToken" type="password" autocomplete="off" placeholder="留空则自动继承全舰主令牌" /></label>
-      </details>
-      <section class="access-roots" aria-labelledby="access-roots-title">
-        <div class="section-heading">
-          <h2 id="access-roots-title">结算主机目录权限</h2>
-          <span>每行一个绝对目录</span>
-        </div>
-        <label>可读取目录<textarea id="readRoots" rows="3" spellcheck="false" placeholder="例如 D:\workSpace\aiFundTournament"></textarea></label>
-        <label>可写入目录<textarea id="writeRoots" rows="2" spellcheck="false" placeholder="必须位于某个可读取目录内；留空即禁止写入"></textarea></label>
-        <label>AI 会议唯一目录<input id="meetingDir" type="text" spellcheck="false" placeholder="例如 D:\workSpace\AiSoulImprint\meetings" /></label>
-        <p class="access-note">目录设置只允许 Human Root 从本弹窗修改；网页消息不能扩权。敏感文件拒绝与 Policy Gate 始终生效。</p>
-      </section>
-      <p class="warning">战队统一出站规范：[Telegram];收件人:[目标];抄送:[战友];Mode:[WaitReply|NoReply]（兼容 [telegram]@目标人）。</p>
+      <h1>PocketFleet Web Bridge</h1>
+      <label>本机端点 (Local Endpoint)<input id="endpoint" type="url" /></label>
+      <label>PocketFleet 本地通信鉴权令牌 (Token)<input id="token" type="password" autocomplete="off" placeholder="PocketFleet 统一通信令牌；在客户端【复制令牌】后粘贴至此处" /></label>
+
       <section class="protocol-start" aria-labelledby="protocol-start-title">
         <div>
-          <strong id="protocol-start-title">星舰电报发信协议（方案 1 标准头版）</strong>
-          <small>出站统一使用 [Telegram];收件人:[节点];抄送:[节点];Mode:[模式]，正文紧随；群内自动拆单与免回闭环。</small>
+          <strong id="protocol-start-title">PocketFleet 多AI协同交互规范</strong>
+          <small>出站以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头指明单一收件人。</small>
         </div>
-        <button id="startCollaborationProtocol" type="button">加载发信说明</button>
+        <button id="startCollaborationProtocol" type="button">加载发信规范说明</button>
       </section>
-      <div class="actions"><button id="save">保存</button><button id="test">测试</button></div>
+
+      <div class="actions">
+        <button id="save">保存设置</button>
+        <button id="test">测试连接</button>
+      </div>
+
       <div class="execution-control">
-        <div><strong>执行总开关</strong><small>仅由 Human Root 点击切换</small></div>
+        <div><strong>执行总开关</strong><small>控制本地桥接调用与出站放行</small></div>
         <button id="executionControl" type="button" disabled>检测状态中...</button>
       </div>
-      <output id="status">尚未测试</output>
 
+      <output id="status">尚未测试</output>
     </main>
     <script src="popup.js"></script>
   </body>

@@ -2026,21 +2026,15 @@ function codeaiWhitelistLines(whitelist) {
 
 function collaborationProtocolBootstrap(requestId, whitelist) {
   return [
-    `# 星舰电报通信协议格式规范 (v1.0)`,
+    `# PocketFleet 多AI协同交互规范`,
     `启动请求ID: ${requestId}`,
     ``,
-    `出站首行必须使用标准冠名头，随后空一行写正文：`,
-    `[Telegram];收件人:[@主责节点];抄送:[@抄送节点];Mode:[WaitReply|NoReply]`,
+    `回复格式要求：以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人），随后换行写正文。`,
+    `例如：`,
+    `[Telegram]re:@SomeoneBot`,
+    `协同任务已确认，执行进展如下……`,
     ``,
-    `正文内容……`,
-    ``,
-    `**核心纪律说明：**`,
-    `1. **收件人**：必须且仅限 1 人，承担唯一第一作答责任。`,
-    `2. **抄送**：可空 [] 或多节点。**抄送节点强制免回（NoReply），仅入账旁读，物理禁止二次回复开麦**，根除互谢震荡。`,
-    `3. **Mode**：WaitReply（需回复）或 NoReply（通报/交付完毕全员免回）。`,
-    `4. **兼容**：指挥官可直发自然语言（首个 @ 为主责，余者自动转抄送）；兼容简易出站 [telegram]@目标人 [NoReply]。`,
-    ``,
-    `收到本说明后，现在不要发送任何出站消息，只回复：发信协议已加载`,
+    `收到本说明后，请仅回复：发信规范已加载`,
   ].join("\n");
 }
 
@@ -2089,8 +2083,10 @@ function pageRouteKey(url = null) {
   }
 }
 
-// ── 0.6.38 [电报] 出站直通门禁（方案 1 标准头优先，兼容旧版首行 [telegram]）───
-// 方案 1 标准头：[Telegram];收件人:[...];抄送:[...];Mode:[WaitReply|NoReply]
+// ── PocketFleet [电报] 出站直通门禁（图 3 标准头优先，兼容旧版格式）───
+// 图 3 标准格式：以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头
+const SCHEME_POCKETFLEET_RE = /^[ \t]{0,3}(?:\*\*|__)?\[(?:telegram|电报)\](?:\*\*|__)?\s*(?:re\s*[:：]|\[mailto\s*[:：])/i;
+// 兼容方案 1 标准头：[Telegram];收件人:[...];抄送:[...];Mode:[WaitReply|NoReply]
 const SCHEME1_HEAD_RE = /^[ \t]{0,3}(?:\*\*|__)?\[(?:telegram|电报)\](?:\*\*|__)?\s*;\s*(?:收件人|To)\s*[:：]\s*\[/i;
 const SCHEME1_ANYWHERE_RE = /(?:\[(?:telegram|电报)\]\s*;|;\s*(?:收件人|To)\s*[:：]\s*\[|(?:收件人|To)\s*[:：]\s*\[)/i;
 // 兼容旧版：首行前3字符内的 [telegram]
@@ -2099,7 +2095,7 @@ const TELEGRAM_HEAD_RE = /^[ \t]{0,3}(?:\[(?:telegram|电报)\](?:\s*\[(?:norepl
 function findTelegramHeaderIndex(lines) {
   for (let i = 0; i < Math.min(lines.length, 10); i++) {
     const line = lines[i].trim();
-    if (SCHEME1_HEAD_RE.test(line) || SCHEME1_ANYWHERE_RE.test(line) || TELEGRAM_HEAD_RE.test(line)) {
+    if (SCHEME_POCKETFLEET_RE.test(line) || SCHEME1_HEAD_RE.test(line) || SCHEME1_ANYWHERE_RE.test(line) || TELEGRAM_HEAD_RE.test(line)) {
       return i;
     }
   }
@@ -2122,7 +2118,12 @@ function extractTelegramText(raw) {
   const headerLine = lines[idx].trim();
   const restLines = lines.slice(idx + 1);
 
-  // 1. 方案 1 标准头：绝对保留完整标准头行，严禁切除 [Telegram] 冠名！
+  // 1. 图 3 标准格式：[Telegram]re:... 或 [Telegram][mailto:...]，绝对保留完整头部行
+  if (SCHEME_POCKETFLEET_RE.test(headerLine)) {
+    return [headerLine, ...restLines].join("\n").trim() || null;
+  }
+
+  // 2. 方案 1 标准头：保留完整标准头行
   if (SCHEME1_HEAD_RE.test(headerLine) || SCHEME1_ANYWHERE_RE.test(headerLine)) {
     let normalized = headerLine;
     if (!/^\s*\[(?:telegram|电报)\]/i.test(normalized)) {
@@ -2131,7 +2132,7 @@ function extractTelegramText(raw) {
     return [normalized, ...restLines].join("\n").trim() || null;
   }
 
-  // 2. 仅对旧格式（简易出站 [telegram]@目标人 [NoReply]）剥离前置 [telegram] 门禁
+  // 3. 仅对旧格式（简易出站 [telegram]@目标人）剥离前置 [telegram] 门禁
   const match = TELEGRAM_HEAD_RE.exec(headerLine);
   if (!match) return null;
   const firstLineTail = headerLine.slice(match[0].length);
@@ -2245,14 +2246,15 @@ async function scanTelegramCalls() {
   telegramExecutedElements.add(targetMessage);
   telegramInFlight.add(key);
 
-  const sender = adapterProfile?.id === "chatgpt-folded-host" ? "folding_host" :
-                 adapterProfile?.id === "doubao-heart" ? "xinji_shu" :
-                 adapterProfile?.id === "qwen-theta" ? "pingshi" :
-                 adapterProfile?.id === "glm-xingtu" ? "xingtu" :
-                 adapterProfile?.id === "gemini-earth-sandbox" ? "earth_sandbox" :
-                 adapterProfile?.id === "copilot-grayfold" ? "grayfold" :
-                 adapterProfile?.id === "deepseek-remainder" ? "remainder_operator" :
-                 adapterProfile?.id === "kimi-motin" ? "motin" : "folding_host";
+  const sender = adapterProfile?.id === "chatgpt-folded-host" ? "chatgpt" :
+                 adapterProfile?.id === "claude-web" ? "claude" :
+                 adapterProfile?.id === "gemini-earth-sandbox" ? "gemini" :
+                 adapterProfile?.id === "deepseek-remainder" ? "deepseek" :
+                 adapterProfile?.id === "copilot-grayfold" ? "copilot" :
+                 adapterProfile?.id === "doubao-heart" ? "doubao" :
+                 adapterProfile?.id === "qwen-theta" ? "qwen" :
+                 adapterProfile?.id === "glm-xingtu" ? "glm" :
+                 adapterProfile?.id === "kimi-motin" ? "kimi" : "chatgpt";
 
   try {
     const resp = await send({
