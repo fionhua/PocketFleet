@@ -28,6 +28,16 @@ except ImportError:
     ImageDraw = None
     pystray = None
 
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 from pocketfleet.cockpit import CockpitServer, telemetry
 from pocketfleet.config_env import load_env_file
 from pocketfleet.core import (
@@ -799,38 +809,63 @@ class EngineBadge:
         val = self._val.lower()
         engine_info = ALL_ENGINE_MAP.get(val)
         if engine_info:
+            disp_label = engine_info["label"]
             self.button.config(
-                text=engine_info["label"],
-                bg=engine_info["bg"],
-                fg="#ffffff",
-                activebackground=engine_info["bg"],
-                activeforeground="#ffffff",
+                text=f"{disp_label}   ❌",
+                bg="#0f172a",
+                fg="#38bdf8",
+                activebackground="#1e293b",
+                activeforeground="#ef4444",
+                relief=tk.SOLID,
+                bd=1,
+                highlightthickness=1,
+                highlightbackground="#0284c7",
+                highlightcolor="#38bdf8",
+                padx=8,
+                pady=2,
+                cursor="hand2",
             )
             if self.tooltip_binder:
                 self.tooltip_binder(
                     self.button,
-                    f"【{engine_info['label']}】\n点击此按钮清除席位执行引擎，设为【未设置】",
+                    f"【{disp_label}】\n点击【❌】移除/关闭当前执行引擎，重置为【未设置】",
                 )
         elif self._val:
             self.button.config(
-                text=f"⚙️ {self._val}",
-                bg="#475569",
-                fg="#ffffff",
-                activebackground="#64748b",
-                activeforeground="#ffffff",
+                text=f"⚙️ {self._val}   ❌",
+                bg="#0f172a",
+                fg="#38bdf8",
+                activebackground="#1e293b",
+                activeforeground="#ef4444",
+                relief=tk.SOLID,
+                bd=1,
+                highlightthickness=1,
+                highlightbackground="#0284c7",
+                highlightcolor="#38bdf8",
+                padx=8,
+                pady=2,
+                cursor="hand2",
             )
             if self.tooltip_binder:
                 self.tooltip_binder(
                     self.button,
-                    f"【{self._val}】\n点击此按钮清除席位执行引擎，设为【未设置】",
+                    f"【{self._val}】\n点击【❌】移除/关闭当前执行引擎，重置为【未设置】",
                 )
         else:
             self.button.config(
                 text="⚪ 未设置 (点击上方按钮指定)",
-                bg="#334155",
-                fg="#94a3b8",
-                activebackground="#475569",
+                bg="#1e293b",
+                fg="#64748b",
+                activebackground="#334155",
                 activeforeground="#f8fafc",
+                relief=tk.FLAT,
+                bd=1,
+                highlightthickness=1,
+                highlightbackground="#334155",
+                highlightcolor="#475569",
+                padx=8,
+                pady=2,
+                cursor="hand2",
             )
             if self.tooltip_binder:
                 self.tooltip_binder(
@@ -1421,12 +1456,12 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         lbl_role_badge = tk.Label(
             r3,
             text="【职能配置】",
-            bg="#334155",
-            fg="#f8fafc",
+            bg="#1e293b",
+            fg="#38bdf8",
             font=self.font_bold,
             relief=tk.FLAT,
-            padx=12,
-            pady=3,
+            padx=2,
+            pady=2,
         )
         lbl_role_badge.pack(side=tk.LEFT, padx=(0, 8))
         lbl_role_badge.bind("<Button-1>", lambda e, rk=role_key: self._select_seat(rk))
@@ -1693,7 +1728,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             # Custom is non-exclusive
             w = self.widgets[target_role]
             w["is_custom"] = True
-            w["role_badge"].config(text="【✏️ 自定义】", bg="#475569", fg="#ffffff")
+            w["role_badge"].config(text="【✏️ 自定义】", bg="#1e293b", fg="#94a3b8")
             w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
             w["custom_entry"].focus_set()
         else:
@@ -1703,14 +1738,14 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                     if not other_w["is_custom"] and other_w["desc_var"].get() == preset["desc_text"]:
                         other_w["is_custom"] = True
                         other_w["desc_var"].set("")
-                        other_w["role_badge"].config(text="【✏️ 自定义】", bg="#475569", fg="#ffffff")
+                        other_w["role_badge"].config(text="【✏️ 自定义】", bg="#1e293b", fg="#94a3b8")
                         other_w["custom_entry"].delete(0, tk.END)
                         other_w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
             w = self.widgets[target_role]
             w["is_custom"] = False
             w["desc_var"].set(preset["desc_text"])
-            w["role_badge"].config(text=f"【{preset['btn_label']}】", bg=preset["bg"], fg=preset["fg"])
+            w["role_badge"].config(text=f"【{preset['btn_label']}】", bg="#1e293b", fg="#38bdf8")
             w["custom_entry"].pack_forget()
 
     def _on_engine_badge_click(self, role_key: str):
@@ -1772,20 +1807,31 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
     def _open_browser_extension_guide(self):
         """Locate and open the browser extension directory and guide the user through installation (Item 1)."""
-        candidates = [
-            REPO_ROOT / "assets" / "browser-extension",
+        # Resolve project root dynamically across frozen exe and source runtime
+        candidates = []
+        if getattr(sys, "frozen", False):
+            exe_dir = Path(sys.executable).resolve().parent
+            candidates.extend([
+                exe_dir.parent / "browser-extension",
+                exe_dir / "browser-extension",
+                exe_dir / "assets" / "browser-extension",
+                Path(getattr(sys, "_MEIPASS", "")) / "assets" / "browser-extension",
+            ])
+        candidates.extend([
             REPO_ROOT / "browser-extension",
-            Path(__file__).resolve().parent.parent.parent / "assets" / "browser-extension",
-            Path("D:/workSpace/ChatAi-Local-Bridge/browser-extension"),
-        ]
+            REPO_ROOT / "assets" / "browser-extension",
+            Path.cwd() / "browser-extension",
+            Path(__file__).resolve().parent.parent.parent / "browser-extension",
+        ])
+
         ext_path = None
         for c in candidates:
-            if c.is_dir() and (c / "manifest.json").is_file():
+            if c and c.is_dir() and (c / "manifest.json").is_file():
                 ext_path = c.resolve()
                 break
 
         if not ext_path:
-            ext_path = (REPO_ROOT / "assets" / "browser-extension").resolve()
+            ext_path = (REPO_ROOT / "browser-extension").resolve()
             ext_path.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -2003,6 +2049,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                     w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
                     self._update_seat_tg_capsule(role_key)
                     self._update_global_group_banner()
+                    self._collapse_tg_drawer(role_key)
                     if self.on_save_callback:
                         self.on_save_callback()
                     messagebox.showinfo(
@@ -2081,6 +2128,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 if "drawer_status_lbl" in w:
                     w["drawer_status_lbl"].config(text="🟢 已连接战队群", fg="#10b981")
                 broker.stop_temporary_poller()
+                self._collapse_tg_drawer(role_key)
                 if self.on_save_callback:
                     self.on_save_callback()
                 return
@@ -2232,7 +2280,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
                 if (desc == p["desc_text"] or desc == p["btn_label"]) and p["desc_text"] not in used_preset_texts:
                     w["desc_var"].set(p["desc_text"])
                     w["is_custom"] = False
-                    w["role_badge"].config(text=f"【{p['btn_label']}】", bg=p["bg"], fg=p["fg"])
+                    w["role_badge"].config(text=f"【{p['btn_label']}】", bg="#1e293b", fg="#38bdf8")
                     w["custom_entry"].pack_forget()
                     used_preset_texts.add(p["desc_text"])
                     matched = True
@@ -2240,7 +2288,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             if not matched:
                 w["desc_var"].set(desc)
                 w["is_custom"] = True
-                w["role_badge"].config(text="【✏️ 自定义】", bg="#475569", fg="#ffffff")
+                w["role_badge"].config(text="【✏️ 自定义】", bg="#1e293b", fg="#94a3b8")
                 w["custom_entry"].delete(0, tk.END)
                 w["custom_entry"].insert(0, desc)
                 w["custom_entry"].pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
@@ -3485,8 +3533,8 @@ class PocketFleetControlApp:
         }
         threading.Thread(target=self._background_status_loop, daemon=True).start()
 
-        # Start drain log loop on main thread (throttled to 250ms)
-        self.root.after(250, self._drain_log_queue)
+        # Start drain log loop on main thread (low priority, 1s interval)
+        self.root.after(1000, self._drain_log_queue)
 
         # Start periodic status refresh on main thread (reads from cache only)
         self.root.after(500, self._refresh_status)
@@ -3514,7 +3562,7 @@ class PocketFleetControlApp:
             self.log_text.config(state=tk.DISABLED)
 
         if not self.is_quitting:
-            self.root.after(250, self._drain_log_queue)
+            self.root.after(1000, self._drain_log_queue)
 
     def _background_status_loop(self) -> None:
         """Background worker performing asynchronous socket/disk probes to prevent UI thread lag."""

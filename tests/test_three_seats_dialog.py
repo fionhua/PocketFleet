@@ -334,15 +334,16 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
 
             # 1. Lead seat initially antigravity
             self.assertEqual(w_lead["engine"].get(), "antigravity")
-            self.assertEqual(btn_lead.cget("text"), "🪐 Antigravity")
-            self.assertEqual(btn_lead.cget("bg"), "#0284c7")
+            self.assertIn("🪐 Antigravity", btn_lead.cget("text"))
+            self.assertIn("❌", btn_lead.cget("text"))
+            self.assertEqual(btn_lead.cget("bg"), "#0f172a")
 
             # 2. Click lead's engine badge -> clears to unset
             dialog._on_engine_badge_click("lead")
             self.assertEqual(w_lead["engine"].get(), "")
             self.assertEqual(w_lead["cmd_var"].get(), "")
             self.assertIn("未设置", btn_lead.cget("text"))
-            self.assertEqual(btn_lead.cget("bg"), "#334155")
+            self.assertEqual(btn_lead.cget("bg"), "#1e293b")
 
             # 3. Attempting to save with unset engine prompts error and aborts
             with mock.patch("tkinter.messagebox.showerror") as mock_err:
@@ -354,20 +355,23 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             dialog._select_seat("lead")
             dialog._apply_code_engine("codex")
             self.assertEqual(w_lead["engine"].get(), "codex")
-            self.assertEqual(btn_lead.cget("text"), "⚡ OpenAI Codex")
-            self.assertEqual(btn_lead.cget("bg"), "#10b981")
+            self.assertIn("⚡ OpenAI Codex", btn_lead.cget("text"))
+            self.assertIn("❌", btn_lead.cget("text"))
+            self.assertEqual(btn_lead.cget("bg"), "#0f172a")
             self.assertEqual(w_lead["cmd_var"].get(), "codex")
 
             # 5. Click top button 'aider' -> paints Aider badge
             dialog._apply_code_engine("aider")
             self.assertEqual(w_lead["engine"].get(), "aider")
-            self.assertEqual(btn_lead.cget("text"), "🛠️ Aider")
-            self.assertEqual(btn_lead.cget("bg"), "#8b5cf6")
+            self.assertIn("🛠️ Aider", btn_lead.cget("text"))
+            self.assertIn("❌", btn_lead.cget("text"))
+            self.assertEqual(btn_lead.cget("bg"), "#0f172a")
             self.assertEqual(w_lead["cmd_var"].get(), "aider")
 
             # 6. Click engine badge again -> clears to unset
             dialog._on_engine_badge_click("lead")
             self.assertEqual(w_lead["engine"].get(), "")
+            self.assertIn("未设置", btn_lead.cget("text"))
             self.assertIn("未设置", btn_lead.cget("text"))
 
             dialog.destroy()
