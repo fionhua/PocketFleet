@@ -8,7 +8,7 @@ body { margin: 0; min-width: 400px; }
 main { padding: 18px; }
 h1 { margin: 0 0 16px; font-size: 18px; color: #174c35; font-weight: 700; letter-spacing: -0.2px; }
 label { display: grid; gap: 6px; margin: 12px 0; font-size: 13px; font-weight: 500; }
-input[type="url"], input[type="password"], textarea {
+input[type="url"], input[type="password"], input[type="text"], textarea {
   padding: 8px 10px;
   border: 1px solid #9aa69d;
   border-radius: 6px;
@@ -22,6 +22,37 @@ input:focus {
   outline: none;
   border-color: #176b47;
   box-shadow: 0 0 0 2px rgba(23, 107, 71, 0.2);
+}
+
+.token-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.token-input-wrapper input {
+  width: 100%;
+  padding-right: 36px;
+}
+.btn-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  color: #68766d;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  min-width: auto;
+}
+.btn-eye:hover {
+  background: rgba(23, 107, 71, 0.12);
+  color: #176b47;
 }
 
 .actions { display: flex; gap: 8px; margin-top: 14px; }

@@ -10,7 +10,19 @@
     <main>
       <h1>PocketFleet Web Bridge</h1>
       <label>本机端点 (Local Endpoint)<input id="endpoint" type="url" /></label>
-      <label>PocketFleet 本地通信鉴权令牌 (Token)<input id="token" type="password" autocomplete="off" placeholder="PocketFleet 统一通信令牌；在客户端【复制令牌】后粘贴至此处" /></label>
+      <label>
+        <span>PocketFleet 本地通信鉴权令牌 (Token)</span>
+        <div class="token-input-wrapper">
+          <input id="token" type="password" autocomplete="off" placeholder="PocketFleet 统一通信令牌；在客户端【复制令牌】后粘贴至此处" />
+          <button id="toggleTokenVisibility" type="button" class="btn-eye" title="显示/隐藏令牌" aria-label="显示/隐藏令牌">
+            <svg class="eye-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path class="eye-open" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle class="eye-open" cx="12" cy="12" r="3"></circle>
+              <line class="eye-closed" x1="1" y1="1" x2="23" y2="23" style="display:none;"></line>
+            </svg>
+          </button>
+        </div>
+      </label>
 
       <section class="protocol-start" aria-labelledby="protocol-start-title">
         <div>

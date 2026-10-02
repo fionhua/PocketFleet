@@ -1,9 +1,22 @@
 const endpoint = document.querySelector("#endpoint");
 const token = document.querySelector("#token");
+const toggleTokenVisibility = document.querySelector("#toggleTokenVisibility");
 const status = document.querySelector("#status");
 const executionControl = document.querySelector("#executionControl");
 const startCollaborationProtocol = document.querySelector("#startCollaborationProtocol");
 const CONTENT_PROTOCOL_VERSION = "unified-telegram-v1";
+
+if (toggleTokenVisibility) {
+  toggleTokenVisibility.addEventListener("click", () => {
+    const isPassword = token.type === "password";
+    token.type = isPassword ? "text" : "password";
+    const eyeSlash = toggleTokenVisibility.querySelector(".eye-closed");
+    if (eyeSlash) {
+      eyeSlash.style.display = isPassword ? "inline" : "none";
+    }
+    toggleTokenVisibility.setAttribute("title", isPassword ? "隐藏令牌" : "显示令牌");
+  });
+}
 
 async function ensureContentBridge(tab) {
   let statusResponse;

@@ -281,3 +281,18 @@ def stop_global_bridge_server() -> None:
             pass
         _global_bridge = None
 
+
+if __name__ == "__main__":
+    import time
+    server = PocketFleetBridgeServer()
+    if server.start():
+        print(f"PocketFleet Web Bridge running on http://{server.host}:{server.port}")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            server.stop()
+    else:
+        print("Failed to start server or port already in use.")
+
+
