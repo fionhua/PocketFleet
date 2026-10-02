@@ -839,7 +839,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         self.on_save_callback = on_save_callback
 
         self.title("Fleet Triad Seats Configuration (席位战队编排) — PocketFleet")
-        self.geometry("860x740")
+        self.geometry("860x820")
         self.resizable(False, False)
         self.configure(bg="#0b0f19")
         self.transient(parent)
@@ -857,7 +857,7 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         px = parent.winfo_rootx()
         py = parent.winfo_rooty()
         cx = max(0, px + (pw - 860) // 2)
-        cy = max(0, py + (ph - 740) // 2)
+        cy = max(0, py + (ph - 820) // 2)
         self.geometry(f"+{cx}+{cy}")
 
         self.active_tab: str = "code"
@@ -1037,6 +1037,86 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
         # Initially pack code tab
         self.tab_frame_code.pack(fill=tk.BOTH, expand=True)
+
+        # ======================================================================
+        # Shared Memo Area (One-click Copyable Fleet Collaboration Memo)
+        # ======================================================================
+        self.memo_frame = tk.LabelFrame(
+            content,
+            text=" 📋 战队协同交互 Memo (AI 会话轨底座配置 / 可一键复制) ",
+            bg="#0f172a",
+            fg="#38bdf8",
+            font=self.font_bold,
+            padx=12,
+            pady=8,
+            relief=tk.GROOVE,
+            bd=1,
+        )
+        self.memo_frame.pack(fill=tk.X, pady=(6, 8))
+
+        memo_top_row = tk.Frame(self.memo_frame, bg="#0f172a")
+        memo_top_row.pack(fill=tk.X, pady=(0, 6))
+
+        tk.Label(
+            memo_top_row,
+            text="👤 人类用户昵称:",
+            fg="#cbd5e1",
+            bg="#0f172a",
+            font=self.font_bold,
+        ).pack(side=tk.LEFT)
+
+        self.entry_human_name = tk.Entry(
+            memo_top_row,
+            bg="#1e293b",
+            fg="#f8fafc",
+            font=self.font_mono,
+            width=16,
+            relief=tk.FLAT,
+            bd=4,
+            insertbackground="#ffffff",
+        )
+        self.entry_human_name.insert(0, "ENTJ指挥官")
+        self.entry_human_name.pack(side=tk.LEFT, padx=(6, 8))
+        self.entry_human_name.bind("<KeyRelease>", lambda e: self._refresh_memo())
+
+        self.lbl_human_sync_status = tk.Label(
+            memo_top_row,
+            text="🔄 自动关联 TG 群",
+            fg="#10b981",
+            bg="#0f172a",
+            font=self.font_sub,
+        )
+        self.lbl_human_sync_status.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.btn_copy_memo = tk.Button(
+            memo_top_row,
+            text="📋 一键复制 Memo (Copy)",
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            padx=14,
+            pady=3,
+            cursor="hand2",
+            command=self._copy_memo_to_clipboard,
+        )
+        self.btn_copy_memo.pack(side=tk.RIGHT)
+
+        self.txt_memo = tk.Text(
+            self.memo_frame,
+            height=2,
+            bg="#0b0f19",
+            fg="#38bdf8",
+            font=self.font_mono,
+            relief=tk.FLAT,
+            bd=4,
+            wrap=tk.WORD,
+            padx=8,
+            pady=4,
+        )
+        self.txt_memo.pack(fill=tk.X)
 
         # ======================================================================
         # Shared Bottom Area (Collaborative group, context window, actions)
@@ -1989,6 +2069,109 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             self._update_seat_tg_capsule(role_key)
 
         self._update_global_group_banner()
+        self._refresh_memo()
+        self._auto_detect_human_nickname()
+
+    def _copy_memo_to_clipboard(self):
+        text = self.txt_memo.get("1.0", tk.END).strip()
+        if not text:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update_idletasks()
+
+        orig_text = "📋 一键复制 Memo (Copy)"
+        self.btn_copy_memo.configure(text="✅ 已复制到剪贴板！", bg="#10b981")
+        self.after(2000, lambda: self.btn_copy_memo.configure(text=orig_text, bg="#0284c7"))
+
+        show_floating_toast(
+            parent=self,
+            title="Memo 已复制",
+            message="📋 战队协同交互 Memo 已成功复制到剪贴板！",
+            duration_ms=1800,
+        )
+
+    def _refresh_memo(self):
+        human = self.entry_human_name.get().strip() if hasattr(self, "entry_human_name") else "ENTJ指挥官"
+        if not human:
+            human = "人类用户"
+
+        participants = []
+        for r_key in ["lead", "builder", "chat"]:
+            w = self.widgets.get(r_key)
+            if not w:
+                continue
+            name = w["name"].get().strip()
+            if name and name not in participants:
+                participants.append(name)
+
+        if not participants:
+            participants = ["裁决者", "泥蛇", "地球Sandbox"]
+
+        p_str = ";".join(participants)
+        memo_line1 = f"[来自TG多AI协作];[人类用户:{human}];参与者:[{p_str}]"
+        memo_line2 = "回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}"
+        memo_content = f"{memo_line1}\n{memo_line2}"
+
+        if hasattr(self, "txt_memo"):
+            self.txt_memo.configure(state=tk.NORMAL)
+            self.txt_memo.delete("1.0", tk.END)
+            self.txt_memo.insert("1.0", memo_content)
+            self.txt_memo.configure(state=tk.DISABLED)
+
+    def _auto_detect_human_nickname(self):
+        # 1. StateStore cached sender name
+        if hasattr(self, "mgr") and hasattr(self.mgr, "state_store") and self.mgr.state_store:
+            cached = self.mgr.state_store.get_meta("last_human_sender_name", "")
+            if cached.strip():
+                self._apply_detected_human_name(cached.strip(), "从本地历史同步")
+                return
+
+        # 2. Environment
+        env_human = (os.environ.get("POCKETFLEET_HUMAN_NAME") or "").strip()
+        if env_human:
+            self._apply_detected_human_name(env_human, "环境变量指定")
+            return
+
+        # 3. Query group administrators via Telegram API in background thread
+        chat_id = self.global_chat_id or (os.environ.get("TELEGRAM_GROUP_ID") or "").strip()
+        tok = None
+        for r_key in ["lead", "builder", "chat"]:
+            w = self.widgets.get(r_key)
+            if w and w["token"].get().strip():
+                t = w["token"].get().strip()
+                if not t.startswith("••••"):
+                    tok = t
+                    break
+
+        if not tok:
+            for env_var in ["TELEGRAM_BOT_JUDGE_TOKEN", "TELEGRAM_BOT_LEAD_TOKEN", "TELEGRAM_BOT_MUDSNAKE_TOKEN", "POCKETFLEET_BOT_TOKEN"]:
+                val = (os.environ.get(env_var) or "").strip()
+                if val:
+                    tok = val
+                    break
+
+        if tok and chat_id:
+            def _fetch():
+                try:
+                    from .transport.telegram import fetch_group_human_nickname
+                    fname = fetch_group_human_nickname(tok, chat_id)
+                    if fname:
+                        self.after(0, lambda: self._apply_detected_human_name(fname, "自动从TG群组获取"))
+                        if hasattr(self, "mgr") and hasattr(self.mgr, "state_store") and self.mgr.state_store:
+                            self.mgr.state_store.set_meta("last_human_sender_name", fname)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_fetch, daemon=True).start()
+
+    def _apply_detected_human_name(self, name: str, source_label: str = ""):
+        if hasattr(self, "entry_human_name") and name:
+            self.entry_human_name.delete(0, tk.END)
+            self.entry_human_name.insert(0, name)
+            if hasattr(self, "lbl_human_sync_status") and source_label:
+                self.lbl_human_sync_status.configure(text=f"✅ {source_label}: {name}")
+            self._refresh_memo()
 
     def _reset_defaults(self):
         default_cfg = get_default_seats_config()

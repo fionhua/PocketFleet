@@ -673,7 +673,65 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
                 self.assertIn("神盾裁决者", badge_text)
                 self.assertIn("@NewJudgeBot", badge_text)
 
+    def test_memo_area_formatting_and_dynamic_refresh(self):
+        """Verify the Memo area formats the 2-line header correctly and updates dynamically."""
+        with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file):
+            dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
+            
+            # Initial human entry
+            dialog.entry_human_name.delete(0, tk.END)
+            dialog.entry_human_name.insert(0, "ENTJ指挥官")
+            dialog._refresh_memo()
+
+            memo_text = dialog.txt_memo.get("1.0", tk.END).strip()
+            self.assertIn("[来自TG多AI协作];[人类用户:ENTJ指挥官];参与者:", memo_text)
+            self.assertIn("回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}", memo_text)
+            self.assertIn("裁决者", memo_text)
+            self.assertIn("泥蛇", memo_text)
+
+            # Test changing human name updates memo
+            dialog.entry_human_name.delete(0, tk.END)
+            dialog.entry_human_name.insert(0, "泥蛇结算闭环者")
+            dialog._refresh_memo()
+            updated_text = dialog.txt_memo.get("1.0", tk.END).strip()
+            self.assertIn("[人类用户:泥蛇结算闭环者]", updated_text)
+
+            # Test changing seat nickname updates memo
+            dialog.widgets["lead"]["name"].delete(0, tk.END)
+            dialog.widgets["lead"]["name"].insert(0, "裁决者🌈")
+            dialog._refresh_memo()
+            updated_ai_text = dialog.txt_memo.get("1.0", tk.END).strip()
+            self.assertIn("裁决者🌈", updated_ai_text)
+
             dialog.destroy()
+
+    def test_fetch_group_human_nickname_mock(self):
+        """Verify fetch_group_human_nickname parses TG getChatAdministrators response correctly."""
+        from pocketfleet.transport.telegram import fetch_group_human_nickname
+        import json
+        import io
+
+        fake_admins = {
+            "ok": True,
+            "result": [
+                {
+                    "status": "administrator",
+                    "user": {"id": 111, "is_bot": True, "first_name": "AiSoulJudgeBot"}
+                },
+                {
+                    "status": "creator",
+                    "user": {"id": 222, "is_bot": False, "first_name": "ENTJ指挥官", "last_name": ""}
+                }
+            ]
+        }
+
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = json.dumps(fake_admins).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            name = fetch_group_human_nickname("fake_token", -1004309197838)
+            self.assertEqual(name, "ENTJ指挥官")
 
 
 if __name__ == "__main__":

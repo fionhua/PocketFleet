@@ -301,14 +301,9 @@ class TestDispatchLoop(unittest.TestCase):
             sender_id=777,
             chat_title="AI星舰战队·战役室",
         )
-        self.assertIn("【🛸 PocketFleet 战役室协同电报】", env)
-        self.assertIn("• 来源会话：AI星舰战队·战役室", env)
-        self.assertIn("• 发件指挥：指挥官 (ID: 777)", env)
-        self.assertIn("• 承接席位：泥蛇（引擎: codex）", env)
-        self.assertIn("• 战役室席位名录（可在回复中 @战友 触发协同）：", env)
-        self.assertIn("@AiSoulJudgeBot", env)
-        self.assertIn("@AiSoulMudSnakeBot", env)
-        self.assertIn("【指挥官外勤任务正文】\n帮我构建网关", env)
+        self.assertIn("[来自TG多AI协作];[人类用户:指挥官];参与者:[裁决者;泥蛇]", env)
+        self.assertIn("回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}", env)
+        self.assertIn("帮我构建网关", env)
 
     def test_mention_routing_to_designated_worker(self) -> None:
         from pocketfleet.core import FleetSeatsConfig, SeatConfig
@@ -348,8 +343,9 @@ class TestDispatchLoop(unittest.TestCase):
         self.assertEqual(task.worker, WorkerType.CODEX)
         self.assertEqual(task.raw_prompt, "帮我写单元测试")
         self.assertEqual(task.display_prompt, "帮我写单元测试")
-        self.assertIn("【指挥官外勤任务正文】\n帮我写单元测试", task.prompt)
-        self.assertIn("@AiSoulJudgeBot", task.prompt)
+        self.assertIn("[来自TG多AI协作];[人类用户:Commander];参与者:[裁决者;泥蛇]", task.prompt)
+        self.assertIn("回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}", task.prompt)
+        self.assertIn("帮我写单元测试", task.prompt)
 
 
 if __name__ == "__main__":

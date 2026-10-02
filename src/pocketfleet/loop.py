@@ -201,61 +201,27 @@ class DispatchLoop:
         sender_id: int = 0,
         chat_title: str = "",
     ) -> str:
-        """Wrap inbound Telegram prompt with in-band role envelope and live peer roster."""
+        """Wrap inbound Telegram prompt with concise Telegram collaboration header matching Fleet Memo."""
         if target_worker == WorkerType.SIMULATION:
             return prompt
 
-        chat_label = chat_title.strip() if chat_title else "Telegram 协同战役室"
-        sender_label = sender_name.strip() if sender_name else "指挥官"
-        sender_id_str = f" (ID: {sender_id})" if sender_id else ""
+        human = sender_name.strip() if sender_name else "人类用户"
 
-        target_seat_name = ""
-        target_role_key = ""
-        roster_lines = []
-
+        participants = []
         if self.seats_config and getattr(self.seats_config, "seats", None):
-            target_engine = target_worker.value.lower()
-            for r_key, seat in self.seats_config.seats.items():
-                s_engine = (seat.engine or "").lower().strip()
-                if (
-                    (target_worker == WorkerType.ANTIGRAVITY and (r_key == "lead" or s_engine == "antigravity"))
-                    or (target_worker == WorkerType.CODEX and (r_key == "builder" or s_engine == "codex"))
-                    or (s_engine == target_engine)
-                ):
-                    target_seat_name = seat.name
-                    target_role_key = r_key
-                    break
+            for r_key in ["lead", "builder", "chat"]:
+                seat = self.seats_config.seats.get(r_key)
+                if seat and seat.name and seat.name not in participants:
+                    participants.append(seat.name)
 
-            for r_key, seat in self.seats_config.seats.items():
-                handle = seat.bot_username.strip() if seat.bot_username else "未配置"
-                desc = f" ({seat.description})" if seat.description else f" ({seat.engine})"
-                is_current = (r_key == target_role_key)
-                prefix = "  👉 [当前承接]" if is_current else "  •"
-                roster_lines.append(f"{prefix} {seat.name}: {handle}{desc}")
+        if not participants:
+            participants = ["裁决者", "泥蛇", "地球Sandbox"]
 
-        if not target_seat_name:
-            target_seat_name = target_worker.value.upper()
-
-        if not roster_lines:
-            roster_lines = [
-                "  • 裁决者: @AiSoulJudgeBot (Google Antigravity / 施工指挥)",
-                "  • 泥蛇: @AiSoulMudSnakeBot (OpenAI Codex / 主力程序员)",
-            ]
-
-        roster_text = "\n".join(roster_lines)
+        p_str = ";".join(participants)
 
         return (
-            "【🛸 PocketFleet 战役室协同电报】\n"
-            f"• 来源会话：{chat_label}\n"
-            f"• 发件指挥：{sender_label}{sender_id_str}\n"
-            f"• 承接席位：{target_seat_name}（引擎: {target_worker.value}）\n"
-            "• 战役室席位名录（可在回复中 @战友 触发协同）：\n"
-            f"{roster_text}\n\n"
-            "【协同与输出公文守则】\n"
-            "1. 你的本轮输出将由系统直接通过 Telegram 战役室回传给指挥官与战友。\n"
-            "2. 请严格保持席位身份，直接切入核心施工或对账，言简意赅，避免与现实断裂的虚假客套。\n"
-            "3. 若需其他席位战友跟进，请在回复正文中明确提及对应战友的 Telegram Bot 句柄。\n\n"
-            "【指挥官外勤任务正文】\n"
+            f"[来自TG多AI协作];[人类用户:{human}];参与者:[{p_str}]\n"
+            "回复格式要求:以[Telegram][mailto:{someone}]|re:{someone}\n\n"
             f"{prompt}"
         )
 
@@ -393,6 +359,13 @@ class DispatchLoop:
                 msg.message_id, msg.sender_id, msg.chat_id
             )
             return None
+
+        # Record last human sender name for seamless UI syncing
+        if not msg.is_bot and msg.sender_name:
+            try:
+                self.state_store.set_meta("last_human_sender_name", msg.sender_name.strip())
+            except Exception:
+                pass
 
         raw_text = msg.text.strip()
         # Detect bot mention before stripping to auto-route to designated seat

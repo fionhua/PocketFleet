@@ -355,6 +355,45 @@ def verify_chat_member(
         return False, f"验证失败: {exc}"
 
 
+def fetch_group_human_nickname(
+    bot_token: str,
+    chat_id: int | str,
+    api_base_url: str = "https://api.telegram.org",
+) -> str | None:
+    """Query Telegram group administrators via getChatAdministrators to find human creator/admin nickname.
+
+    Returns the first human administrator's first_name, prioritizing group creator.
+    """
+    token = bot_token.strip()
+    c_id = str(chat_id).strip()
+    if not token or not c_id:
+        return None
+    url = f"{api_base_url}/bot{token}/getChatAdministrators?chat_id={c_id}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("ok"):
+                admins = data.get("result", [])
+                # Pass 1: human creator
+                for m in admins:
+                    u = m.get("user", {})
+                    if not u.get("is_bot") and m.get("status") == "creator":
+                        fname = u.get("first_name", "").strip()
+                        if fname:
+                            return fname
+                # Pass 2: any human administrator
+                for m in admins:
+                    u = m.get("user", {})
+                    if not u.get("is_bot"):
+                        fname = u.get("first_name", "").strip()
+                        if fname:
+                            return fname
+    except Exception:
+        pass
+    return None
+
+
 def send_bot_checkin(
     bot_token: str,
     chat_id: int | str,
