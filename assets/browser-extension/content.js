@@ -316,7 +316,18 @@ function insertIntoEditor(text) {
 
 function editorText(editor) {
   if (!editor) return "";
-  return String("value" in editor ? editor.value : editor.textContent || "").trim();
+  if ("value" in editor && typeof editor.value === "string") {
+    return editor.value.trim();
+  }
+  if (editor.isContentEditable || editor.getAttribute("contenteditable") === "true") {
+    const clone = editor.cloneNode(true);
+    const placeholders = clone.querySelectorAll(
+      ".placeholder, [data-placeholder], .ProseMirror-placeholder, [class*='placeholder'], [aria-hidden='true']"
+    );
+    placeholders.forEach((el) => el.remove());
+    return (clone.textContent || "").trim();
+  }
+  return String(editor.textContent || "").trim();
 }
 
 function sleep(milliseconds) {
