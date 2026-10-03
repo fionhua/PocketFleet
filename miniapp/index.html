@@ -1010,6 +1010,8 @@
           window.location.href = shareUrl;
         }
       }
+    }
+
     function cancelOrClose() {
       if (tg && tg.close) {
         try { tg.close(); return; } catch(e){}
@@ -1021,7 +1023,11 @@
     }
 
     // Run on startup
-    window.addEventListener("DOMContentLoaded", initSeats);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initSeats);
+    } else {
+      initSeats();
+    }
   </script>
 </body>
 </html>
