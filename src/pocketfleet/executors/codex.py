@@ -47,8 +47,6 @@ class CodexExecutor(BaseExecutor):
             "--skip-git-repo-check",
             "--color",
             "never",
-            "--sandbox",
-            "workspace-write",
             "--approve-for-me",
             prompt,
         ]

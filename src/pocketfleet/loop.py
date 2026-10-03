@@ -437,6 +437,15 @@ class DispatchLoop:
 
         # 1. Resolve Host Role & Host Display Name
         host_role = "chat"
+        # Meeting kickoff deduplication: if identical topic was convened within last 60 seconds, skip!
+        now = time.time()
+        if self._active_meeting and self._active_meeting.get("active"):
+            prev_topic = self._active_meeting.get("topic", "")
+            prev_time = self._active_meeting.get("created_at", 0)
+            if prev_topic == topic and (now - prev_time) < 60:
+                logger.info("Ignoring duplicate meeting kickoff for topic '%s' within 60s (already active)", topic)
+                return None
+
         host_display_name = chat_name
         if host_bot.lower() == lead_u.lower():
             host_role = "lead"

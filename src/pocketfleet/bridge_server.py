@@ -72,9 +72,13 @@ def seed_extension_token(repo_root: Optional[Path] = None, ext_path: Optional[Pa
     return token
 
 
+MESSAGE_TTL_SECONDS: float = 300.0
+DEDUP_WINDOW_SECONDS: float = 60.0
+
 _CODEAI_LOCK = threading.Lock()
 _CODEAI_QUEUE: collections.deque[dict[str, Any]] = collections.deque()
 _CODEAI_IN_FLIGHT: dict[str, dict[str, Any]] = {}
+_CODEAI_RECENT_HASHES: dict[str, float] = {}
 
 
 def enqueue_codeai_message(
@@ -84,37 +88,122 @@ def enqueue_codeai_message(
     channel: str = "duty-wake",
     source: str = "telegram",
     target: str = "chat",
+    ttl_seconds: float = MESSAGE_TTL_SECONDS,
 ) -> str:
-    """Thread-safe enqueue a message for the browser extension to pull into ChatGPT Web."""
-    delivery_id = str(uuid.uuid4())
+    """Thread-safe enqueue a message for the browser extension to pull into ChatGPT Web.
+
+    Guarantees:
+    1. Strict 300s TTL: messages older than 300 seconds are auto-dropped.
+    2. Deduplication: Identical message within 60s is dropped idempotently.
+    """
+    now = time.time()
     sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    item = {
-        "ok": True,
-        "pending": True,
-        "delivery_id": delivery_id,
-        "filename": filename,
-        "content": content,
-        "sha256": sha,
-        "raw": raw,
-        "channel": channel,
-        "source": source,
-        "target": target,
-        "enqueued_at": time.time(),
-    }
+
     with _CODEAI_LOCK:
+        # Clean expired recent hashes
+        expired_hashes = [h for h, ts in _CODEAI_RECENT_HASHES.items() if (now - ts) > DEDUP_WINDOW_SECONDS]
+        for h in expired_hashes:
+            _CODEAI_RECENT_HASHES.pop(h, None)
+
+        # Check for duplicate within dedup window
+        if sha in _CODEAI_RECENT_HASHES:
+            logger.info("Dropped duplicate CodeAI message (sha256=%s... within %ds dedup window)", sha[:8], int(DEDUP_WINDOW_SECONDS))
+            return "duplicate_skipped"
+
+        # Purge expired items from queue (>300s)
+        valid_items = collections.deque()
+        while _CODEAI_QUEUE:
+            old_item = _CODEAI_QUEUE.popleft()
+            if (now - old_item.get("enqueued_at", 0)) <= old_item.get("ttl_seconds", MESSAGE_TTL_SECONDS):
+                valid_items.append(old_item)
+            else:
+                logger.warning(
+                    "Purged stale CodeAI message %s (age %.1fs > %ss TTL) before enqueue",
+                    old_item["delivery_id"][:8],
+                    now - old_item.get("enqueued_at", 0),
+                    int(old_item.get("ttl_seconds", MESSAGE_TTL_SECONDS)),
+                )
+        _CODEAI_QUEUE.extend(valid_items)
+
+        # Purge expired in-flight
+        expired_inflight = [
+            did for did, it in _CODEAI_IN_FLIGHT.items()
+            if (now - it.get("in_flight_at", it.get("enqueued_at", 0))) > MESSAGE_TTL_SECONDS
+        ]
+        for did in expired_inflight:
+            _CODEAI_IN_FLIGHT.pop(did, None)
+
+        delivery_id = str(uuid.uuid4())
+        item = {
+            "ok": True,
+            "pending": True,
+            "delivery_id": delivery_id,
+            "filename": filename,
+            "content": content,
+            "sha256": sha,
+            "raw": raw,
+            "channel": channel,
+            "source": source,
+            "target": target,
+            "enqueued_at": now,
+            "ttl_seconds": ttl_seconds,
+        }
         _CODEAI_QUEUE.append(item)
-    logger.info("Enqueued CodeAI message %s (length %d bytes)", delivery_id[:8], len(content))
+        _CODEAI_RECENT_HASHES[sha] = now
+    logger.info("Enqueued CodeAI message %s (length %d bytes, TTL %ds)", delivery_id[:8], len(content), int(ttl_seconds))
     return delivery_id
 
 
 def pop_codeai_message() -> Optional[dict[str, Any]]:
-    """Pop the next pending message and mark in-flight."""
+    """Pop the next pending message and mark in-flight.
+
+    Strictly filters out and purges any message older than 300s TTL.
+    """
+    now = time.time()
     with _CODEAI_LOCK:
-        if _CODEAI_QUEUE:
+        while _CODEAI_QUEUE:
             item = _CODEAI_QUEUE.popleft()
+            age = now - item.get("enqueued_at", 0)
+            ttl = item.get("ttl_seconds", MESSAGE_TTL_SECONDS)
+            if age > ttl:
+                logger.warning(
+                    "Dropped stale CodeAI message %s upon pull (age %.1fs > %ss TTL, discarded)",
+                    item["delivery_id"][:8],
+                    age,
+                    int(ttl),
+                )
+                continue
+
+            item["in_flight_at"] = now
             _CODEAI_IN_FLIGHT[item["delivery_id"]] = item
             return item
     return None
+
+
+def purge_expired_codeai_messages(max_age_sec: float = MESSAGE_TTL_SECONDS) -> int:
+    """Explicitly purge any pending or in-flight messages older than max_age_sec."""
+    now = time.time()
+    purged = 0
+    with _CODEAI_LOCK:
+        valid_items = collections.deque()
+        while _CODEAI_QUEUE:
+            item = _CODEAI_QUEUE.popleft()
+            if (now - item.get("enqueued_at", 0)) <= max_age_sec:
+                valid_items.append(item)
+            else:
+                purged += 1
+        _CODEAI_QUEUE.extend(valid_items)
+
+        expired_inflight = [
+            did for did, it in _CODEAI_IN_FLIGHT.items()
+            if (now - it.get("in_flight_at", it.get("enqueued_at", 0))) > max_age_sec
+        ]
+        for did in expired_inflight:
+            _CODEAI_IN_FLIGHT.pop(did, None)
+            purged += 1
+    if purged > 0:
+        logger.info("Explicitly purged %d stale CodeAI messages older than %ds", purged, int(max_age_sec))
+    return purged
 
 
 def ack_codeai_message(delivery_id: Optional[str]) -> bool:

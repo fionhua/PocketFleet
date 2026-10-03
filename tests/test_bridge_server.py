@@ -130,6 +130,56 @@ class TestPocketFleetBridgeServer(unittest.TestCase):
         self.assertEqual(self.received_posts[0]["sender"], "chatgpt")
         self.assertIn("任务已完成", self.received_posts[0]["text"])
 
+    def test_codeai_queue_ttl_expiry(self) -> None:
+        from pocketfleet.bridge_server import (
+            enqueue_codeai_message,
+            pop_codeai_message,
+            purge_expired_codeai_messages,
+            _CODEAI_LOCK,
+            _CODEAI_QUEUE,
+        )
+
+        with _CODEAI_LOCK:
+            _CODEAI_QUEUE.clear()
+
+        # 1. Enqueue item with short TTL (e.g. 0.1s)
+        did = enqueue_codeai_message(content="Expired prompt test", ttl_seconds=0.1)
+        self.assertNotEqual(did, "duplicate_skipped")
+
+        # Sleep to exceed TTL
+        time.sleep(0.15)
+
+        # 2. pop_codeai_message should drop it and return None
+        item = pop_codeai_message()
+        self.assertIsNone(item, "Expired message must be dropped and not delivered")
+
+    def test_codeai_queue_deduplication(self) -> None:
+        from pocketfleet.bridge_server import (
+            enqueue_codeai_message,
+            pop_codeai_message,
+            _CODEAI_LOCK,
+            _CODEAI_QUEUE,
+            _CODEAI_RECENT_HASHES,
+        )
+
+        with _CODEAI_LOCK:
+            _CODEAI_QUEUE.clear()
+            _CODEAI_RECENT_HASHES.clear()
+
+        # 1. First enqueue succeeds
+        did1 = enqueue_codeai_message(content="Identical meeting briefing test")
+        self.assertNotEqual(did1, "duplicate_skipped")
+
+        # 2. Duplicate enqueue within dedup window is dropped
+        did2 = enqueue_codeai_message(content="Identical meeting briefing test")
+        self.assertEqual(did2, "duplicate_skipped")
+
+        # 3. Only one message is popped
+        item = pop_codeai_message()
+        self.assertIsNotNone(item)
+        self.assertEqual(item["content"], "Identical meeting briefing test")
+        self.assertIsNone(pop_codeai_message(), "Second duplicate message must not be in queue")
+
 
 class TestFleetManagerBridgeIntegration(unittest.TestCase):
     def test_fleet_manager_bridge_lifecycle(self) -> None:
