@@ -508,6 +508,23 @@ class TestDispatchLoop(unittest.TestCase):
             self.assertEqual(len(self.transport.sent_messages), 1)
             self.assertIn("结案闭幕", self.transport.sent_messages[0].text)
 
+            # Re-activate meeting to test unauthorized bot attempt
+            self.loop._active_meeting = {"active": True, "host": "@AiSoulSettlementBot", "topic": "测试议题"}
+            fake_bot_msg = InboundMessage(
+                message_id=4005,
+                chat_id=111,
+                sender_id=99999,
+                sender_name="AiSoulJudgeBot",
+                sender_username="AiSoulJudgeBot",
+                text="/meetover",
+                is_bot=True,
+            )
+            self.transport.sent_messages.clear()
+            self.loop.handle_message(fake_bot_msg)
+            # Must remain active because Judge is not the meeting host!
+            self.assertTrue(self.loop._active_meeting["active"])
+            self.assertEqual(len(self.transport.sent_messages), 0)
+
     def test_parse_telegram_envelope(self):
         from pocketfleet.loop import parse_telegram_envelope
         # 1. Standard waitReply
@@ -542,7 +559,9 @@ class TestDispatchLoop(unittest.TestCase):
         self.assertIn("[mailto] @AiSoulSettlementBot @AiSoulJudgeBot @AiSoulMudSnakeBot", text)
         self.assertIn("【人类指挥官 · PocketFleet联席会议启幕指令】", text)
         self.assertIn("讨论裁决者为什么越战越强的问题", text)
-        self.assertIn("15 分钟无进展自动推进", text)
+        self.assertIn("15 分钟无有效进展自动静默提醒主持人", text)
+        self.assertIn("主持推进义务", text)
+        self.assertIn("闭门鉴权", text)
         self.assertIn("[Telegram]re:ENTJ指挥官;[NoReply]", text)
 
         announcement_msg = InboundMessage(

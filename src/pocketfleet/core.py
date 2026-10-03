@@ -43,6 +43,7 @@ class InboundMessage:
     chat_title: str = ""
     sender_chat_id: int | None = None
     is_anonymous: bool = False
+    sender_username: str = ""
 
 
 @dataclass

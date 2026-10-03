@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import multiprocessing
+
+logger = logging.getLogger("pocketfleet.control_panel")
 import os
 import queue
 import socket
@@ -4414,6 +4416,7 @@ def acquire_single_instance_lock(port: int = 18766) -> bool:
     global _SINGLE_INSTANCE_SOCKET
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", port))
         s.listen(5)
         _SINGLE_INSTANCE_SOCKET = s
@@ -4442,13 +4445,26 @@ def notify_existing_instance_or_takeover(port: int = 18766) -> bool:
     # If socket did not respond with ACK, it's a stale/frozen zombie. Kill it!
     try:
         import subprocess
-        out = subprocess.check_output('netstat -ano | findstr "18766"', shell=True, text=True)
-        for line in out.strip().splitlines():
-            parts = line.split()
-            if len(parts) >= 5 and "LISTENING" in parts:
-                pid = parts[-1]
-                if pid != str(os.getpid()):
-                    subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
+        creation_flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+        res = subprocess.run(
+            'netstat -ano | findstr "18766"',
+            shell=True,
+            capture_output=True,
+            text=True,
+            creationflags=creation_flags,
+        )
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and "LISTENING" in parts:
+                    pid = parts[-1]
+                    if pid != str(os.getpid()):
+                        subprocess.run(
+                            f"taskkill /F /PID {pid}",
+                            shell=True,
+                            capture_output=True,
+                            creationflags=creation_flags,
+                        )
         time.sleep(0.5)
     except Exception as ex:
         logger.error("Failed to kill stale instance: %s", ex)
@@ -4479,18 +4495,21 @@ def start_single_instance_listener(app: "PocketFleetControlApp", port: int = 187
 
 def main():
     multiprocessing.freeze_support()
-    if not acquire_single_instance_lock(18766):
+    acquired = acquire_single_instance_lock(18766)
+    if not acquired:
         # Another instance is already bound. Ask it to bring its window to the front!
         if notify_existing_instance_or_takeover(18766):
             # Existing instance has brought its window to front. Exit cleanly.
             sys.exit(0)
-        # Old zombie was killed, acquire lock now
-        if not acquire_single_instance_lock(18766):
-            sys.exit(0)
+        # Old zombie was killed, try to acquire lock again
+        acquired = acquire_single_instance_lock(18766)
+        # Even if lock wasn't re-acquired (e.g. socket in TIME_WAIT), do NOT exit;
+        # proceed to launch the UI so the user always sees their application!
 
     root = tk.Tk()
     app = PocketFleetControlApp(root)
-    start_single_instance_listener(app, 18766)
+    if acquired:
+        start_single_instance_listener(app, 18766)
     root.mainloop()
 
 

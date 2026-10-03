@@ -488,15 +488,17 @@ class DispatchLoop:
             f"📌 会议议题：{topic}\n"
             f"🌾 召集人：{human}\n"
             f"🎛️ 会议主持人：{host_display_name} (`{host_bot}`)\n"
-            f"⏱️ 看门狗推进：{watchdog_minutes} 分钟无有效会议进展报警\n\n"
+            f"⏱️ 监护推进：{watchdog_minutes} 分钟无有效会议进展自动提醒\n\n"
             f"### 一、 参会席位名单与职责\n"
             f"{p_str_formatted}\n\n"
-            f"### 二、 战队出站发信锁死语法规范（严格遵循，杜绝回声死循环）\n"
-            f"• 语法定义：首行必须严格为 [Telegram]re:@BotId;[waitReply] 或 [Telegram]re:@BotId;[NoReply]\n"
-            f"• 点名交锋（需对方回答）：`[Telegram]re:{target_example_1};[waitReply]`\n"
-            f"• 结案/纯同步（通知对方免回）：`[Telegram]re:{target_example_2};[NoReply]`\n"
-            f"• 阻断机制：网桥检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n"
-            f"• 闭幕方式：议程达成共识后，由主持人在群内发送 `/meetover` 正式结案闭幕。\n\n"
+            f"### 二、 战队出站发信与防回声纪律（严格遵循）\n"
+            f"• 语法定义：首行必须严格二选一：\n"
+            f"  - 需对方继续行动或作答（移交执行权）：`[Telegram]re:@TargetBot;[waitReply]`\n"
+            f"  - 仅同步进展、入席确认或结案（不移交执行权）：`[Telegram]re:ENTJ指挥官;[NoReply]`\n"
+            f"• 阻断机制：网桥检测到 [NoReply] 时，回复仍保留在群里供人类审阅，但自动脱敏 @ 触发符，彻底阻断回声！\n\n"
+            f"### 三、 主持人推进与闭门义务\n"
+            f"1. 🔄 【主持推进义务】：主持人负有推进到底的义务，严禁仅以“收到/知悉/同意”等纯 ACK 结束发言；每轮必须明确下一个受令节点，或在遇阻时明确向指挥官报告。\n"
+            f"2. 🏁 【闭门鉴权】：仅【指挥官】与【主持人】有权发送 `/meetover` 闭会；主持人确认充分研讨并给出最终会议总结后，方可发送 `/meetover` 结案归档。\n\n"
             f"👉 请主持人【{host_display_name}】率先开场发言，就议题展开第一手深度剖析，向参会节点分配任务并启动研讨！"
         )
 
@@ -584,6 +586,20 @@ class DispatchLoop:
 
     def _handle_fleet_meeting_over(self, msg: InboundMessage) -> None:
         """Handle Starfleet Council meeting conclusion and watchdog termination."""
+        # Check authorization: only Human Commander or current Host can conclude the meeting
+        if self._active_meeting and self._active_meeting.get("active"):
+            host = (self._active_meeting.get("host") or "").lower()
+            sender_u = (getattr(msg, "sender_username", "") or "").lower()
+            if sender_u and not sender_u.startswith("@"):
+                sender_u = "@" + sender_u
+            # If sender is an AI bot (ends with 'bot') and is NOT the designated meeting host:
+            if sender_u.endswith("bot") and sender_u != host:
+                logger.warning(
+                    "Unauthorized /meetover attempt by non-host bot %s (host is %s). Ignored.",
+                    sender_u, host
+                )
+                return None
+
         topic = "本次会议"
         duration_min = 1
         turns = 0
