@@ -679,6 +679,7 @@ def send_agentapi_message(
         cmd = [comspec, "/c"] + cmd
 
     try:
+        no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
         proc = subprocess.run(
             cmd,
             capture_output=True,
@@ -687,6 +688,7 @@ def send_agentapi_message(
             errors="replace",
             timeout=timeout,
             check=False,
+            creationflags=no_win,
         )
         return proc.returncode == 0
     except Exception as exc:

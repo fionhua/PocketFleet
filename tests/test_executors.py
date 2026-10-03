@@ -83,6 +83,35 @@ class TestExecutors(unittest.TestCase):
             self.assertEqual(mock_popen.call_args[0][0], ["aider", "--message", "Refactor module", "--yes"])
             self.assertEqual(mock_popen.call_args[1]["stdin"], subprocess.DEVNULL)
 
+    def test_run_safe_process_tree_windows_creationflags(self):
+        from pocketfleet.executors.base import run_safe_process_tree
+
+        mock_proc = mock.MagicMock()
+        mock_proc.communicate.return_value = ("output", "")
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+
+        with mock.patch("sys.platform", "win32"), mock.patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+            code, out, err = run_safe_process_tree(["echo", "hello"])
+            self.assertEqual(code, 0)
+            creationflags = mock_popen.call_args.kwargs.get("creationflags", 0)
+            self.assertTrue(creationflags & subprocess.CREATE_NEW_PROCESS_GROUP)
+            self.assertTrue(creationflags & getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
+    def test_kill_proc_tree_windows_creationflags(self):
+        from pocketfleet.executors.base import kill_proc_tree
+
+        mock_proc = mock.MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.poll.return_value = None
+
+        with mock.patch("sys.platform", "win32"), mock.patch("subprocess.run") as mock_run:
+            kill_proc_tree(mock_proc)
+            mock_run.assert_called_once()
+            args, kwargs = mock_run.call_args
+            self.assertEqual(args[0], ["taskkill", "/F", "/T", "/PID", "12345"])
+            self.assertEqual(kwargs.get("creationflags"), getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
 
 if __name__ == "__main__":
     unittest.main()

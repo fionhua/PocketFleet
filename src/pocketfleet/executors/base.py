@@ -37,7 +37,8 @@ def kill_proc_tree(proc: subprocess.Popen) -> None:
     is_win = sys.platform == "win32"
     if is_win:
         try:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+            no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=5, creationflags=no_win)
         except Exception:
             try:
                 proc.kill()
@@ -66,7 +67,8 @@ def run_safe_process_tree(
 ) -> Tuple[int, str, str]:
     """Execute command in isolated process group with tree termination on timeout or cancellation."""
     is_win = sys.platform == "win32"
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if is_win else 0
+    no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    creationflags = (subprocess.CREATE_NEW_PROCESS_GROUP | no_win) if is_win else 0
     preexec_fn = None if is_win else getattr(os, "setsid", None)
 
     try:
