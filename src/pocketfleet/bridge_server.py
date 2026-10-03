@@ -234,9 +234,20 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if path == "/api/v1/tools":
-            self._send_json_response(200, {"ok": True, "tools": []})
-            return
+        if path in ("/", "/miniapp", "/miniapp/", "/miniapp/index.html"):
+            for candidate in [
+                Path(__file__).resolve().parent.parent.parent / "miniapp" / "index.html",
+                Path(__file__).resolve().parent.parent.parent / "index.html",
+            ]:
+                if candidate.is_file():
+                    content = candidate.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(content)))
+                    self._send_cors_headers()
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
 
         self._send_json_response(404, {"error": f"Not found: {path}"})
 

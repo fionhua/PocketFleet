@@ -811,9 +811,10 @@
 
       showToast("🚀 正在召集会议...");
 
-      // 1. Direct Kickoff via Local Web Bridge (Zero-hop Telegram dispatch)
-      let bridgeDispatched = false;
-      fetch("http://127.0.0.1:18765/api/v1/meet/kickoff", {
+      let dispatched = false;
+
+      // 1. Try Cloudflare Pages Serverless Function (/api/meet) - Works on HTTPS & Mobile with Zero Mixed-Content
+      fetch("/api/meet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: jsonStr
@@ -821,22 +822,47 @@
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
-          bridgeDispatched = true;
+          dispatched = true;
           showToast("🏛️ 会议公文已发布至战队群！");
           setTimeout(() => {
             if (tg && tg.close) { try { tg.close(); } catch(e){} }
           }, 800);
         } else {
-          doFallback();
+          tryLocalBridge();
         }
       })
       .catch(() => {
-        doFallback();
+        tryLocalBridge();
       });
 
+      function tryLocalBridge() {
+        if (dispatched) return;
+        // 2. Direct Kickoff via Local Web Bridge (Zero-hop Telegram dispatch)
+        fetch("http://127.0.0.1:18765/api/v1/meet/kickoff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: jsonStr
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok) {
+            dispatched = true;
+            showToast("🏛️ 会议公文已发布至战队群！");
+            setTimeout(() => {
+              if (tg && tg.close) { try { tg.close(); } catch(e){} }
+            }, 800);
+          } else {
+            doFallback();
+          }
+        })
+        .catch(() => {
+          doFallback();
+        });
+      }
+
       function doFallback() {
-        if (bridgeDispatched) return;
-        // 2. Try native tg.sendData if in active bot chat
+        if (dispatched) return;
+        // 3. Try native tg.sendData if in active bot chat
         if (tg && tg.sendData) {
           try {
             tg.sendData(jsonStr);
@@ -850,7 +876,7 @@
           }
         }
 
-        // 3. Fallback: Telegram share URL to prefill command into chat with 1 tap
+        // 4. Fallback: Telegram share URL to prefill command into chat with 1 tap
         showToast("📋 召集指令已复制！正在跳转群聊...");
         const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
         setTimeout(() => {
