@@ -416,6 +416,100 @@ class TestDispatchLoop(unittest.TestCase):
             self.assertNotIn("已递交至 ChatGPT 网页端网桥处理", sent.text)
 
 
+    def test_defang_telegram_mentions(self):
+        from pocketfleet.loop import defang_telegram_mentions
+        sample = "[Telegram]re:@AiSoulJudgeBot[NoReply] 任务已完成，请对账 @AiSoulSettlementBot 抄送 @RandomBot"
+        defanged = defang_telegram_mentions(sample)
+        self.assertNotIn("@AiSoulJudgeBot", defanged)
+        self.assertNotIn("@AiSoulSettlementBot", defanged)
+        self.assertNotIn("@RandomBot", defanged)
+        self.assertIn("裁决者 (免回)", defanged)
+        self.assertIn("结算主机 (免回)", defanged)
+        self.assertIn("[RandomBot · 免回]", defanged)
+
+    def test_fleet_meeting_kickoff_and_briefing(self):
+        meet_msg = InboundMessage(
+            message_id=4001,
+            chat_id=111,
+            sender_id=12345,
+            sender_name="Commander",
+            text="/meet 招股书退市风险评估",
+            is_bot=False,
+        )
+        with mock.patch("pocketfleet.bridge_server.enqueue_codeai_message") as mock_enqueue, \
+             mock.patch("pocketfleet.bridge_server.is_web_bridge_connected", return_value=(True, "OK")):
+            res = self.loop.handle_message(meet_msg)
+            self.assertIsNone(res)
+            # 1. Announcement sent to TG
+            self.assertEqual(len(self.transport.sent_messages), 1)
+            sent = self.transport.sent_messages[0]
+            self.assertIn("【AI星舰联席会议已召开】", sent.text)
+            self.assertIn("招股书退市风险评估", sent.text)
+            # 2. Briefing enqueued for host
+            mock_enqueue.assert_called_once()
+            call_kwargs = mock_enqueue.call_args[1]
+            self.assertIn("招股书退市风险评估", call_kwargs["content"])
+            self.assertEqual(call_kwargs["channel"], "duty-wake")
+            # 3. Active meeting registered
+            self.assertIsNotNone(self.loop._active_meeting)
+            self.assertTrue(self.loop._active_meeting["active"])
+            self.assertEqual(self.loop._active_meeting["topic"], "招股书退市风险评估")
+
+    def test_fleet_meeting_miniapp_json(self):
+        miniapp_msg = InboundMessage(
+            message_id=4002,
+            chat_id=111,
+            sender_id=12345,
+            sender_name="Commander",
+            text='{"action": "meet", "topic": "自研防回声网桥落地", "host": "@AiSoulSettlementBot", "watchdog_minutes": 3}',
+            is_bot=False,
+        )
+        with mock.patch("pocketfleet.bridge_server.enqueue_codeai_message") as mock_enqueue, \
+             mock.patch("pocketfleet.bridge_server.is_web_bridge_connected", return_value=(True, "OK")):
+            self.loop.handle_message(miniapp_msg)
+            self.assertIsNotNone(self.loop._active_meeting)
+            self.assertTrue(self.loop._active_meeting["active"])
+            self.assertEqual(self.loop._active_meeting["topic"], "自研防回声网桥落地")
+            self.assertEqual(self.loop._active_meeting["watchdog_sec"], 180)
+
+    def test_fleet_meeting_watchdog_and_meetover(self):
+        meet_msg = InboundMessage(
+            message_id=4003,
+            chat_id=111,
+            sender_id=12345,
+            sender_name="Commander",
+            text="/meet 性能调优",
+            is_bot=False,
+        )
+        with mock.patch("pocketfleet.bridge_server.enqueue_codeai_message"), \
+             mock.patch("pocketfleet.bridge_server.is_web_bridge_connected", return_value=(True, "OK")):
+            self.loop.handle_message(meet_msg)
+            self.assertTrue(self.loop._active_meeting["active"])
+
+            # Fast forward time to trigger watchdog
+            self.loop._last_meeting_activity_ts = time.time() - 360
+            self.transport.sent_messages.clear()
+            self.loop._check_meeting_watchdog()
+            self.assertEqual(len(self.transport.sent_messages), 1)
+            self.assertIn("进度推进看门狗", self.transport.sent_messages[0].text)
+
+            # Send /meetover to close meeting
+            over_msg = InboundMessage(
+                message_id=4004,
+                chat_id=111,
+                sender_id=12345,
+                sender_name="Commander",
+                text="/meetover",
+                is_bot=False,
+            )
+            self.transport.sent_messages.clear()
+            self.loop.handle_message(over_msg)
+            self.assertFalse(self.loop._active_meeting["active"])
+            self.assertEqual(len(self.transport.sent_messages), 1)
+            self.assertIn("圆满闭幕", self.transport.sent_messages[0].text)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

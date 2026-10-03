@@ -121,7 +121,8 @@ class TelegramTransport(BaseTransport):
             if not msg_obj:
                 continue
 
-            text = msg_obj.get("text") or msg_obj.get("caption") or ""
+            web_app_data = msg_obj.get("web_app_data", {}).get("data", "")
+            text = web_app_data or msg_obj.get("text") or msg_obj.get("caption") or ""
             from_obj = msg_obj.get("from") or {}
             chat_obj = msg_obj.get("chat") or {}
             chat_type = chat_obj.get("type", "group")

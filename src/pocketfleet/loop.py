@@ -42,6 +42,22 @@ from .transport.base import BaseTransport
 logger = logging.getLogger(__name__)
 
 
+def defang_telegram_mentions(text: str) -> str:
+    """Transform active @BotName mentions into read-only display text so recipients don't re-trigger."""
+    import re
+    replacements = {
+        r"@aisoulsettlementbot\b": "结算主机 (免回)",
+        r"@aisouljudgebot\b": "裁决者 (免回)",
+        r"@aisoulmudsnakebot\b": "泥蛇 (免回)",
+    }
+    defanged = text
+    for pattern, rep in replacements.items():
+        defanged = re.sub(pattern, rep, defanged, flags=re.IGNORECASE)
+    # Generic fallback: defang any remaining @[name]bot into [name · 免回]
+    defanged = re.sub(r"@([a-zA-Z0-9_]+bot)\b", r"[\1 · 免回]", defanged, flags=re.IGNORECASE)
+    return defanged
+
+
 class DispatchLoop:
     def __init__(
         self,
@@ -69,6 +85,8 @@ class DispatchLoop:
         self.role_assignment = role_assignment
         self.running = False
         self._pending_tg_events: Dict[str, tuple[int, int, str, float]] = {}
+        self._active_meeting: Optional[dict[str, Any]] = None
+        self._last_meeting_activity_ts: float = 0.0
 
         if seats_config:
             self.seats_config = seats_config
@@ -249,6 +267,174 @@ class DispatchLoop:
             f"{prompt}"
         )
 
+    def _handle_fleet_meeting(
+        self,
+        msg: InboundMessage,
+        meet_arg: str,
+        host_override: Optional[str] = None,
+        watchdog_minutes: int = 5,
+        participants: Optional[list] = None,
+    ) -> None:
+        """Handle Starfleet Council meeting convening, participants briefing, and silent watchdog."""
+        human = msg.sender_name.strip() if msg.sender_name else "人类指挥官"
+
+        # Resolve all participants from seats_config
+        seats_map = getattr(self.seats_config, "seats", {}) if self.seats_config else {}
+        chat_seat = seats_map.get("chat")
+        lead_seat = seats_map.get("lead")
+        builder_seat = seats_map.get("builder")
+
+        chat_u = (chat_seat.bot_username if chat_seat else "@AiSoulSettlementBot") or "@AiSoulSettlementBot"
+        lead_u = (lead_seat.bot_username if lead_seat else "@AiSoulJudgeBot") or "@AiSoulJudgeBot"
+        builder_u = (builder_seat.bot_username if builder_seat else "@AiSoulMudSnakeBot") or "@AiSoulMudSnakeBot"
+
+        chat_name = (chat_seat.name if chat_seat else "结算主机") or "结算主机"
+        lead_name = (lead_seat.name if lead_seat else "裁决者") or "裁决者"
+        builder_name = (builder_seat.name if builder_seat else "泥蛇") or "泥蛇"
+
+        import re
+        topic = meet_arg.strip()
+        host_bot = host_override
+        m_host = re.search(r"@([a-zA-Z0-9_]+bot)\b", topic, re.IGNORECASE)
+        if m_host:
+            host_bot = "@" + m_host.group(1).lower()
+            topic = re.sub(r"@([a-zA-Z0-9_]+bot)\b", "", topic, flags=re.IGNORECASE).strip()
+
+        if not host_bot:
+            host_bot = chat_u
+
+        if not topic:
+            card = (
+                "🏛️ *【AI星舰联席会议中心】已就绪*\n\n"
+                "参会席位已按战队配置自动归位：\n"
+                f"• 🎛️ *默认主持*：{chat_name} (`{chat_u}`) — 方案推演与会议对账\n"
+                f"• ⚖️ *审计席*：{lead_name} (`{lead_u}`) — 架构守门与防御审计\n"
+                f"• 🐍 *施工席*：{builder_name} (`{builder_u}`) — 工程定桩与算法实现\n\n"
+                "💬 *请直接在群里发送本次会议的研讨【议题】或资料*（例如：`/meet 招股书退市风险评估`），全员会议立即开席！"
+            )
+            self._send_immediate_or_outbox(chat_id=msg.chat_id, text=card, reply_to_message_id=msg.message_id)
+            return None
+
+        # Record active meeting session
+        wd_sec = max(60, int(watchdog_minutes * 60)) if watchdog_minutes else 300
+        self._active_meeting = {
+            "active": True,
+            "topic": topic,
+            "host": host_bot,
+            "chat_id": msg.chat_id,
+            "watchdog_sec": wd_sec,
+            "start_ts": time.time(),
+        }
+        self._last_meeting_activity_ts = time.time()
+
+        # Build dynamic seat display
+        seat_lines = []
+        if participants and isinstance(participants, list):
+            for p in participants:
+                p_tag = p if p.startswith("@") else f"@{p}"
+                is_h = " (首发主持)" if p_tag.lower() == host_bot.lower() else ""
+                seat_lines.append(f"• 🤖 `{p_tag}`{is_h}")
+        else:
+            seat_lines = [
+                f"• 🎛️ *主持席*：{chat_name} (`{chat_u}`) — 方案推演与对账" + (" (首发主持)" if host_bot.lower() == chat_u.lower() else ""),
+                f"• ⚖️ *审计席*：{lead_name} (`{lead_u}`) — 架构守门与防御审计" + (" (首发主持)" if host_bot.lower() == lead_u.lower() else ""),
+                f"• 🐍 *施工席*：{builder_name} (`{builder_u}`) — 工程定桩与算法实现" + (" (首发主持)" if host_bot.lower() == builder_u.lower() else ""),
+            ]
+        seats_str = "\n".join(seat_lines)
+
+        # 1. Telegram Group Kickoff Announcement
+        announcement = (
+            f"🏛️ *【AI星舰联席会议已召开】*\n"
+            f"📌 *议题*：{topic}\n"
+            f"🌾 *召集人*：{human}\n"
+            f"⏱️ *推进看门狗*：每 {watchdog_minutes} 分钟静默监护\n\n"
+            f"参会席位（基于战队配置自动就位）：\n"
+            f"{seats_str}\n\n"
+            f"📡 议题公文已分发至主持席（`{host_bot}`），正在展开第一手深度推演，请稍候..."
+        )
+        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=announcement, reply_to_message_id=msg.message_id)
+
+        # 2. Canonical Starfleet Meeting Briefing for Host (ChatGPT / Web Bridge)
+        from .bridge_server import enqueue_codeai_message, is_web_bridge_connected
+        connected, reason = is_web_bridge_connected(max_idle_sec=60.0)
+
+        briefing_prompt = (
+            f"# 🏛️ 【AI星舰战队联席会议公文】\n"
+            f"📌 会议议题：{topic}\n"
+            f"🌾 召集人：{human}\n\n"
+            f"### 一、 参会席位与会议分工\n"
+            f"1. 🎛️ 【主持席】{chat_name} ({chat_u})\n"
+            f"   分工：牵头破题、方案推演、会议对账与综合结论。\n"
+            f"2. ⚖️ 【审计席】{lead_name} ({lead_u})\n"
+            f"   分工：架构守门、防崩兜底、代码与逻辑严密审计。\n"
+            f"3. 🐍 【施工席】{builder_name} ({builder_u})\n"
+            f"   分工：工程落地、核心算法实现与技术定桩。\n\n"
+            f"### 二、 会议主持与发信规则\n"
+            f"• 谁开始主持：由【{chat_name}】率先开场发言，就议题展开第一手深度剖析与推演；\n"
+            f"• 战友交接：推演中如需代码或审计支持，文末以 [Telegram]re:{lead_u}[waitReply] 或 [Telegram]re:{builder_u}[waitReply] 点名交接；\n"
+            f"• 结案/通知：纯同步信息请带上 [NoReply]；\n"
+            f"• 出站发信：回复首行带 [Telegram]，网桥将自动实时投递至战队群！\n\n"
+            f"请作为主持席立即开始就本次议题展开深入推演！"
+        )
+
+        enqueue_codeai_message(
+            content=briefing_prompt,
+            filename=f"Telegram_meet_{msg.message_id}.txt",
+            raw=True,
+            channel="duty-wake",
+            source=f"telegram:{msg.chat_id}:{msg.message_id}",
+            target="chat",
+        )
+        self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "chatgpt_web_meeting")
+
+        if not connected:
+            warning_text = (
+                f"⚠️ [PocketFleet 网桥提醒] 结算主机网页未就绪（{reason}）。\n"
+                f"📌 会议公文已在本地网桥队列安全待命，请在浏览器中打开 ChatGPT 网页，确认扩展显示 🟢 已就绪即可自动推进！"
+            )
+            self._send_immediate_or_outbox(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=msg.message_id)
+
+        return None
+
+    def _handle_fleet_meeting_over(self, msg: InboundMessage) -> None:
+        """Handle Starfleet Council meeting conclusion and watchdog termination."""
+        topic = "本次会议"
+        if self._active_meeting:
+            topic = self._active_meeting.get("topic", "本次会议")
+            self._active_meeting["active"] = False
+
+        closing_card = (
+            f"🏁 *【AI星舰联席会议 · 圆满闭幕】*\n\n"
+            f"📌 *议题*：{topic}\n"
+            f"✅ 会议看门狗已安全停止，各席位自动转入常规待命态。\n"
+            f"🌾 战队协同推演结案，感谢指挥官与各席位的高效推进！"
+        )
+        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=closing_card, reply_to_message_id=msg.message_id)
+        return None
+
+    def _check_meeting_watchdog(self) -> None:
+        """Silent watchdog: if no activity detected for X minutes, ping host to advance agenda."""
+        if not self._active_meeting or not self._active_meeting.get("active"):
+            return
+        now = time.time()
+        timeout_sec = self._active_meeting.get("watchdog_sec", 300)
+        chat_id = self._active_meeting.get("chat_id")
+        if not chat_id:
+            return
+        if now - self._last_meeting_activity_ts >= timeout_sec:
+            host = self._active_meeting.get("host", "@AiSoulSettlementBot")
+            topic = self._active_meeting.get("topic", "本次议题")
+            minutes = max(1, int(timeout_sec // 60))
+            reminder = (
+                f"⏰ *【星舰联席会议 · 进度推进看门狗】*\n"
+                f"已超过 {minutes} 分钟未检测到会议新动态。\n"
+                f"📌 *议题*：{topic}\n"
+                f"👉 请主持席 `{host}` 推进议程分工；若议题讨论已完成，请发送 `/meetover` 正式闭幕。"
+            )
+            self._send_immediate_or_outbox(chat_id=chat_id, text=reminder)
+            # Reset timestamp so next ping occurs in timeout_sec
+            self._last_meeting_activity_ts = now
+
 
     def _send_immediate_or_outbox(
         self,
@@ -422,6 +608,45 @@ class DispatchLoop:
         raw_text = (msg.text or "").strip()
         if not raw_text:
             return None
+
+        # Update meeting watchdog activity timer if meeting is currently in progress
+        if self._active_meeting and self._active_meeting.get("active"):
+            if msg.chat_id == self._active_meeting.get("chat_id"):
+                self._last_meeting_activity_ts = time.time()
+
+        clean_text = raw_text.strip()
+        # Telegram Mini App submission (web_app_data)
+        if clean_text.startswith("{") and ("topic" in clean_text or "meet" in clean_text or "action" in clean_text):
+            try:
+                import json
+                data = json.loads(clean_text)
+                if isinstance(data, dict) and (data.get("action") == "meet" or "topic" in data):
+                    m_topic = data.get("topic", "").strip()
+                    m_host = data.get("host", None)
+                    m_watchdog = int(data.get("watchdog_minutes", 5))
+                    m_participants = data.get("participants", None)
+                    return self._handle_fleet_meeting(
+                        msg=msg,
+                        meet_arg=m_topic,
+                        host_override=m_host,
+                        watchdog_minutes=m_watchdog,
+                        participants=m_participants,
+                    )
+            except Exception as e:
+                logger.debug("Failed parsing inbound JSON as MiniApp meet data: %s", e)
+
+        # /meetover or #MEET_OVER or #MEET_SUMMARY
+        if clean_text.lower().startswith("/meetover") or clean_text.startswith("#MEET_OVER") or clean_text.startswith("#MEET_SUMMARY"):
+            return self._handle_fleet_meeting_over(msg)
+
+        # /meet or /meeting
+        if clean_text.lower().startswith("/meet") or clean_text.lower().startswith("/meeting"):
+            arg = ""
+            if clean_text.lower().startswith("/meeting"):
+                arg = clean_text[8:].strip()
+            elif clean_text.lower().startswith("/meet"):
+                arg = clean_text[5:].strip()
+            return self._handle_fleet_meeting(msg=msg, meet_arg=arg)
         # Detect bot mention before stripping to auto-route to designated seat
         import re
         mentioned_worker: WorkerType | None = None
@@ -762,15 +987,30 @@ class DispatchLoop:
                 if pending_info:
                     chat_id, reply_to_id, _, _ = pending_info
 
+            is_noreply = False
+            p_lower = (ev.prompt or "").lower()
+            if "[noreply]" in p_lower or "【免回】" in (ev.prompt or "") or "mode:[noreply]" in p_lower:
+                is_noreply = True
+
             if ev.status == "completed":
                 res_preview = (ev.response or "")[-1500:] if len(ev.response or "") > 1500 else (ev.response or "Success")
-                reply_text = (
-                    f"✅ *Task Completed* [lead:antigravity]\n"
-                    f"Event: `{ev.event_id[:8]}`\n"
-                    f"```text\n{res_preview}\n```"
-                )
+                if is_noreply:
+                    res_preview = defang_telegram_mentions(res_preview)
+                    reply_text = (
+                        f"📋 *【战队协同 · 执行结案（免回）】*\n"
+                        f"🎯 *任务席位*：`{ev.seat_id or 'lead'}` (`{ev.event_id[:8]}`)\n\n"
+                        f"```text\n{res_preview}\n```"
+                    )
+                else:
+                    reply_text = (
+                        f"✅ *Task Completed* [lead:antigravity]\n"
+                        f"Event: `{ev.event_id[:8]}`\n"
+                        f"```text\n{res_preview}\n```"
+                    )
             else:
                 err_preview = (ev.error or ev.response or "Unknown error")[-1000:]
+                if is_noreply:
+                    err_preview = defang_telegram_mentions(err_preview)
                 reply_text = (
                     f"❌ *Task Failed* [lead:antigravity] (exit code {ev.exit_code or 1})\n"
                     f"Event: `{ev.event_id[:8]}`\n"
@@ -866,17 +1106,30 @@ class DispatchLoop:
             with self._status_lock:
                 self.current_running_task = None
 
+            is_noreply = False
+            p_lower = (prompt or "").lower()
+            if "[noreply]" in p_lower or "【免回】" in (prompt or "") or "mode:[noreply]" in p_lower:
+                is_noreply = True
+
             if code == 0:
                 task.mark_completed(stdout, exit_code=0)
                 self.state_store.record_message_finish(msg.message_id, "COMPLETED", 0)
                 if executor.name == "fleet_triad":
-                    reply_text = stdout
+                    reply_text = defang_telegram_mentions(stdout) if is_noreply else stdout
                 else:
                     res_preview = stdout[-1500:] if len(stdout) > 1500 else stdout
-                    reply_text = (
-                        f"✅ *Task Completed* [{executor.name}]\n"
-                        f"```text\n{res_preview}\n```"
-                    )
+                    if is_noreply:
+                        res_preview = defang_telegram_mentions(res_preview)
+                        reply_text = (
+                            f"📋 *【战队协同 · 执行结案（免回）】*\n"
+                            f"🎯 *执行席*：[{executor.name}]\n\n"
+                            f"```text\n{res_preview}\n```"
+                        )
+                    else:
+                        reply_text = (
+                            f"✅ *Task Completed* [{executor.name}]\n"
+                            f"```text\n{res_preview}\n```"
+                        )
 
                 telemetry.record_task(
                     prompt=prompt,
@@ -889,6 +1142,8 @@ class DispatchLoop:
                 task.mark_failed(stderr or stdout, exit_code=code)
                 self.state_store.record_message_finish(msg.message_id, "FAILED", code)
                 err_preview = (stderr or stdout)[-1000:]
+                if is_noreply:
+                    err_preview = defang_telegram_mentions(err_preview)
                 reply_text = (
                     f"❌ *Task Failed* [{executor.name}] (exit code {code})\n"
                     f"```text\n{err_preview}\n```"
@@ -919,7 +1174,13 @@ class DispatchLoop:
         except Exception as outbox_err:
             logger.warning("Outbox flush error: %s", outbox_err)
 
-        # 2. Poll completed events and deliver results
+        # 2. Check meeting watchdog
+        try:
+            self._check_meeting_watchdog()
+        except Exception as wd_err:
+            logger.debug("Meeting watchdog error: %s", wd_err)
+
+        # 3. Poll completed events and deliver results
         try:
             self._poll_and_report_events()
         except Exception as rep_err:

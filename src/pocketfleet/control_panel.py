@@ -3294,6 +3294,14 @@ class FleetManager:
                 if text and self.dispatch_loop and getattr(self.dispatch_loop, "running", False):
                     try:
                         self.log(f"📨 [BRIDGE] Outbound from {sender}: {text[:60]}...")
+                        # If message contains [NoReply] / 【免回】, apply defanged mention transformation
+                        # so recipients are visible to Human Commander in Telegram without triggering a bot reply
+                        t_lower = text.lower()
+                        if "[noreply]" in t_lower or "【免回】" in text or "mode:[noreply]" in t_lower:
+                            from pocketfleet.loop import defang_telegram_mentions
+                            text = defang_telegram_mentions(text)
+                            self.log("🛡️ [ANTI-ECHO] Applied defanged read-only mention transformation for [NoReply]")
+
                         chats = getattr(self.dispatch_loop, "allowed_chat_ids", None)
                         if chats:
                             from pocketfleet.core import OutboundMessage
@@ -3478,6 +3486,7 @@ class FleetManager:
             except Exception:
                 pass
 
+            seats_cfg = self.load_seats_config()
             auth_uids = set(seats_cfg.authorized_user_ids) if seats_cfg.authorized_user_ids else None
             transport = TelegramTransport(bot_token=token, state_store=state_store)
             self.dispatch_loop = DispatchLoop(

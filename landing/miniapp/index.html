@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI星舰联席会议 · 召集仪轨</title>
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: var(--tg-theme-bg-color, #0d1117);
+      --bg-secondary: var(--tg-theme-secondary-bg-color, #161b22);
+      --bg-card: rgba(255, 255, 255, 0.04);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: var(--tg-theme-text-color, #f0f6fc);
+      --text-muted: var(--tg-theme-hint-color, #8b949e);
+      --accent-cyan: #00e5ff;
+      --accent-blue: var(--tg-theme-button-color, #2f80ed);
+      --accent-purple: #a855f7;
+      --accent-gold: #f59e0b;
+      --accent-green: #10b981;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --shadow-glow: 0 0 20px rgba(0, 229, 255, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      padding: 16px;
+      padding-bottom: 96px;
+      line-height: 1.5;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header Banner */
+    .header {
+      margin-bottom: 20px;
+      text-align: center;
+      position: relative;
+    }
+
+    .badge-starfleet {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: rgba(0, 229, 255, 0.1);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent-cyan);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .badge-starfleet .dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--accent-cyan);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent-cyan);
+    }
+
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Section Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .section-title .icon {
+      font-size: 15px;
+    }
+
+    /* Participants Checklist */
+    .participant-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .participant-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .participant-item.selected {
+      background: rgba(47, 128, 237, 0.12);
+      border-color: rgba(47, 128, 237, 0.4);
+    }
+
+    .p-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .p-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .p-details {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .p-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-main);
+    }
+
+    .p-role {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .checkbox-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      border: 1.5px solid var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .participant-item.selected .checkbox-box {
+      background-color: var(--accent-blue);
+      border-color: var(--accent-blue);
+    }
+
+    .checkbox-box svg {
+      display: none;
+      width: 12px;
+      height: 12px;
+      fill: white;
+    }
+
+    .participant-item.selected .checkbox-box svg {
+      display: block;
+    }
+
+    /* Host Selector (Radio) */
+    .host-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .host-btn {
+      padding: 10px 8px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-size: 12px;
+      text-align: center;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .host-btn.active {
+      background: rgba(0, 229, 255, 0.12);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      font-weight: 600;
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.15);
+    }
+
+    .host-btn .host-icon {
+      font-size: 16px;
+    }
+
+    /* Agenda Textarea */
+    .agenda-input-wrap {
+      position: relative;
+    }
+
+    textarea.agenda-input {
+      width: 100%;
+      height: 90px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-card);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      color: var(--text-main);
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    textarea.agenda-input:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.15);
+    }
+
+    textarea.agenda-input::placeholder {
+      color: #6e7681;
+    }
+
+    .quick-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .tag-chip {
+      padding: 3px 8px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      font-size: 11px;
+      color: #8b949e;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tag-chip:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Watchdog Options */
+    .watchdog-options {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .wd-pill {
+      padding: 8px 4px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      color: var(--text-muted);
+    }
+
+    .wd-pill.active {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: var(--accent-gold);
+      color: var(--accent-gold);
+      font-weight: 600;
+    }
+
+    .hint-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    /* Fixed Bottom Action Bar */
+    .bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 14px 16px;
+      background: rgba(13, 17, 23, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-top: 1px solid var(--border-card);
+      display: flex;
+      gap: 10px;
+      z-index: 100;
+    }
+
+    .btn-kickoff {
+      flex: 1;
+      height: 46px;
+      background: linear-gradient(135deg, #00e5ff 0%, #2f80ed 100%);
+      color: #0d1117;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 15px rgba(0, 229, 255, 0.3);
+      transition: all 0.2s ease;
+    }
+
+    .btn-kickoff:active {
+      transform: scale(0.98);
+      filter: brightness(0.9);
+    }
+
+    .btn-close-meeting {
+      padding: 0 14px;
+      height: 46px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      color: #f87171;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-close-meeting:active {
+      background: rgba(239, 68, 68, 0.15);
+    }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid var(--accent-cyan);
+      color: var(--text-main);
+      padding: 10px 18px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      box-shadow: var(--shadow-glow);
+      z-index: 999;
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Toast -->
+  <div id="toast" class="toast">
+    <span>📡</span>
+    <span id="toast-text">公文已分发</span>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="badge-starfleet">
+      <span class="dot"></span>
+      PocketFleet Council
+    </div>
+    <h1 class="title">AI星舰联席会议 · 召集仪轨</h1>
+    <p class="subtitle">零云端开销 · Telegram 原生即时推演与防回声闭环</p>
+  </div>
+
+  <!-- 1. 参会席位 (Checklist) -->
+  <div class="card">
+    <div class="section-title">
+      <span class="icon">🤖</span>
+      <span>1. 参会席位勾选 (Participants)</span>
+    </div>
+    <div class="participant-list" id="participant-list">
+      <!-- 结算主机 -->
+      <div class="participant-item selected" data-bot="@AiSoulSettlementBot" data-name="结算主机" onclick="toggleParticipant(this)">
+        <div class="p-info">
+          <div class="p-avatar" style="color: #a855f7;">🎛️</div>
+          <div class="p-details">
+            <span class="p-name">结算主机 (ChatGPT Web)</span>
+            <span class="p-role">@AiSoulSettlementBot · 方案推演 / 会议对账</span>
+          </div>
+        </div>
+        <div class="checkbox-box">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+      </div>
+
+      <!-- 裁决者 -->
+      <div class="participant-item selected" data-bot="@AiSoulJudgeBot" data-name="裁决者" onclick="toggleParticipant(this)">
+        <div class="p-info">
+          <div class="p-avatar" style="color: #00e5ff;">⚖️</div>
+          <div class="p-details">
+            <span class="p-name">裁决者🌈 (Antigravity)</span>
+            <span class="p-role">@AiSoulJudgeBot · 架构守门 / 防御审计</span>
+          </div>
+        </div>
+        <div class="checkbox-box">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+      </div>
+
+      <!-- 泥蛇 -->
+      <div class="participant-item selected" data-bot="@AiSoulMudSnakeBot" data-name="泥蛇" onclick="toggleParticipant(this)">
+        <div class="p-info">
+          <div class="p-avatar" style="color: #10b981;">🐍</div>
+          <div class="p-details">
+            <span class="p-name">泥蛇H (Codex / Aider)</span>
+            <span class="p-role">@AiSoulMudSnakeBot · 工程定桩 / 算法实现</span>
+          </div>
+        </div>
+        <div class="checkbox-box">
+          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 指定会议主持人 (Host) -->
+  <div class="card">
+    <div class="section-title">
+      <span class="icon">👑</span>
+      <span>2. 指定首发主持人 (Meeting Host)</span>
+    </div>
+    <div class="host-grid" id="host-grid">
+      <div class="host-btn active" data-bot="@AiSoulSettlementBot" onclick="selectHost(this)">
+        <span class="host-icon">🎛️</span>
+        <span>结算主机</span>
+      </div>
+      <div class="host-btn" data-bot="@AiSoulJudgeBot" onclick="selectHost(this)">
+        <span class="host-icon">⚖️</span>
+        <span>裁决者</span>
+      </div>
+      <div class="host-btn" data-bot="@AiSoulMudSnakeBot" onclick="selectHost(this)">
+        <span class="host-icon">🐍</span>
+        <span>泥蛇</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 会议研讨主题与资料 (Agenda) -->
+  <div class="card">
+    <div class="section-title">
+      <span class="icon">📌</span>
+      <span>3. 会议研讨主题与资料 (Agenda)</span>
+    </div>
+    <div class="agenda-input-wrap">
+      <textarea id="agenda-input" class="agenda-input" placeholder="输入本次会议研讨议题或需审查的代码/资料（例如：招股书退市风险评估、防回声网桥落地审查）..."></textarea>
+    </div>
+    <div class="quick-tags">
+      <span class="tag-chip" onclick="setTopic('招股书退市风险全景评估')">📈 退市风险评估</span>
+      <span class="tag-chip" onclick="setTopic('自研防回声网桥与触发符脱敏审计')">🛡️ 防回声网桥落地</span>
+      <span class="tag-chip" onclick="setTopic('缠论顶底背驰算法核心定桩')">🐍 缠论核心算法</span>
+      <span class="tag-chip" onclick="setTopic('星舰跨会话投递通道压测对账')">⚖️ 投递通道对账</span>
+    </div>
+  </div>
+
+  <!-- 4. 超时推进看门狗 (Watchdog) -->
+  <div class="card">
+    <div class="section-title">
+      <span class="icon">⏱️</span>
+      <span>4. 超时看门狗自动推进 (Silent Watchdog)</span>
+    </div>
+    <div class="watchdog-options" id="wd-options">
+      <div class="wd-pill" data-min="3" onclick="selectWatchdog(this)">3 分钟</div>
+      <div class="wd-pill active" data-min="5" onclick="selectWatchdog(this)">5 分钟</div>
+      <div class="wd-pill" data-min="10" onclick="selectWatchdog(this)">10 分钟</div>
+      <div class="wd-pill" data-min="15" onclick="selectWatchdog(this)">15 分钟</div>
+    </div>
+    <p class="hint-text">💡 主持人若在设定时间内未收到任何战队动态且未闭幕，看门狗将自动在群内温和提醒推进议程。</p>
+  </div>
+
+  <!-- Bottom Action Bar -->
+  <div class="bottom-bar">
+    <button class="btn-close-meeting" onclick="submitCloseMeeting()" title="发送闭幕指令结束当前会议">
+      <span>🏁</span>
+      <span>/meetover</span>
+    </button>
+    <button class="btn-kickoff" onclick="submitMeeting()">
+      <span>🚀</span>
+      <span>立即召集星舰开会</span>
+    </button>
+  </div>
+
+  <script>
+    // Initialize Telegram WebApp SDK
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      if (tg.setHeaderColor) tg.setHeaderColor('#0d1117');
+      if (tg.setBackgroundColor) tg.setBackgroundColor('#0d1117');
+    }
+
+    let selectedHost = "@AiSoulSettlementBot";
+    let selectedWatchdog = 5;
+
+    function toggleParticipant(elem) {
+      elem.classList.toggle('selected');
+      updateHostOptions();
+    }
+
+    function selectHost(elem) {
+      document.querySelectorAll('.host-btn').forEach(btn => btn.classList.remove('active'));
+      elem.classList.add('active');
+      selectedHost = elem.getAttribute('data-bot');
+    }
+
+    function selectWatchdog(elem) {
+      document.querySelectorAll('.wd-pill').forEach(pill => pill.classList.remove('active'));
+      elem.classList.add('active');
+      selectedWatchdog = parseInt(elem.getAttribute('data-min'), 10) || 5;
+    }
+
+    function setTopic(text) {
+      const input = document.getElementById('agenda-input');
+      input.value = text;
+      input.focus();
+    }
+
+    function updateHostOptions() {
+      // Sync host list if participant toggled
+      const activeBots = Array.from(document.querySelectorAll('.participant-item.selected'))
+                              .map(i => i.getAttribute('data-bot'));
+      if (!activeBots.includes(selectedHost) && activeBots.length > 0) {
+        selectedHost = activeBots[0];
+        document.querySelectorAll('.host-btn').forEach(btn => {
+          if (btn.getAttribute('data-bot') === selectedHost) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      const text = document.getElementById('toast-text');
+      text.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    function getSelectedParticipants() {
+      return Array.from(document.querySelectorAll('.participant-item.selected'))
+                  .map(i => i.getAttribute('data-bot'));
+    }
+
+    function submitMeeting() {
+      const topic = document.getElementById('agenda-input').value.trim();
+      if (!topic) {
+        showToast("⚠️ 请先输入会议主题或选择预设议题！");
+        document.getElementById('agenda-input').focus();
+        return;
+      }
+
+      const participants = getSelectedParticipants();
+      if (participants.length === 0) {
+        showToast("⚠️ 请至少选择一个参会席位！");
+        return;
+      }
+
+      const payload = {
+        action: "meet",
+        topic: topic,
+        host: selectedHost,
+        participants: participants,
+        watchdog_minutes: selectedWatchdog
+      };
+
+      const jsonStr = JSON.stringify(payload);
+
+      if (tg && tg.sendData) {
+        showToast("🚀 正在向 Telegram 战队群召集会议...");
+        tg.sendData(jsonStr);
+        setTimeout(() => {
+          tg.close();
+        }, 300);
+      } else {
+        // Fallback for desktop browser preview
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(jsonStr);
+        }
+        showToast("📋 召集指令已复制（已按本地模拟模式生成）");
+        alert("【本地调试模式】已生成会议公文 JSON：\n\n" + jsonStr + "\n\n在 Telegram 中通过 Mini App 打开将自动无缝发送！");
+      }
+    }
+
+    function submitCloseMeeting() {
+      const payload = {
+        action: "meetover",
+        topic: "会议闭幕"
+      };
+      const jsonStr = "/meetover";
+
+      if (tg && tg.sendData) {
+        tg.sendData(jsonStr);
+        setTimeout(() => {
+          tg.close();
+        }, 300);
+      } else {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(jsonStr);
+        }
+        showToast("🏁 闭幕指令 /meetover 已复制");
+      }
+    }
+  </script>
+</body>
+</html>
