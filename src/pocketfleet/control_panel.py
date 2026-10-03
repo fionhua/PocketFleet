@@ -4407,7 +4407,8 @@ def acquire_single_instance_lock(port: int = 18766) -> bool:
 def main():
     multiprocessing.freeze_support()
     if not acquire_single_instance_lock(18766):
-        print("⚠️ [PocketFleet] Another instance of Control Panel is already running. Exiting cleanly.")
+        logger.warning("[PocketFleet] Another instance of Control Panel is already running. Exiting cleanly.")
+        print("[PocketFleet] Another instance of Control Panel is already running. Exiting cleanly.")
         sys.exit(0)
     root = tk.Tk()
     app = PocketFleetControlApp(root)
