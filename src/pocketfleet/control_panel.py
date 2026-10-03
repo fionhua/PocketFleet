@@ -4419,9 +4419,37 @@ def acquire_single_instance_lock(port: int = 18766) -> bool:
 def main():
     multiprocessing.freeze_support()
     if not acquire_single_instance_lock(18766):
-        logger.warning("[PocketFleet] Another instance of Control Panel is already running. Exiting cleanly.")
-        print("[PocketFleet] Another instance of Control Panel is already running. Exiting cleanly.")
-        sys.exit(0)
+        logger.warning("[PocketFleet] Another instance of Control Panel is already running.")
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            from tkinter import messagebox
+            ret = messagebox.askyesno(
+                "PocketFleet 控制面板",
+                "PocketFleet 控制面板当前已在后台或系统托盘中运行。\n\n是否强制结束旧实例并重新启动？"
+            )
+            root.destroy()
+            if ret:
+                import subprocess
+                try:
+                    out = subprocess.check_output('netstat -ano | findstr "18766"', shell=True, text=True)
+                    for line in out.strip().splitlines():
+                        parts = line.split()
+                        if len(parts) >= 5 and "LISTENING" in parts:
+                            pid = parts[-1]
+                            if pid != str(os.getpid()):
+                                subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
+                    time.sleep(0.6)
+                except Exception as ex:
+                    logger.error("Failed to kill existing instance: %s", ex)
+
+                if not acquire_single_instance_lock(18766):
+                    sys.exit(0)
+            else:
+                sys.exit(0)
+        except Exception:
+            sys.exit(0)
+
     root = tk.Tk()
     app = PocketFleetControlApp(root)
     root.mainloop()
