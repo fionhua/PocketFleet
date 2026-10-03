@@ -359,8 +359,8 @@ class DispatchLoop:
             )
             return None
 
-        # Record active meeting session
-        wd_sec = max(60, int(watchdog_minutes * 60)) if watchdog_minutes else 300
+        # Record active meeting session (default watchdog: 15 minutes = 900 seconds)
+        wd_sec = max(60, int(watchdog_minutes * 60)) if watchdog_minutes else 900
         self._active_meeting = {
             "active": True,
             "topic": topic,
@@ -669,7 +669,7 @@ class DispatchLoop:
                 if isinstance(data, dict) and (data.get("action") == "meet" or "topic" in data):
                     m_topic = data.get("topic", "").strip()
                     m_host = data.get("host", None)
-                    m_watchdog = int(data.get("watchdog_minutes", 5))
+                    m_watchdog = int(data.get("watchdog_minutes", 15))
                     m_participants = data.get("participants", None)
                     return self._handle_fleet_meeting(
                         msg=msg,

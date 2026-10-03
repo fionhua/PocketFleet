@@ -678,10 +678,10 @@
           <span>4. 超时看门狗自动推进 (Silent Watchdog)</span>
         </div>
         <div class="watchdog-options" id="wd-options">
-          <div class="wd-pill" data-min="3" onclick="selectWatchdog(this)">3 分钟</div>
-          <div class="wd-pill active" data-min="5" onclick="selectWatchdog(this)">5 分钟</div>
+          <div class="wd-pill" data-min="5" onclick="selectWatchdog(this)">5 分钟</div>
           <div class="wd-pill" data-min="10" onclick="selectWatchdog(this)">10 分钟</div>
-          <div class="wd-pill" data-min="15" onclick="selectWatchdog(this)">15 分钟</div>
+          <div class="wd-pill active" data-min="15" onclick="selectWatchdog(this)">15 分钟</div>
+          <div class="wd-pill" data-min="30" onclick="selectWatchdog(this)">30 分钟</div>
         </div>
         <p class="hint-text">💡 主持人若在设定时间内未收到任何战队动态且未闭幕，看门狗将自动在群内温和提醒推进议程。</p>
       </div>
@@ -745,7 +745,7 @@
 
     let seats = [];
     let selectedHost = "";
-    let selectedWatchdog = 5;
+    let selectedWatchdog = 15;
     let editingIndex = -1;
 
     // Load seats from URL params -> localStorage -> fallback defaults
