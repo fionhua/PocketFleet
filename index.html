@@ -529,7 +529,7 @@
       <div class="card">
         <div class="section-title" style="margin-bottom: 12px;">
           <span class="icon">👑</span>
-          <span>2. 指定首发主持人 (Meeting Host)</span>
+          <span>2. 指定会议主持人 (Meeting Host)</span>
         </div>
         <div class="host-grid" id="host-grid">
           <!-- Injected via JavaScript -->
@@ -548,14 +548,14 @@
           <div class="wd-pill active" data-min="15" onclick="selectWatchdog(this)">15 分钟</div>
           <div class="wd-pill" data-min="30" onclick="selectWatchdog(this)">30 分钟</div>
         </div>
-        <p class="hint-text">💡 主持人若在设定时间内未收到任何战队动态且未闭幕，看门狗将自动在群内温和提醒推进议程。</p>
+        <p class="hint-text">💡 设定时间内若无有效会议进展且未闭幕，看门狗将在群内温和提醒主持人推进任务或闭幕。</p>
       </div>
 
       <!-- 5. 立即操作控制栏 (Action Bar) -->
       <div class="action-bar-left">
-        <button class="btn-close-meeting" onclick="submitCloseMeeting()" title="发送闭幕指令结束当前会议">
-          <span>🏁</span>
-          <span>/meetover</span>
+        <button class="btn-close-meeting" onclick="cancelOrClose()" title="取消召集并退出面板">
+          <span>✕</span>
+          <span>取消</span>
         </button>
         <button class="btn-kickoff" onclick="submitMeeting()">
           <span>🚀</span>
@@ -706,7 +706,7 @@
             <div class="p-details">
               <div class="p-name-row">
                 <span class="p-name">${escapeHtml(seat.name)}</span>
-                ${isHost ? '<span class="p-host-badge">首发主持</span>' : ''}
+                ${isHost ? '<span class="p-host-badge">主持人</span>' : ''}
               </div>
               <span class="p-role">${escapeHtml(seat.bot)} · ${escapeHtml(seat.role)}</span>
             </div>
@@ -961,6 +961,14 @@
           window.location.href = shareUrl;
         }
       }
+    function cancelOrClose() {
+      if (tg && tg.close) {
+        try { tg.close(); return; } catch(e){}
+      }
+      showToast("已取消召集");
+      setTimeout(() => {
+        try { window.close(); } catch(e){}
+      }, 400);
     }
 
     // Run on startup

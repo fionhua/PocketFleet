@@ -399,45 +399,57 @@ class DispatchLoop:
         p_lines = []
         if host_role == "lead":
             p_lines = [
-                f"1. ⚖️ 【主持席 · 架构审计】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计 (首发主持)",
-                f"2. 🎛️ 【推演席 · 方案收敛】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛",
-                f"3. 🐍 【施工席 · 代码工程】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩",
+                f"• ⚖️ {lead_name} (`{lead_u}`) — 架构守门与审计 【主持人】",
+                f"• 🎛️ {chat_name} (`{chat_u}`) — 方案推演与对账",
+                f"• 🐍 {builder_name} (`{builder_u}`) — 工程定桩与算法落地",
             ]
         elif host_role == "builder":
             p_lines = [
-                f"1. 🐍 【主持席 · 代码工程】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩 (首发主持)",
-                f"2. 🎛️ 【推演席 · 方案收敛】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛",
-                f"3. ⚖️ 【审计席 · 架构审计】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计",
+                f"• 🐍 {builder_name} (`{builder_u}`) — 工程定桩与算法落地 【主持人】",
+                f"• 🎛️ {chat_name} (`{chat_u}`) — 方案推演与对账",
+                f"• ⚖️ {lead_name} (`{lead_u}`) — 架构守门与审计",
             ]
         else:
             p_lines = [
-                f"1. 🎛️ 【主持席 · 方案收敛】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛 (首发主持)",
-                f"2. ⚖️ 【审计席 · 架构审计】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计",
-                f"3. 🐍 【施工席 · 代码工程】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩",
+                f"• 🎛️ {chat_name} (`{chat_u}`) — 方案推演与对账 【主持人】",
+                f"• ⚖️ {lead_name} (`{lead_u}`) — 架构守门与审计",
+                f"• 🐍 {builder_name} (`{builder_u}`) — 工程定桩与算法落地",
             ]
         p_str_formatted = "\n".join(p_lines)
 
-        briefing_prompt = (
-            f"# 🏛️ 【人类指挥官召集 · AI星舰战队联席会议公文】\n"
-            f"📌 会议议题：{topic}\n"
-            f"🌾 召集人：{human}\n"
-            f"📢 发布代理：由首发主持【{host_display_name} (`{host_bot}`)】受命播发\n"
-            f"⏱️ 推进看门狗：每 {watchdog_minutes} 分钟监护\n\n"
-            f"### 一、 参会席位名单与职责 (Participants)\n"
-            f"{p_str_formatted}\n\n"
-            f"### 二、 会议主持与发信规则（协议级强制遵循）\n"
-            f"• 首发主持：由【{host_display_name} (`{host_bot}`)】率先开场发言，就议题展开第一手深度剖析与方案推演；\n"
-            f"• 出站发信规范（首行带 [Telegram] 投递回群）：\n"
-            f"  - 点名交锋（需对方回复）：`[Telegram];re:@BotId;[waitReply]` 或 `[Telegram];mailto:@BotId;[waitReply]`\n"
-            f"  - 结案/纯同步（防死循环）：`[Telegram];re:@BotId;[NoReply]`\n"
-            f"  - 网桥自动脱敏：检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n"
-            f"• 会议闭幕：议程达成共识后，由主持人在群内发送 `/meetover` 正式结案闭幕。\n\n"
-            f"注意：请【{host_display_name}】以 `[Telegram];mailto:@BotId;[waitReply]` 向【{human}】确认是否需要有补充信息。其他参会节点以 `[Telegram];mailto:{host_bot};[NoReply]` 发送“收到，已进入议席”。"
+        # 1. Clean, human-friendly card posted to Telegram Group
+        human_card = (
+            f"🏛️ *【AI 星舰联席会议已召集】*\n\n"
+            f"📌 *议题*：{topic}\n"
+            f"🌾 *召集人*：{human}\n"
+            f"🎛️ *主持人*：{host_display_name} (`{host_bot}`)\n"
+            f"👥 *参会席位*：\n"
+            f"{p_str_formatted}\n"
+            f"⏱️ *看门狗*：{watchdog_minutes} 分钟无有效会议进展自动提醒\n\n"
+            f"_{host_display_name} 正在组织第一轮研讨与分工……_"
         )
 
-        # 3. Post the Official Council Briefing Directly into the Telegram Group Chat!
+        # 2. Complete underground protocol briefing dispatched to Host Node
+        briefing_prompt = (
+            f"# 【AI星舰战队联席会议公文 · 主持人任务书】\n"
+            f"📌 会议议题：{topic}\n"
+            f"🌾 召集人：{human}\n"
+            f"🎛️ 会议主持人：{host_display_name} (`{host_bot}`)\n"
+            f"⏱️ 看门狗推进：{watchdog_minutes} 分钟无有效会议进展报警\n\n"
+            f"### 一、 参会席位名单与职责\n"
+            f"{p_str_formatted}\n\n"
+            f"### 二、 战队出站发信锁死语法规范（严格遵循，杜绝回声死循环）\n"
+            f"• 语法定义：首行必须严格为 [Telegram]re:@BotId;[waitReply] 或 [Telegram]re:@BotId;[NoReply]\n"
+            f"• 点名交锋（需要对方回答）：`[Telegram]re:@BotId;[waitReply]`\n"
+            f"• 结案/纯同步（通知对方不需要回复）：`[Telegram]re:@BotId;[NoReply]`\n"
+            f"• 阻断机制：网桥检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n"
+            f"• 闭幕方式：议程达成共识后，由主持人在群内发送 `/meetover` 正式结案闭幕。\n\n"
+            f"👉 请主持人【{host_display_name}】率先开场发言，就议题展开第一手深度剖析，向参会节点分配任务并启动研讨！"
+        )
+
+        # 3. Post the Clean Human Card Directly into the Telegram Group Chat!
         reply_id = None if (getattr(msg, "sender_id", 0) == 0 or msg.message_id > 1000000000) else msg.message_id
-        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=briefing_prompt, reply_to_message_id=reply_id)
+        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=human_card, reply_to_message_id=reply_id)
 
         # 4. Dispatch Briefing to the designated Host Node
         if host_role == "chat":
@@ -534,9 +546,9 @@ class DispatchLoop:
             minutes = max(1, int(timeout_sec // 60))
             reminder = (
                 f"⏰ *【星舰联席会议 · 进度推进看门狗】*\n"
-                f"已超过 {minutes} 分钟未检测到会议新动态。\n"
+                f"已超过 {minutes} 分钟无有效会议进展。\n"
                 f"📌 *议题*：{topic}\n"
-                f"👉 请主持席 `{host}` 推进议程分工；若议题讨论已完成，请发送 `/meetover` 正式闭幕。"
+                f"👉 请主持人 `{host}` 推进议程分工；若议题讨论已完成，请发送 `/meetover` 正式闭幕。"
             )
             self._send_immediate_or_outbox(chat_id=chat_id, text=reminder)
             # Reset timestamp so next ping occurs in timeout_sec
@@ -721,10 +733,13 @@ class DispatchLoop:
         if not raw_text:
             return None
 
-        # Update meeting watchdog activity timer if meeting is currently in progress
+        # Update meeting watchdog activity timer ONLY on substantive meeting progress (not ACKs or NoReply)
         if self._active_meeting and self._active_meeting.get("active"):
             if msg.chat_id == self._active_meeting.get("chat_id"):
-                self._last_meeting_activity_ts = time.time()
+                t_low = raw_text.lower()
+                is_pure_ack = any(ack in t_low for ack in ["收到", "已进入议席", "ack", "[noreply]", "【免回】", "/meet", "/meetover", "#meet"])
+                if not is_pure_ack and len(raw_text) > 15:
+                    self._last_meeting_activity_ts = time.time()
 
         clean_text = raw_text.strip()
         # Telegram Mini App submission (web_app_data)

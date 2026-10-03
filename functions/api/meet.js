@@ -52,39 +52,32 @@ export async function onRequestPost({ request, env }) {
     let pList = [];
     if (host.includes("Judge")) {
       pList = [
-        `1. ⚖️ 【主持席 · 架构审计】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计 (首发主持)`,
-        `2. 🎛️ 【推演席 · 方案收敛】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛`,
-        `3. 🐍 【施工席 · 代码工程】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩`
+        `• ⚖️ 裁决者 (\`@AiSoulJudgeBot\`) — 架构守门与审计 【主持人】`,
+        `• 🎛️ 结算主机 (\`@AiSoulSettlementBot\`) — 方案推演与对账`,
+        `• 🐍 泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程定桩与算法落地`
       ];
     } else if (host.includes("MudSnake")) {
       pList = [
-        `1. 🐍 【主持席 · 代码工程】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩 (首发主持)`,
-        `2. 🎛️ 【推演席 · 方案收敛】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛`,
-        `3. ⚖️ 【审计席 · 架构审计】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计`
+        `• 🐍 泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程定桩与算法落地 【主持人】`,
+        `• 🎛️ 结算主机 (\`@AiSoulSettlementBot\`) — 方案推演与对账`,
+        `• ⚖️ 裁决者 (\`@AiSoulJudgeBot\`) — 架构守门与审计`
       ];
     } else {
       pList = [
-        `1. 🎛️ 【主持席 · 方案收敛】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛 (首发主持)`,
-        `2. ⚖️ 【审计席 · 架构审计】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计`,
-        `3. 🐍 【施工席 · 代码工程】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩`
+        `• 🎛️ 结算主机 (\`@AiSoulSettlementBot\`) — 方案推演与对账 【主持人】`,
+        `• ⚖️ 裁决者 (\`@AiSoulJudgeBot\`) — 架构守门与审计`,
+        `• 🐍 泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程定桩与算法落地`
       ];
     }
 
-    const briefing = `# 🏛️ 【人类指挥官召集 · AI星舰战队联席会议公文】\n` +
-      `📌 会议议题：${topic}\n` +
-      `🌾 召集人：${human}\n` +
-      `📢 发布代理：由首发主持【${hostDisplayName} (${host})】受命播发\n` +
-      `⏱️ 推进看门狗：每 ${watchdogMinutes} 分钟监护\n\n` +
-      `### 一、 参会席位名单与职责 (Participants)\n` +
-      pList.join("\n") + "\n\n" +
-      `### 二、 会议主持与发信规则（协议级强制遵循）\n` +
-      `• 首发主持：由【${hostDisplayName} (${host})】率先开场发言，就议题展开第一手深度剖析与方案推演；\n` +
-      `• 出站发信规范（首行带 [Telegram] 投递回群）：\n` +
-      `  - 点名交锋（需对方回复）：\`[Telegram];re:@BotId;[waitReply]\` 或 \`[Telegram];mailto:@BotId;[waitReply]\`\n` +
-      `  - 结案/纯同步（防死循环）：\`[Telegram];re:@BotId;[NoReply]\`\n` +
-      `  - 网桥自动脱敏：检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n` +
-      `• 会议闭幕：议程达成共识后，由主持人在群内发送 \`/meetover\` 正式结案闭幕。\n\n` +
-      `注意：请【${hostDisplayName}】以 \`[Telegram];mailto:@BotId;[waitReply]\` 向【${human}】确认是否需要有补充信息。其他参会节点以 \`[Telegram];mailto:${host};[NoReply]\` 发送“收到，已进入议席”。`;
+    const briefing = `🏛️ *【AI 星舰联席会议已召集】*\n\n` +
+      `📌 *议题*：${topic}\n` +
+      `🌾 *召集人*：${human}\n` +
+      `🎛️ *主持人*：${hostDisplayName} (\`${host}\`)\n` +
+      `👥 *参会席位*：\n` +
+      pList.join("\n") + `\n` +
+      `⏱️ *看门狗*：${watchdogMinutes} 分钟无有效会议进展自动提醒\n\n` +
+      `_${hostDisplayName} 正在组织第一轮研讨与分工……_`;
 
     const tgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const resp = await fetch(tgUrl, {
