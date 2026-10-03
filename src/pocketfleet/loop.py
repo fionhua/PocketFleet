@@ -417,7 +417,8 @@ class DispatchLoop:
         )
 
         # 3. Post the Official Council Briefing Directly into the Telegram Group Chat!
-        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=briefing_prompt, reply_to_message_id=msg.message_id)
+        reply_id = None if (getattr(msg, "sender_id", 0) == 0 or msg.message_id > 1000000000) else msg.message_id
+        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=briefing_prompt, reply_to_message_id=reply_id)
 
         # 4. Dispatch Briefing to the designated Host Node
         if host_role == "chat":
@@ -437,17 +438,17 @@ class DispatchLoop:
                     f"⚠️ [PocketFleet 网桥提醒] 结算主机网页端未就绪（{reason}）。\n"
                     f"📌 会议公文已在本地网桥队列安全待命，请在浏览器中打开 ChatGPT 网页，确认扩展显示 🟢 已就绪即可自动推进！"
                 )
-                self._send_immediate_or_outbox(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=msg.message_id)
+                self._send_immediate_or_outbox(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=reply_id)
 
         elif host_role == "lead":
             # Host is Lead (e.g. 裁决者 / Antigravity)
             self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "antigravity_meeting")
             if hasattr(self, "session_hub") and self.session_hub:
-                self.session_hub.enqueue_event(
+                self.session_hub.enqueue_task(
                     seat_id="lead",
                     prompt=briefing_prompt,
                     source=f"telegram:{msg.chat_id}:{msg.message_id}",
-                    metadata={"meeting": True, "topic": topic, "watchdog_minutes": watchdog_minutes},
+                    reply_chat_id=msg.chat_id,
                 )
                 logger.info("Enqueued Starfleet meeting briefing to Lead (Antigravity) via SessionHub")
             else:
@@ -464,11 +465,11 @@ class DispatchLoop:
             # Host is Builder (e.g. 泥蛇 / Codex)
             self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "codex_meeting")
             if hasattr(self, "session_hub") and self.session_hub:
-                self.session_hub.enqueue_event(
+                self.session_hub.enqueue_task(
                     seat_id="builder",
                     prompt=briefing_prompt,
                     source=f"telegram:{msg.chat_id}:{msg.message_id}",
-                    metadata={"meeting": True, "topic": topic, "watchdog_minutes": watchdog_minutes},
+                    reply_chat_id=msg.chat_id,
                 )
                 logger.info("Enqueued Starfleet meeting briefing to Builder (Codex) via SessionHub")
             else:

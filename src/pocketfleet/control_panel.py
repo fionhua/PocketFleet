@@ -3322,24 +3322,59 @@ class FleetManager:
                 watchdog_minutes = int(payload.get("watchdog_minutes", 15))
                 participants = payload.get("participants", None)
                 self.log(f"🏛️ [MEET] Direct kickoff from Mini App: host={host}, topic={topic[:50]}")
+                # Resolve target chat
+                target_chat = None
+                if self.dispatch_loop and getattr(self.dispatch_loop, "allowed_chat_ids", None):
+                    target_chat = list(self.dispatch_loop.allowed_chat_ids)[0]
+                if not target_chat:
+                    try:
+                        seats_cfg = self.load_seats_config()
+                        if getattr(seats_cfg, "telegram_chat_id", None):
+                            target_chat = int(seats_cfg.telegram_chat_id)
+                    except Exception:
+                        pass
+                if not target_chat:
+                    target_chat = -1004309197838
+
+                from pocketfleet.core import InboundMessage
+                fake_msg = InboundMessage(
+                    message_id=int(time.time()),
+                    chat_id=int(target_chat),
+                    sender_id=0,
+                    sender_name="人类指挥官",
+                    text=f"/meet {host or ''} {topic}".strip(),
+                    is_bot=False,
+                )
+
                 if self.dispatch_loop and getattr(self.dispatch_loop, "running", False):
-                    chats = getattr(self.dispatch_loop, "allowed_chat_ids", None)
-                    if chats:
-                        target_chat = list(chats)[0]
-                        from pocketfleet.core import InboundMessage
-                        fake_msg = InboundMessage(
-                            chat_id=target_chat,
-                            sender_name="人类指挥官",
-                            text=f"/meet {host or ''} {topic}".strip(),
-                            message_id=int(time.time()),
-                        )
-                        self.dispatch_loop._handle_fleet_meeting(
-                            msg=fake_msg,
-                            meet_arg=topic,
-                            host_override=host,
-                            watchdog_minutes=watchdog_minutes,
-                            participants=participants,
-                        )
+                    self.dispatch_loop._handle_fleet_meeting(
+                        msg=fake_msg,
+                        meet_arg=topic,
+                        host_override=host,
+                        watchdog_minutes=watchdog_minutes,
+                        participants=participants,
+                    )
+                else:
+                    # Daemon loop not active in this process; use standalone transport to publish directly to Telegram
+                    try:
+                        token, _, _ = self._load_credentials()
+                        if token:
+                            from pocketfleet.transport.telegram import TelegramTransport
+                            from pocketfleet.loop import DispatchLoop
+                            from pocketfleet.core import WorkerType
+                            trans = TelegramTransport(token=token, allowed_chat_ids={int(target_chat)})
+                            seats_cfg = self.load_seats_config()
+                            standalone_loop = DispatchLoop(transport=trans, default_worker=WorkerType.ANTIGRAVITY, seats_config=seats_cfg)
+                            standalone_loop._handle_fleet_meeting(
+                                msg=fake_msg,
+                                meet_arg=topic,
+                                host_override=host,
+                                watchdog_minutes=watchdog_minutes,
+                                participants=participants,
+                            )
+                            self.log("🏛️ [MEET] Published Starfleet Council Briefing via standalone transport.")
+                    except Exception as ex:
+                        self.log(f"❌ [MEET] Failed to dispatch meeting: {ex}")
 
             ok = ensure_bridge_server_running(on_telegram_post=_on_telegram_post, on_meet_kickoff=_on_meet_kickoff)
             self.bridge_server = get_global_bridge_server()

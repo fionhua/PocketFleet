@@ -214,7 +214,12 @@ class TelegramTransport(BaseTransport):
                     time.sleep(wait_time)
                     continue
 
-                logger.error("Failed to send Telegram message: HTTP %s - %s", exc.code, err_body)
+                # Automatic fallback: if reply_to_message_id failed (message deleted or synthetic), retry without it
+                if exc.code == 400 and payload.get("reply_to_message_id"):
+                    logger.info("Retrying Telegram message delivery without reply_to_message_id...")
+                    payload.pop("reply_to_message_id", None)
+                    continue
+
                 # Automatic fallback: if parse_mode caused Bad Request, strip formatting and retry as plain text
                 if exc.code == 400 and payload.get("parse_mode"):
                     logger.info("Retrying Telegram message delivery without parse_mode (plain-text fallback)...")
