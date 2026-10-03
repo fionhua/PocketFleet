@@ -338,10 +338,21 @@ class DispatchLoop:
             logger.warning("Failed to persist telegram_chat_id to config file: %s", e)
 
     def handle_message(self, msg: InboundMessage, forced_seat: Optional[str] = None) -> Optional[Task]:
-        # --- [IRON GATE 2: Role-based Gating] ---
-        # Allow internal fleet bots for Bot-to-Bot collaboration; drop external unknown bots
+        raw_text = (msg.text or "").strip()
+        if not raw_text:
+            return None
+
+        # --- [ECHO-PROOF SHIELD 1: Drop System Status Notifications & Echoes] ---
+        # Never process outbox echoes, acks, or task status notifications from any sender
+        if raw_text.startswith(("⏳", "❌", "✅", "🤖", "🎛️")) or any(
+            m in raw_text for m in ("Task Queued", "Task Failed", "Task Completed", "收到指令，已递交至", "PocketFleet Status:")
+        ):
+            logger.debug("Dropped system status echo/notification ID %s: %s...", msg.message_id, raw_text[:40])
+            return None
+
+        # --- [IRON GATE 2: Role-based Gating & Bot Echo Proofing] ---
+        # Allow internal fleet bots ONLY if explicitly directed to a peer bot via @mention; drop external unknown bots
         if msg.is_bot:
-            allow_bot = False
             fleet_bot_handles = set()
             if self.seats_config and getattr(self.seats_config, "seats", None):
                 for s in self.seats_config.seats.values():
@@ -349,11 +360,16 @@ class DispatchLoop:
                         fleet_bot_handles.add(s.bot_username.lower().lstrip("@"))
 
             s_name = (msg.sender_name or "").lower().lstrip("@")
-            if s_name in fleet_bot_handles:
-                allow_bot = True
-
-            if not allow_bot:
+            if s_name not in fleet_bot_handles:
                 logger.debug("Ignored external bot message ID %s from %s", msg.message_id, msg.sender_name)
+                return None
+
+            # Internal fleet bots MUST explicitly direct to another bot via @mention (e.g. @AiSoulMudSnakeBot)
+            # This strictly prevents unaddressed bot chatter or echoes from entering the default worker queue!
+            import re
+            has_explicit_peer_mention = bool(re.search(r"@([a-zA-Z0-9_]+bot)\b", raw_text, flags=re.IGNORECASE))
+            if not has_explicit_peer_mention:
+                logger.debug("Dropped internal fleet bot broadcast without explicit peer mention from @%s", s_name)
                 return None
 
         # --- [IRON GATE 2.5: TelegramUpdateBroker Onboarding & Ephemeral Binding] ---
