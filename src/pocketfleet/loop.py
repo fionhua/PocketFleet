@@ -396,16 +396,35 @@ class DispatchLoop:
             host_role = "builder"
             host_display_name = builder_name
 
-        # 2. Canonical Starfleet Meeting Briefing (posted directly to Telegram Group & dispatched to Host)
+        p_lines = []
+        if host_role == "lead":
+            p_lines = [
+                f"1. ⚖️ 【主持席 · 架构审计】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计 (首发主持)",
+                f"2. 🎛️ 【推演席 · 方案收敛】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛",
+                f"3. 🐍 【施工席 · 代码工程】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩",
+            ]
+        elif host_role == "builder":
+            p_lines = [
+                f"1. 🐍 【主持席 · 代码工程】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩 (首发主持)",
+                f"2. 🎛️ 【推演席 · 方案收敛】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛",
+                f"3. ⚖️ 【审计席 · 架构审计】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计",
+            ]
+        else:
+            p_lines = [
+                f"1. 🎛️ 【主持席 · 方案收敛】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛 (首发主持)",
+                f"2. ⚖️ 【审计席 · 架构审计】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计",
+                f"3. 🐍 【施工席 · 代码工程】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩",
+            ]
+        p_str_formatted = "\n".join(p_lines)
+
         briefing_prompt = (
-            f"# 🏛️ 【AI星舰战队联席会议公文】\n"
+            f"# 🏛️ 【人类指挥官召集 · AI星舰战队联席会议公文】\n"
             f"📌 会议议题：{topic}\n"
             f"🌾 召集人：{human}\n"
+            f"📢 发布代理：由首发主持【{host_display_name} (`{host_bot}`)】受命播发\n"
             f"⏱️ 推进看门狗：每 {watchdog_minutes} 分钟监护\n\n"
             f"### 一、 参会席位名单与职责 (Participants)\n"
-            f"1. 🎛️ 【主持席】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛\n"
-            f"2. ⚖️ 【审计席】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计\n"
-            f"3. 🐍 【施工席】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩\n\n"
+            f"{p_str_formatted}\n\n"
             f"### 二、 会议主持与发信规则（协议级强制遵循）\n"
             f"• 首发主持：由【{host_display_name} (`{host_bot}`)】率先开场发言，就议题展开第一手深度剖析与方案推演；\n"
             f"• 出站发信规范（首行带 [Telegram] 投递回群）：\n"

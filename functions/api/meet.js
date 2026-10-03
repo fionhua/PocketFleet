@@ -49,14 +49,34 @@ export async function onRequestPost({ request, env }) {
 
     const hostDisplayName = host.includes("Judge") ? "裁决者" : (host.includes("MudSnake") ? "泥蛇" : "结算主机");
 
-    const briefing = `# 🏛️ 【AI星舰战队联席会议公文】\n` +
+    let pList = [];
+    if (host.includes("Judge")) {
+      pList = [
+        `1. ⚖️ 【主持席 · 架构审计】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计 (首发主持)`,
+        `2. 🎛️ 【推演席 · 方案收敛】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛`,
+        `3. 🐍 【施工席 · 代码工程】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩`
+      ];
+    } else if (host.includes("MudSnake")) {
+      pList = [
+        `1. 🐍 【主持席 · 代码工程】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩 (首发主持)`,
+        `2. 🎛️ 【推演席 · 方案收敛】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛`,
+        `3. ⚖️ 【审计席 · 架构审计】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计`
+      ];
+    } else {
+      pList = [
+        `1. 🎛️ 【主持席 · 方案收敛】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛 (首发主持)`,
+        `2. ⚖️ 【审计席 · 架构审计】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计`,
+        `3. 🐍 【施工席 · 代码工程】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩`
+      ];
+    }
+
+    const briefing = `# 🏛️ 【人类指挥官召集 · AI星舰战队联席会议公文】\n` +
       `📌 会议议题：${topic}\n` +
       `🌾 召集人：${human}\n` +
+      `📢 发布代理：由首发主持【${hostDisplayName} (${host})】受命播发\n` +
       `⏱️ 推进看门狗：每 ${watchdogMinutes} 分钟监护\n\n` +
       `### 一、 参会席位名单与职责 (Participants)\n` +
-      `1. 🎛️ 【主持席】结算主机 (\`@AiSoulSettlementBot\`) — 方案推演、会议对账与结论收敛\n` +
-      `2. ⚖️ 【审计席】裁决者 (\`@AiSoulJudgeBot\`) — 架构守门、防崩兜底与逻辑审计\n` +
-      `3. 🐍 【施工席】泥蛇 (\`@AiSoulMudSnakeBot\`) — 工程落地、核心算法与代码定桩\n\n` +
+      pList.join("\n") + "\n\n" +
       `### 二、 会议主持与发信规则（协议级强制遵循）\n` +
       `• 首发主持：由【${hostDisplayName} (${host})】率先开场发言，就议题展开第一手深度剖析与方案推演；\n` +
       `• 出站发信规范（首行带 [Telegram] 投递回群）：\n` +
