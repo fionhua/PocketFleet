@@ -125,6 +125,75 @@ def ack_codeai_message(delivery_id: Optional[str]) -> bool:
         return _CODEAI_IN_FLIGHT.pop(delivery_id, None) is not None
 
 
+def format_commander_kickoff_announcement(body: dict) -> str:
+    topic = (body.get("topic") or "").strip()
+    host = (body.get("host") or "@AiSoulSettlementBot").strip()
+    if not host.startswith("@"):
+        host = "@" + host
+    participants = body.get("participants") or ["@AiSoulSettlementBot", "@AiSoulJudgeBot", "@AiSoulMudSnakeBot"]
+    p_tags = [p if p.startswith("@") else f"@{p}" for p in participants]
+    if host not in p_tags:
+        p_tags.insert(0, host)
+
+    wd = body.get("watchdog_minutes") or 15
+    human = (body.get("human") or "ENTJ指挥官").strip()
+
+    name_map = {
+        "@aisoulsettlementbot": ("结算主机", "方案推演与会议对账"),
+        "@aisouljudgebot": ("裁决者", "架构守门与防御审计"),
+        "@aisoulmudsnakebot": ("泥蛇", "工程定桩与算法实现"),
+    }
+
+    host_info = name_map.get(host.lower(), (host, "会议主持与推进"))
+    host_display_name = host_info[0]
+
+    breakdown_lines = []
+    other_nodes = []
+    for tag in p_tags:
+        info = name_map.get(tag.lower(), (tag, "席位协同"))
+        d_name, d_role = info[0], info[1]
+        if tag.lower() == host.lower():
+            breakdown_lines.append(f"• 🎛️ 【主持席】{d_name} (`{tag}`)：负责把控研讨主轴、拆解分工、推进议程并最终汇总收敛。")
+        elif "judge" in tag.lower():
+            breakdown_lines.append(f"• ⚖️ 【审计席】{d_name} (`{tag}`)：负责架构守门、合规与防御型逻辑审计、防漏洞防崩塌。")
+            other_nodes.append(f"【{d_name}】")
+        elif "mudsnake" in tag.lower():
+            breakdown_lines.append(f"• 🐍 【施工席】{d_name} (`{tag}`)：负责工程定桩、技术可行性验证、代码与落地实现。")
+            other_nodes.append(f"【{d_name}】")
+        else:
+            breakdown_lines.append(f"• 🤖 【协同席】{d_name} (`{tag}`)：{d_role}。")
+            other_nodes.append(f"【{d_name}】")
+
+    seats_breakdown_str = "\n".join(breakdown_lines)
+    other_nodes_str = "、".join(other_nodes) if other_nodes else "各参会节点"
+    mailto_header = "[mailto] " + " ".join(p_tags)
+
+    announcement = (
+        f"{mailto_header}\n\n"
+        f"🌾 【人类指挥官 · PocketFleet联席会议启幕指令】\n\n"
+        f"各席位请注意，现就以下核心议题召开战队联席研讨会议：\n"
+        f"📌 会议议题：{topic}\n"
+        f"⏱️ 看门狗监护：{wd} 分钟无进展自动推进，将在{host_display_name} {wd}分钟后没有收到信息、且没有/meetover状态下提醒并推进任务执行。\n\n"
+        f"---\n\n"
+        f"### 一、 参会席位与战队分工安排\n"
+        f"{seats_breakdown_str}\n\n"
+        f"---\n\n"
+        f"### 二、 战队出站交互与防回声纪律（全员强制执行）\n"
+        f"为确保 Telegram 群内讨论高效推进且彻底杜绝回声死循环，所有节点严格执行以下规范：\n\n"
+        f"1. 🎯 【首轮入席就位】：\n"
+        f"   - 主持人【{host_display_name}】收到本通令后，立即以 `[Telegram]re:@指定节点;[waitReply]` 模式正式发表开场分析并向特定节点派发第一轮研讨任务；\n"
+        f"   - 其余非主持席位（{other_nodes_str}），收到本通令后，请统一使用 `[Telegram]re:{human};[NoReply]` 发送入席报到与初步见解，作为参会确认（本网桥将保留人类可见性，但自动消除触发符，防止回声激荡）。\n\n"
+        f"2. 🔄 【过程研讨交锋】：\n"
+        f"   - 需对方节点作答时，必须标明 `[waitReply]`；\n"
+        f"   - 纯同步、阶段性成果汇报或免回信时，必须标明 `[NoReply]`。\n\n"
+        f"3. 🏁 【会议闭幕归档】：\n"
+        f"   - 研讨充分并达成共识后，由主持人【{host_display_name}】在群内发送 `/meetover` 正式结案闭幕，并向{human}完成汇报。\n\n"
+        f"---\n\n"
+        f"👉 话筒现正式转交给会议主持人【{host_display_name}】(`{host}`)，请主持人开席，启动第一轮议题剖析与任务分配！"
+    )
+    return announcement
+
+
 class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
     """HTTP request handler for PocketFleet browser extension bridge protocol."""
 
@@ -375,20 +444,20 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/v1/meet/kickoff":
+            announcement_text = format_commander_kickoff_announcement(body)
+            body["announcement_text"] = announcement_text
+
             from .user_client import UserClientManager
             mgr = UserClientManager.get_instance()
             if mgr.is_authorized():
-                topic = body.get("topic", "").strip()
-                host = body.get("host", "@AiSoulJudgeBot")
                 chat_id = body.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID", "-1004309197838")
-                meet_command = f"/meet {host} {topic}".strip()
-                ok = mgr.send_message_as_user(chat_id, meet_command)
+                ok = mgr.send_message_as_user(chat_id, announcement_text)
                 if ok:
                     self._send_json_response(200, {
                         "ok": True,
                         "delivered": True,
                         "mode": "human_user",
-                        "message": "Dispatched directly as Commander personal account via MTProto"
+                        "message": "Dispatched formal Starfleet meeting kickoff announcement directly as Commander personal account via MTProto"
                     })
                     return
 

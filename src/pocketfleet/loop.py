@@ -313,6 +313,7 @@ class DispatchLoop:
         watchdog_minutes: int = 5,
         participants: Optional[list] = None,
         human_caller: Optional[str] = None,
+        skip_human_card: bool = False,
     ) -> None:
         """Handle Starfleet Council meeting convening, participants briefing, and silent watchdog."""
         if human_caller and human_caller.strip():
@@ -500,8 +501,9 @@ class DispatchLoop:
         )
 
         # 3. Post the Clean Human Card Directly into the Telegram Group Chat!
-        reply_id = None if (getattr(msg, "sender_id", 0) == 0 or msg.message_id > 1000000000) else msg.message_id
-        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=human_card, reply_to_message_id=reply_id)
+        if not skip_human_card:
+            reply_id = None if (getattr(msg, "sender_id", 0) == 0 or msg.message_id > 1000000000) else msg.message_id
+            self._send_immediate_or_outbox(chat_id=msg.chat_id, text=human_card, reply_to_message_id=reply_id)
 
         # 4. Dispatch Briefing to the designated Host Node
         if host_role == "chat":
@@ -847,6 +849,35 @@ class DispatchLoop:
                     )
             except Exception as e:
                 logger.debug("Failed parsing inbound JSON as MiniApp meet data: %s", e)
+
+        # Check for Commander's formal Starfleet Council Kickoff Announcement
+        if "【人类指挥官 · PocketFleet联席会议启幕指令】" in clean_text or "PocketFleet联席会议启幕指令" in clean_text:
+            import re
+            m_top = re.search(r"📌\s*会议议题[：:]\s*(.+)", clean_text)
+            topic_extracted = m_top.group(1).strip() if m_top else "战队联席研讨"
+            m_host = re.search(r"会议主持人[【（(](.*?)[】）)]\s*[（(](@[a-zA-Z0-9_]+bot)[)）]", clean_text, re.IGNORECASE)
+            if not m_host:
+                m_host = re.search(r"【主持席】.*?\((@[a-zA-Z0-9_]+bot)\)", clean_text, re.IGNORECASE)
+            host_extracted = m_host.group(2 if len(m_host.groups()) >= 2 else 1) if m_host else None
+            m_wd = re.search(r"看门狗监护[：:]\s*(\d+)\s*分钟", clean_text)
+            wd_extracted = int(m_wd.group(1)) if m_wd else 15
+
+            # Extract mailto participants
+            m_mailto = re.search(r"\[mailto\]\s*(.+)", clean_text)
+            pts_extracted = []
+            if m_mailto:
+                pts_extracted = [p.strip() for p in m_mailto.group(1).split() if "@" in p]
+
+            logger.info("Recognized Commander formal meeting kickoff announcement: topic='%s', host=%s, wd=%d", topic_extracted, host_extracted, wd_extracted)
+            return self._handle_fleet_meeting(
+                msg=msg,
+                meet_arg=topic_extracted,
+                host_override=host_extracted,
+                watchdog_minutes=wd_extracted,
+                participants=pts_extracted or None,
+                human_caller=msg.sender_name or "ENTJ指挥官",
+                skip_human_card=True,
+            )
 
         # /meetover or #MEET_OVER or #MEET_SUMMARY
         if clean_text.lower().startswith("/meetover") or clean_text.startswith("#MEET_OVER") or clean_text.startswith("#MEET_SUMMARY"):

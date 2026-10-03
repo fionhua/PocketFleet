@@ -529,6 +529,43 @@ class TestDispatchLoop(unittest.TestCase):
         # 3. Plain text returns None
         self.assertIsNone(parse_telegram_envelope("普通的讨论文本没有标签"))
 
+    def test_commander_formal_kickoff_announcement(self):
+        from pocketfleet.bridge_server import format_commander_kickoff_announcement
+        body = {
+            "topic": "讨论裁决者为什么越战越强的问题",
+            "host": "@AiSoulSettlementBot",
+            "participants": ["@AiSoulSettlementBot", "@AiSoulJudgeBot", "@AiSoulMudSnakeBot"],
+            "watchdog_minutes": 15,
+            "human": "ENTJ指挥官",
+        }
+        text = format_commander_kickoff_announcement(body)
+        self.assertIn("[mailto] @AiSoulSettlementBot @AiSoulJudgeBot @AiSoulMudSnakeBot", text)
+        self.assertIn("【人类指挥官 · PocketFleet联席会议启幕指令】", text)
+        self.assertIn("讨论裁决者为什么越战越强的问题", text)
+        self.assertIn("15 分钟无进展自动推进", text)
+        self.assertIn("[Telegram]re:ENTJ指挥官;[NoReply]", text)
+
+        announcement_msg = InboundMessage(
+            message_id=5001,
+            chat_id=111,
+            sender_id=12345,
+            sender_name="ENTJ指挥官",
+            text=text,
+            is_bot=False,
+        )
+        with mock.patch("pocketfleet.bridge_server.enqueue_codeai_message") as mock_enqueue, \
+             mock.patch("pocketfleet.bridge_server.is_web_bridge_connected", return_value=(True, "OK")):
+            res = self.loop.handle_message(announcement_msg)
+            self.assertIsNone(res)
+            # Verify no duplicate card sent since skip_human_card=True!
+            self.assertEqual(len(self.transport.sent_messages), 0)
+            # Verify host briefing was enqueued
+            mock_enqueue.assert_called_once()
+            # Verify active meeting registered
+            self.assertIsNotNone(self.loop._active_meeting)
+            self.assertEqual(self.loop._active_meeting["topic"], "讨论裁决者为什么越战越强的问题")
+            self.assertEqual(self.loop._active_meeting["watchdog_sec"], 900)
+
 
 if __name__ == "__main__":
     unittest.main()
