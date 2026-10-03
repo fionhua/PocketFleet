@@ -7,7 +7,7 @@ export async function onRequestPost({ request, env }) {
     const topic = (data.topic || "").trim();
     const host = data.host || "@AiSoulSettlementBot";
     const watchdogMinutes = data.watchdog_minutes || 15;
-    const human = data.human || "人类指挥官";
+    const human = (data.human || "").trim() || (data.caller || "").trim() || "ENTJ指挥官";
     const chatId = data.chat_id || (env && env.TELEGRAM_CHAT_ID) || "-1004309197838";
 
     // Starfleet Bot Tokens fallback

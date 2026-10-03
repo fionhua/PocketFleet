@@ -312,9 +312,19 @@ class DispatchLoop:
         host_override: Optional[str] = None,
         watchdog_minutes: int = 5,
         participants: Optional[list] = None,
+        human_caller: Optional[str] = None,
     ) -> None:
         """Handle Starfleet Council meeting convening, participants briefing, and silent watchdog."""
-        human = msg.sender_name.strip() if msg.sender_name else "人类指挥官"
+        if human_caller and human_caller.strip():
+            human = human_caller.strip()
+        elif msg.sender_name and msg.sender_name.strip():
+            human = msg.sender_name.strip()
+            if getattr(msg, "sender_username", None):
+                human = f"{human} (@{msg.sender_username})"
+        elif getattr(msg, "sender_username", None):
+            human = f"@{msg.sender_username}"
+        else:
+            human = "ENTJ指挥官"
 
         # Resolve all participants from seats_config
         seats_map = getattr(self.seats_config, "seats", {}) if self.seats_config else {}
@@ -826,12 +836,14 @@ class DispatchLoop:
                     m_host = data.get("host", None)
                     m_watchdog = int(data.get("watchdog_minutes", 15))
                     m_participants = data.get("participants", None)
+                    m_human = (data.get("human") or data.get("caller") or "").strip() or None
                     return self._handle_fleet_meeting(
                         msg=msg,
                         meet_arg=m_topic,
                         host_override=m_host,
                         watchdog_minutes=m_watchdog,
                         participants=m_participants,
+                        human_caller=m_human,
                     )
             except Exception as e:
                 logger.debug("Failed parsing inbound JSON as MiniApp meet data: %s", e)

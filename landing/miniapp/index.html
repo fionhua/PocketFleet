@@ -841,12 +841,23 @@
         return;
       }
 
+      let humanCaller = "ENTJ指挥官";
+      if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        const u = tg.initDataUnsafe.user;
+        if (u.username) {
+          humanCaller = `@${u.username}`;
+        } else if (u.first_name || u.last_name) {
+          humanCaller = [u.first_name, u.last_name].filter(Boolean).join(" ");
+        }
+      }
+
       const payload = {
         action: "meet",
         topic: topic,
         host: selectedHost || selectedParticipants[0],
         participants: selectedParticipants,
-        watchdog_minutes: selectedWatchdog
+        watchdog_minutes: selectedWatchdog,
+        human: humanCaller
       };
 
       const jsonStr = JSON.stringify(payload);
