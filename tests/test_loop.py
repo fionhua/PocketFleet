@@ -506,7 +506,28 @@ class TestDispatchLoop(unittest.TestCase):
             self.loop.handle_message(over_msg)
             self.assertFalse(self.loop._active_meeting["active"])
             self.assertEqual(len(self.transport.sent_messages), 1)
-            self.assertIn("圆满闭幕", self.transport.sent_messages[0].text)
+            self.assertIn("结案闭幕", self.transport.sent_messages[0].text)
+
+    def test_parse_telegram_envelope(self):
+        from pocketfleet.loop import parse_telegram_envelope
+        # 1. Standard waitReply
+        env1 = parse_telegram_envelope("[Telegram]re:@AiSoulJudgeBot;[waitReply] 请审查这段代码")
+        self.assertIsNotNone(env1)
+        self.assertEqual(env1.action, "re")
+        self.assertEqual(env1.target_bot, "@AiSoulJudgeBot")
+        self.assertEqual(env1.reply_mode, "waitReply")
+        self.assertEqual(env1.body, "请审查这段代码")
+
+        # 2. Standard NoReply
+        env2 = parse_telegram_envelope("[Telegram]mailto:@AiSoulSettlementBot;[NoReply] 收到，测试完成")
+        self.assertIsNotNone(env2)
+        self.assertEqual(env2.action, "mailto")
+        self.assertEqual(env2.target_bot, "@AiSoulSettlementBot")
+        self.assertEqual(env2.reply_mode, "NoReply")
+        self.assertEqual(env2.body, "收到，测试完成")
+
+        # 3. Plain text returns None
+        self.assertIsNone(parse_telegram_envelope("普通的讨论文本没有标签"))
 
 
 if __name__ == "__main__":

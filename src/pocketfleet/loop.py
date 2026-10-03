@@ -15,6 +15,7 @@ import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -56,6 +57,43 @@ def defang_telegram_mentions(text: str) -> str:
     # Generic fallback: defang any remaining @[name]bot into [name · 免回]
     defanged = re.sub(r"@([a-zA-Z0-9_]+bot)\b", r"[\1 · 免回]", defanged, flags=re.IGNORECASE)
     return defanged
+
+
+@dataclass
+class TelegramEnvelopeHeader:
+    raw_tag: str
+    action: str  # "re" or "mailto"
+    target_bot: str  # e.g. "@AiSoulMudSnakeBot"
+    reply_mode: str  # "waitReply" or "NoReply"
+    body: str
+
+
+def parse_telegram_envelope(text: str) -> Optional[TelegramEnvelopeHeader]:
+    """Parse strictly locked canonical grammar:
+    [Telegram]re:@BotId;[waitReply]
+    [Telegram]re:@BotId;[NoReply]
+    [Telegram]mailto:@BotId;[waitReply]
+    [Telegram]mailto:@BotId;[NoReply]
+    """
+    import re
+    m = re.match(
+        r"^\[Telegram\];?(re|mailto):(@[a-zA-Z0-9_]+);?\[(waitReply|NoReply)\]\s*(.*)",
+        text.strip(),
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return None
+    action = m.group(1).lower()
+    target = m.group(2)
+    mode = "waitReply" if "wait" in m.group(3).lower() else "NoReply"
+    body = m.group(4).strip()
+    return TelegramEnvelopeHeader(
+        raw_tag=m.group(0)[:len(text.strip()) - len(body)].strip(),
+        action=action,
+        target_bot=target,
+        reply_mode=mode,
+        body=body,
+    )
 
 
 class DispatchLoop:
@@ -429,6 +467,10 @@ class DispatchLoop:
             f"_{host_display_name} 正在组织第一轮研讨与分工……_"
         )
 
+        other_bots = [u for u in [chat_u, lead_u, builder_u] if u.lower() != host_bot.lower()]
+        target_example_1 = other_bots[0] if other_bots else "@AiSoulSettlementBot"
+        target_example_2 = other_bots[1] if len(other_bots) > 1 else target_example_1
+
         # 2. Complete underground protocol briefing dispatched to Host Node
         briefing_prompt = (
             f"# 【AI星舰战队联席会议公文 · 主持人任务书】\n"
@@ -440,8 +482,8 @@ class DispatchLoop:
             f"{p_str_formatted}\n\n"
             f"### 二、 战队出站发信锁死语法规范（严格遵循，杜绝回声死循环）\n"
             f"• 语法定义：首行必须严格为 [Telegram]re:@BotId;[waitReply] 或 [Telegram]re:@BotId;[NoReply]\n"
-            f"• 点名交锋（需要对方回答）：`[Telegram]re:@BotId;[waitReply]`\n"
-            f"• 结案/纯同步（通知对方不需要回复）：`[Telegram]re:@BotId;[NoReply]`\n"
+            f"• 点名交锋（需对方回答）：`[Telegram]re:{target_example_1};[waitReply]`\n"
+            f"• 结案/纯同步（通知对方免回）：`[Telegram]re:{target_example_2};[NoReply]`\n"
             f"• 阻断机制：网桥检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n"
             f"• 闭幕方式：议程达成共识后，由主持人在群内发送 `/meetover` 正式结案闭幕。\n\n"
             f"👉 请主持人【{host_display_name}】率先开场发言，就议题展开第一手深度剖析，向参会节点分配任务并启动研讨！"
@@ -502,7 +544,6 @@ class DispatchLoop:
                     source=f"telegram:{msg.chat_id}:{msg.message_id}",
                     reply_chat_id=msg.chat_id,
                 )
-                logger.info("Enqueued Starfleet meeting briefing to Builder (Codex) via SessionHub")
             else:
                 task = Task(
                     prompt=briefing_prompt,
@@ -513,20 +554,39 @@ class DispatchLoop:
                 )
                 self.task_queue.put(task)
 
+        # 5. Initialize Active Meeting State with Watchdog & Turn Budget Circuit Breaker
+        self._active_meeting = {
+            "active": True,
+            "chat_id": msg.chat_id,
+            "topic": topic,
+            "host": host_bot,
+            "watchdog_sec": max(60, watchdog_minutes * 60),
+            "created_at": time.time(),
+            "turn_count": 0,
+            "max_turns": 12,
+        }
+        self._last_meeting_activity_ts = time.time()
+        logger.info("Starfleet meeting started: topic='%s', host='%s', watchdog=%dm, max_turns=12", topic, host_bot, watchdog_minutes)
+
         return None
 
     def _handle_fleet_meeting_over(self, msg: InboundMessage) -> None:
         """Handle Starfleet Council meeting conclusion and watchdog termination."""
         topic = "本次会议"
+        duration_min = 1
+        turns = 0
         if self._active_meeting:
             topic = self._active_meeting.get("topic", "本次会议")
+            duration_min = max(1, int((time.time() - self._active_meeting.get("created_at", time.time())) // 60))
+            turns = self._active_meeting.get("turn_count", 0)
             self._active_meeting["active"] = False
 
         closing_card = (
-            f"🏁 *【AI星舰联席会议 · 圆满闭幕】*\n\n"
+            f"🏁 *【AI星舰联席会议 · 结案闭幕】*\n\n"
             f"📌 *议题*：{topic}\n"
-            f"✅ 会议看门狗已安全停止，各席位自动转入常规待命态。\n"
-            f"🌾 战队协同推演结案，感谢指挥官与各席位的高效推进！"
+            f"⏱️ *历时*：约 {duration_min} 分钟（共 {turns} 轮交锋）\n"
+            f"✅ 会议看门狗已安全撤除，各席位转入待命态。\n"
+            f"🌾 协同推演结案，感谢指挥官与各席位的高效定桩！"
         )
         self._send_immediate_or_outbox(chat_id=msg.chat_id, text=closing_card, reply_to_message_id=msg.message_id)
         return None
@@ -545,7 +605,7 @@ class DispatchLoop:
             topic = self._active_meeting.get("topic", "本次议题")
             minutes = max(1, int(timeout_sec // 60))
             reminder = (
-                f"⏰ *【星舰联席会议 · 进度推进看门狗】*\n"
+                f"⏳ *【星舰联席会议 · 进度推进看门狗】*\n"
                 f"已超过 {minutes} 分钟无有效会议进展。\n"
                 f"📌 *议题*：{topic}\n"
                 f"👉 请主持人 `{host}` 推进议程分工；若议题讨论已完成，请发送 `/meetover` 正式闭幕。"
@@ -740,6 +800,20 @@ class DispatchLoop:
                 is_pure_ack = any(ack in t_low for ack in ["收到", "已进入议席", "ack", "[noreply]", "【免回】", "/meet", "/meetover", "#meet"])
                 if not is_pure_ack and len(raw_text) > 15:
                     self._last_meeting_activity_ts = time.time()
+                    self._active_meeting["turn_count"] = self._active_meeting.get("turn_count", 0) + 1
+                    max_turns = self._active_meeting.get("max_turns", 12)
+                    if self._active_meeting["turn_count"] >= max_turns:
+                        logger.warning("Meeting turn budget reached (%d/%d). Triggering automatic circuit breaker.", self._active_meeting["turn_count"], max_turns)
+                        self._send_immediate_or_outbox(
+                            chat_id=msg.chat_id,
+                            text=f"🛑 *【会议轮次硬熔断】* 本次会议已达最大交锋配额（{max_turns} 轮）。会议自动收敛闭幕，请主持人与参会席位以此前的结论定桩结案。"
+                        )
+                        self._active_meeting["active"] = False
+
+        # Parse canonical envelope header [Telegram]re:@Bot;[mode]
+        env = parse_telegram_envelope(raw_text)
+        if env and env.reply_mode == "NoReply":
+            logger.info("Parsed canonical [NoReply] envelope targeting %s", env.target_bot)
 
         clean_text = raw_text.strip()
         # Telegram Mini App submission (web_app_data)
