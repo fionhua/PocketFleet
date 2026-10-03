@@ -40,11 +40,19 @@
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: var(--bg-primary);
       color: var(--text-main);
-      padding: 16px;
-      padding-bottom: 96px;
+      padding: 16px 20px 96px 20px;
       line-height: 1.5;
       font-size: 14px;
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .app-container {
+      width: 100%;
+      max-width: 1280px;
+      margin: 0 auto;
       display: flex;
       flex-direction: column;
     }
@@ -482,14 +490,22 @@
       bottom: 0;
       left: 0;
       right: 0;
-      padding: 14px 16px;
+      padding: 14px 20px;
       background: rgba(13, 17, 23, 0.88);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border-top: 1px solid var(--border-card);
       display: flex;
-      gap: 10px;
+      justify-content: center;
       z-index: 100;
+    }
+
+    .bottom-bar-inner {
+      width: 100%;
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      gap: 10px;
     }
 
     .btn-kickoff {
@@ -578,8 +594,9 @@
     <span id="toast-text">公文已分发</span>
   </div>
 
-  <!-- Header -->
-  <div class="header">
+  <div class="app-container">
+    <!-- Header -->
+    <div class="header">
     <div class="badge-starfleet">
       <span class="dot"></span>
       PocketFleet Council
@@ -662,17 +679,20 @@
     </div>
     <p class="hint-text">💡 主持人若在设定时间内未收到任何战队动态且未闭幕，看门狗将自动在群内温和提醒推进议程。</p>
   </div>
+  </div> <!-- /app-container -->
 
   <!-- Bottom Action Bar -->
   <div class="bottom-bar">
-    <button class="btn-close-meeting" onclick="submitCloseMeeting()" title="发送闭幕指令结束当前会议">
-      <span>🏁</span>
-      <span>/meetover</span>
-    </button>
-    <button class="btn-kickoff" onclick="submitMeeting()">
-      <span>🚀</span>
-      <span>立即召集会议</span>
-    </button>
+    <div class="bottom-bar-inner">
+      <button class="btn-close-meeting" onclick="submitCloseMeeting()" title="发送闭幕指令结束当前会议">
+        <span>🏁</span>
+        <span>/meetover</span>
+      </button>
+      <button class="btn-kickoff" onclick="submitMeeting()">
+        <span>🚀</span>
+        <span>立即召集会议</span>
+      </button>
+    </div>
   </div>
 
   <script>
