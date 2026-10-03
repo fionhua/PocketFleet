@@ -168,26 +168,6 @@
     .section-title .icon {
       font-size: 15px;
     }
-
-    .btn-text-action {
-      background: none;
-      border: none;
-      color: var(--accent-cyan);
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      transition: background 0.2s ease;
-    }
-
-    .btn-text-action:hover {
-      background: rgba(0, 229, 255, 0.1);
-    }
-
     /* Participants Checklist */
     .participant-list {
       display: flex;
@@ -271,37 +251,6 @@
       text-overflow: ellipsis;
     }
 
-    .p-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: 8px;
-    }
-
-    .btn-icon {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 14px;
-      padding: 4px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-    }
-
-    .btn-icon:hover {
-      color: var(--text-main);
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    .btn-icon.delete:hover {
-      color: var(--accent-red);
-      background: rgba(248, 113, 113, 0.15);
-    }
-
     .checkbox-box {
       width: 20px;
       height: 20px;
@@ -328,71 +277,6 @@
 
     .participant-item.selected .checkbox-box svg {
       display: block;
-    }
-
-    /* Add/Edit Seat Modal/Card */
-    .edit-modal {
-      display: none;
-      margin-top: 12px;
-      padding: 12px;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px dashed var(--accent-cyan);
-      border-radius: var(--radius-sm);
-      animation: fadeIn 0.2s ease;
-    }
-
-    .edit-modal.active {
-      display: block;
-    }
-
-    .modal-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .input-field {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 8px 10px;
-      color: var(--text-main);
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.2s ease;
-    }
-
-    .input-field:focus {
-      border-color: var(--accent-cyan);
-    }
-
-    .modal-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-
-    .btn-secondary {
-      padding: 6px 12px;
-      background: rgba(255, 255, 255, 0.08);
-      border: none;
-      border-radius: 6px;
-      color: var(--text-muted);
-      font-size: 12px;
-      cursor: pointer;
-    }
-
-    .btn-primary {
-      padding: 6px 14px;
-      background: var(--accent-blue);
-      border: none;
-      border-radius: 6px;
-      color: white;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
     }
 
     /* Host Selector (Radio Grid) */
@@ -628,35 +512,16 @@
   <div class="main-layout">
     <!-- Left Column (380px): Cards 1, 2, 4 -->
     <div class="col-left">
-      <!-- 1. 参会席位 (Checklist & Dynamic Management) -->
+      <!-- 1. 参会席位勾选 (Participants) -->
       <div class="card">
-        <div class="section-header">
-          <div class="section-title">
-            <span class="icon">🤖</span>
-            <span>1. 参会席位选择与管理</span>
-          </div>
-          <button class="btn-text-action" onclick="openAddSeatModal()">
-            <span>➕ 添加席位</span>
-          </button>
+        <div class="section-title" style="margin-bottom: 12px;">
+          <span class="icon">🤖</span>
+          <span>1. 参会席位勾选 (Participants)</span>
         </div>
 
         <!-- Dynamic Participant List -->
         <div class="participant-list" id="participant-list">
           <!-- Injected via JavaScript -->
-        </div>
-
-        <!-- Inline Add/Edit Seat Form -->
-        <div class="edit-modal" id="edit-modal">
-          <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--accent-cyan);" id="modal-title">添加新席位</div>
-          <div class="modal-grid">
-            <input type="text" id="modal-name" class="input-field" placeholder="席位名称（例如：方案主持）" />
-            <input type="text" id="modal-bot" class="input-field" placeholder="Telegram Bot用户名（@...）" />
-          </div>
-          <input type="text" id="modal-role" class="input-field" placeholder="职责分工（例如：方案推演与会议对账）" style="margin-bottom: 10px;" />
-          <div class="modal-actions">
-            <button class="btn-secondary" onclick="closeEditModal()">取消</button>
-            <button class="btn-primary" onclick="saveSeat()">保存席位</button>
-          </div>
         </div>
       </div>
 
@@ -824,11 +689,10 @@
       const container = document.getElementById("participant-list");
       container.innerHTML = "";
 
-      seats.forEach((seat, idx) => {
+      seats.forEach((seat) => {
         const item = document.createElement("div");
         item.className = `participant-item ${seat.selected ? "selected" : ""}`;
-        item.onclick = (e) => {
-          if (e.target.closest(".btn-icon")) return;
+        item.onclick = () => {
           seat.selected = !seat.selected;
           item.classList.toggle("selected", seat.selected);
           updateHostGridAvailability();
@@ -847,12 +711,8 @@
               <span class="p-role">${escapeHtml(seat.bot)} · ${escapeHtml(seat.role)}</span>
             </div>
           </div>
-          <div class="p-actions">
-            <button class="btn-icon" onclick="openEditSeatModal(${idx})" title="编辑席位">✏️</button>
-            <button class="btn-icon delete" onclick="deleteSeat(${idx})" title="删除席位">🗑️</button>
-            <div class="checkbox-box">
-              <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-            </div>
+          <div class="checkbox-box">
+            <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
           </div>
         `;
         container.appendChild(item);
@@ -904,89 +764,6 @@
       const input = document.getElementById("agenda-input");
       input.value = text;
       input.focus();
-    }
-
-    /* Seat Add & Edit Management */
-    function openAddSeatModal() {
-      editingIndex = -1;
-      document.getElementById("modal-title").innerText = "添加新席位";
-      document.getElementById("modal-name").value = "";
-      document.getElementById("modal-bot").value = "@";
-      document.getElementById("modal-role").value = "";
-      document.getElementById("edit-modal").classList.add("active");
-      document.getElementById("modal-name").focus();
-    }
-
-    function openEditSeatModal(idx) {
-      editingIndex = idx;
-      const s = seats[idx];
-      document.getElementById("modal-title").innerText = `编辑席位 · ${s.name}`;
-      document.getElementById("modal-name").value = s.name;
-      document.getElementById("modal-bot").value = s.bot;
-      document.getElementById("modal-role").value = s.role;
-      document.getElementById("edit-modal").classList.add("active");
-      document.getElementById("modal-name").focus();
-    }
-
-    function closeEditModal() {
-      document.getElementById("edit-modal").classList.remove("active");
-      editingIndex = -1;
-    }
-
-    function saveSeat() {
-      const name = document.getElementById("modal-name").value.trim();
-      let bot = document.getElementById("modal-bot").value.trim();
-      const role = document.getElementById("modal-role").value.trim() || "战队协同";
-
-      if (!name) {
-        showToast("⚠️ 请输入席位名称");
-        return;
-      }
-      if (!bot || bot === "@") {
-        showToast("⚠️ 请输入有效的 Telegram Bot 用户名（@...）");
-        return;
-      }
-      if (!bot.startsWith("@")) bot = "@" + bot;
-
-      if (editingIndex >= 0 && editingIndex < seats.length) {
-        // Edit existing
-        seats[editingIndex].name = name;
-        seats[editingIndex].bot = bot;
-        seats[editingIndex].role = role;
-      } else {
-        // Add new
-        seats.push({
-          bot: bot,
-          name: name,
-          role: role,
-          icon: "🤖",
-          color: "#00e5ff",
-          is_host: seats.length === 0,
-          selected: true
-        });
-        if (seats.length === 1) selectedHost = bot;
-      }
-
-      localStorage.setItem("pf_council_seats", JSON.stringify(seats));
-      closeEditModal();
-      renderSeats();
-      renderHosts();
-      showToast("✅ 席位已成功更新并本地保存！");
-    }
-
-    function deleteSeat(idx) {
-      if (seats.length <= 1) {
-        showToast("⚠️ 至少需保留一个席位！");
-        return;
-      }
-      const removed = seats.splice(idx, 1)[0];
-      if (removed.bot.toLowerCase() === selectedHost.toLowerCase()) {
-        selectedHost = seats[0].bot;
-      }
-      localStorage.setItem("pf_council_seats", JSON.stringify(seats));
-      renderSeats();
-      renderHosts();
-      showToast("🗑️ 席位已删除");
     }
 
     function showToast(msg) {
