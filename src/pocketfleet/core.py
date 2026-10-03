@@ -57,6 +57,7 @@ class OutboundMessage:
     text: str
     reply_to_message_id: int | None = None
     parse_mode: str = "Markdown"
+    reply_markup: dict | None = None
 
 
 

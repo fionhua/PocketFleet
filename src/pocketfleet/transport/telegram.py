@@ -159,6 +159,9 @@ class TelegramTransport(BaseTransport):
         if message.reply_to_message_id:
             payload["reply_to_message_id"] = message.reply_to_message_id
 
+        if getattr(message, "reply_markup", None):
+            payload["reply_markup"] = message.reply_markup
+
         for attempt in range(max_retries + 1):
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(

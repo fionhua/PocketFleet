@@ -304,15 +304,59 @@ class DispatchLoop:
             host_bot = chat_u
 
         if not topic:
+            # Build dynamic seats data for WebApp URL based on user's actual configured seats
+            seats_data = []
+            if self.seats_config and getattr(self.seats_config, "seats", None):
+                for role_key in ["chat", "lead", "builder"]:
+                    seat = self.seats_config.seats.get(role_key)
+                    if seat and seat.bot_username:
+                        b_u = seat.bot_username.strip()
+                        if not b_u.startswith("@"):
+                            b_u = "@" + b_u
+                        s_name = seat.name or role_key
+                        s_desc = "方案推演与会议对账" if role_key == "chat" else ("架构守门与审计" if role_key == "lead" else "工程定桩与算法落地")
+                        s_icon = "🎛️" if role_key == "chat" else ("⚖️" if role_key == "lead" else "🐍")
+                        s_color = "#a855f7" if role_key == "chat" else ("#00e5ff" if role_key == "lead" else "#10b981")
+                        seats_data.append({
+                            "bot": b_u,
+                            "name": s_name,
+                            "role": s_desc,
+                            "icon": s_icon,
+                            "color": s_color,
+                            "is_host": (role_key == "chat"),
+                        })
+
+            import urllib.parse
+            import json
+            query_str = urllib.parse.urlencode({"data": json.dumps(seats_data)}) if seats_data else ""
+            miniapp_url = f"https://pocketfleet.pages.dev/?{query_str}" if query_str else "https://pocketfleet.pages.dev/"
+
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "🏛️ 打开会议召集面板",
+                            "web_app": {"url": miniapp_url}
+                        }
+                    ]
+                ]
+            }
+
             card = (
-                "🏛️ *【AI星舰联席会议中心】已就绪*\n\n"
-                "参会席位已按战队配置自动归位：\n"
+                "🏛️ *【AI战队联席会议中心】已就绪*\n\n"
+                "参会席位已按战队配置自动就位：\n"
                 f"• 🎛️ *默认主持*：{chat_name} (`{chat_u}`) — 方案推演与会议对账\n"
                 f"• ⚖️ *审计席*：{lead_name} (`{lead_u}`) — 架构守门与防御审计\n"
                 f"• 🐍 *施工席*：{builder_name} (`{builder_u}`) — 工程定桩与算法实现\n\n"
-                "💬 *请直接在群里发送本次会议的研讨【议题】或资料*（例如：`/meet 招股书退市风险评估`），全员会议立即开席！"
+                f"👉 [点击打开专属会议召集面板]({miniapp_url})\n\n"
+                "💬 *或直接在群里发送研讨议题*（例如：`/meet 招股书退市风险评估`），全员会议立即开席！"
             )
-            self._send_immediate_or_outbox(chat_id=msg.chat_id, text=card, reply_to_message_id=msg.message_id)
+            self._send_immediate_or_outbox(
+                chat_id=msg.chat_id,
+                text=card,
+                reply_to_message_id=msg.message_id,
+                reply_markup=reply_markup,
+            )
             return None
 
         # Record active meeting session
@@ -442,6 +486,7 @@ class DispatchLoop:
         text: str,
         reply_to_message_id: Optional[int] = None,
         parse_mode: Optional[str] = "Markdown",
+        reply_markup: Optional[dict] = None,
     ) -> None:
         """Attempt immediate transport delivery; fallback to persistent outbox on failure."""
         msg = OutboundMessage(
@@ -449,6 +494,7 @@ class DispatchLoop:
             text=text,
             reply_to_message_id=reply_to_message_id,
             parse_mode=parse_mode,
+            reply_markup=reply_markup,
         )
         ok = False
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI星舰联席会议 · 召集仪轨</title>
+  <title>AI联席会议 · 召集面板</title>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,6 +22,7 @@
       --accent-purple: #a855f7;
       --accent-gold: #f59e0b;
       --accent-green: #10b981;
+      --accent-red: #f87171;
       --radius-sm: 8px;
       --radius-md: 12px;
       --radius-lg: 16px;
@@ -50,7 +51,7 @@
 
     /* Header Banner */
     .header {
-      margin-bottom: 20px;
+      margin-bottom: 18px;
       text-align: center;
       position: relative;
     }
@@ -99,10 +100,17 @@
       border: 1px solid var(--border-card);
       border-radius: var(--radius-md);
       padding: 14px 16px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
     }
 
     .section-title {
@@ -112,11 +120,29 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 12px;
     }
 
     .section-title .icon {
       font-size: 15px;
+    }
+
+    .btn-text-action {
+      background: none;
+      border: none;
+      color: var(--accent-cyan);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: background 0.2s ease;
+    }
+
+    .btn-text-action:hover {
+      background: rgba(0, 229, 255, 0.1);
     }
 
     /* Participants Checklist */
@@ -147,6 +173,8 @@
       display: flex;
       align-items: center;
       gap: 10px;
+      flex: 1;
+      overflow: hidden;
     }
 
     .p-avatar {
@@ -158,23 +186,77 @@
       justify-content: center;
       font-size: 16px;
       background: rgba(255, 255, 255, 0.06);
+      flex-shrink: 0;
     }
 
     .p-details {
       display: flex;
       flex-direction: column;
+      overflow: hidden;
+    }
+
+    .p-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     .p-name {
       font-weight: 600;
       font-size: 13px;
       color: var(--text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .p-host-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      background: rgba(0, 229, 255, 0.15);
+      color: var(--accent-cyan);
+      border-radius: 4px;
+      font-weight: 600;
     }
 
     .p-role {
       font-size: 11px;
       color: var(--text-muted);
       font-family: 'JetBrains Mono', monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .p-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 8px;
+    }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .btn-icon:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-icon.delete:hover {
+      color: var(--accent-red);
+      background: rgba(248, 113, 113, 0.15);
     }
 
     .checkbox-box {
@@ -186,6 +268,7 @@
       align-items: center;
       justify-content: center;
       transition: all 0.2s ease;
+      flex-shrink: 0;
     }
 
     .participant-item.selected .checkbox-box {
@@ -204,10 +287,75 @@
       display: block;
     }
 
-    /* Host Selector (Radio) */
+    /* Add/Edit Seat Modal/Card */
+    .edit-modal {
+      display: none;
+      margin-top: 12px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px dashed var(--accent-cyan);
+      border-radius: var(--radius-sm);
+      animation: fadeIn 0.2s ease;
+    }
+
+    .edit-modal.active {
+      display: block;
+    }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .input-field {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--text-main);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .input-field:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .btn-secondary {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      padding: 6px 14px;
+      background: var(--accent-blue);
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* Host Selector (Radio Grid) */
     .host-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
       gap: 8px;
     }
 
@@ -225,6 +373,9 @@
       align-items: center;
       gap: 4px;
       transition: all 0.2s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .host-btn.active {
@@ -246,7 +397,7 @@
 
     textarea.agenda-input {
       width: 100%;
-      height: 90px;
+      height: 85px;
       background: rgba(0, 0, 0, 0.3);
       border: 1px solid var(--border-card);
       border-radius: var(--radius-sm);
@@ -332,7 +483,7 @@
       left: 0;
       right: 0;
       padding: 14px 16px;
-      background: rgba(13, 17, 23, 0.85);
+      background: rgba(13, 17, 23, 0.88);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border-top: 1px solid var(--border-card);
@@ -370,7 +521,7 @@
       height: 46px;
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--border-card);
-      color: #f87171;
+      color: var(--accent-red);
       border-radius: var(--radius-sm);
       font-size: 12px;
       font-weight: 600;
@@ -412,6 +563,11 @@
       transform: translateX(-50%) translateY(0);
       opacity: 1;
     }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -428,103 +584,73 @@
       <span class="dot"></span>
       PocketFleet Council
     </div>
-    <h1 class="title">AI星舰联席会议 · 召集仪轨</h1>
-    <p class="subtitle">零云端开销 · Telegram 原生即时推演与防回声闭环</p>
+    <h1 class="title">AI联席会议 · 召集面板</h1>
+    <p class="subtitle">Telegram 原生推演 · 多席位协同 · 防回声闭环</p>
   </div>
 
-  <!-- 1. 参会席位 (Checklist) -->
+  <!-- 1. 参会席位 (Checklist & Dynamic Management) -->
   <div class="card">
-    <div class="section-title">
-      <span class="icon">🤖</span>
-      <span>1. 参会席位勾选 (Participants)</span>
+    <div class="section-header">
+      <div class="section-title">
+        <span class="icon">🤖</span>
+        <span>1. 参会席位选择与管理</span>
+      </div>
+      <button class="btn-text-action" onclick="openAddSeatModal()">
+        <span>➕ 添加席位</span>
+      </button>
     </div>
+
+    <!-- Dynamic Participant List -->
     <div class="participant-list" id="participant-list">
-      <!-- 结算主机 -->
-      <div class="participant-item selected" data-bot="@AiSoulSettlementBot" data-name="结算主机" onclick="toggleParticipant(this)">
-        <div class="p-info">
-          <div class="p-avatar" style="color: #a855f7;">🎛️</div>
-          <div class="p-details">
-            <span class="p-name">结算主机 (ChatGPT Web)</span>
-            <span class="p-role">@AiSoulSettlementBot · 方案推演 / 会议对账</span>
-          </div>
-        </div>
-        <div class="checkbox-box">
-          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-        </div>
-      </div>
+      <!-- Injected via JavaScript -->
+    </div>
 
-      <!-- 裁决者 -->
-      <div class="participant-item selected" data-bot="@AiSoulJudgeBot" data-name="裁决者" onclick="toggleParticipant(this)">
-        <div class="p-info">
-          <div class="p-avatar" style="color: #00e5ff;">⚖️</div>
-          <div class="p-details">
-            <span class="p-name">裁决者🌈 (Antigravity)</span>
-            <span class="p-role">@AiSoulJudgeBot · 架构守门 / 防御审计</span>
-          </div>
-        </div>
-        <div class="checkbox-box">
-          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-        </div>
+    <!-- Inline Add/Edit Seat Form -->
+    <div class="edit-modal" id="edit-modal">
+      <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--accent-cyan);" id="modal-title">添加新席位</div>
+      <div class="modal-grid">
+        <input type="text" id="modal-name" class="input-field" placeholder="席位名称（例如：方案主持）" />
+        <input type="text" id="modal-bot" class="input-field" placeholder="Telegram Bot用户名（@...）" />
       </div>
-
-      <!-- 泥蛇 -->
-      <div class="participant-item selected" data-bot="@AiSoulMudSnakeBot" data-name="泥蛇" onclick="toggleParticipant(this)">
-        <div class="p-info">
-          <div class="p-avatar" style="color: #10b981;">🐍</div>
-          <div class="p-details">
-            <span class="p-name">泥蛇H (Codex / Aider)</span>
-            <span class="p-role">@AiSoulMudSnakeBot · 工程定桩 / 算法实现</span>
-          </div>
-        </div>
-        <div class="checkbox-box">
-          <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-        </div>
+      <input type="text" id="modal-role" class="input-field" placeholder="职责分工（例如：方案推演与会议对账）" style="margin-bottom: 10px;" />
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeEditModal()">取消</button>
+        <button class="btn-primary" onclick="saveSeat()">保存席位</button>
       </div>
     </div>
   </div>
 
-  <!-- 2. 指定会议主持人 (Host) -->
+  <!-- 2. 指定会议主持人 (Host Selection) -->
   <div class="card">
-    <div class="section-title">
+    <div class="section-title" style="margin-bottom: 12px;">
       <span class="icon">👑</span>
       <span>2. 指定首发主持人 (Meeting Host)</span>
     </div>
     <div class="host-grid" id="host-grid">
-      <div class="host-btn active" data-bot="@AiSoulSettlementBot" onclick="selectHost(this)">
-        <span class="host-icon">🎛️</span>
-        <span>结算主机</span>
-      </div>
-      <div class="host-btn" data-bot="@AiSoulJudgeBot" onclick="selectHost(this)">
-        <span class="host-icon">⚖️</span>
-        <span>裁决者</span>
-      </div>
-      <div class="host-btn" data-bot="@AiSoulMudSnakeBot" onclick="selectHost(this)">
-        <span class="host-icon">🐍</span>
-        <span>泥蛇</span>
-      </div>
+      <!-- Injected via JavaScript -->
     </div>
   </div>
 
   <!-- 3. 会议研讨主题与资料 (Agenda) -->
   <div class="card">
-    <div class="section-title">
+    <div class="section-title" style="margin-bottom: 12px;">
       <span class="icon">📌</span>
       <span>3. 会议研讨主题与资料 (Agenda)</span>
     </div>
     <div class="agenda-input-wrap">
-      <textarea id="agenda-input" class="agenda-input" placeholder="输入本次会议研讨议题或需审查的代码/资料（例如：招股书退市风险评估、防回声网桥落地审查）..."></textarea>
+      <textarea id="agenda-input" class="agenda-input" placeholder="输入本次会议研讨议题或需审查的代码/资料（例如：核心算法防回声审计与定桩、退市新规综合推演）..."></textarea>
     </div>
     <div class="quick-tags">
-      <span class="tag-chip" onclick="setTopic('招股书退市风险全景评估')">📈 退市风险评估</span>
-      <span class="tag-chip" onclick="setTopic('自研防回声网桥与触发符脱敏审计')">🛡️ 防回声网桥落地</span>
-      <span class="tag-chip" onclick="setTopic('缠论顶底背驰算法核心定桩')">🐍 缠论核心算法</span>
-      <span class="tag-chip" onclick="setTopic('星舰跨会话投递通道压测对账')">⚖️ 投递通道对账</span>
+      <span class="tag-chip" onclick="setTopic('系统方案推演与架构设计')">📐 架构设计</span>
+      <span class="tag-chip" onclick="setTopic('核心代码审查与安全审计')">🔍 代码审查</span>
+      <span class="tag-chip" onclick="setTopic('关键算法落地与工程实现')">⚡ 算法实现</span>
+      <span class="tag-chip" onclick="setTopic('复杂问题诊断与异常排查')">🐞 问题排查</span>
     </div>
   </div>
 
   <!-- 4. 超时推进看门狗 (Watchdog) -->
   <div class="card">
-    <div class="section-title">
+    <div class="section-title" style="margin-bottom: 12px;">
       <span class="icon">⏱️</span>
       <span>4. 超时看门狗自动推进 (Silent Watchdog)</span>
     </div>
@@ -545,7 +671,7 @@
     </button>
     <button class="btn-kickoff" onclick="submitMeeting()">
       <span>🚀</span>
-      <span>立即召集星舰开会</span>
+      <span>立即召集会议</span>
     </button>
   </div>
 
@@ -559,93 +685,300 @@
       if (tg.setBackgroundColor) tg.setBackgroundColor('#0d1117');
     }
 
-    let selectedHost = "@AiSoulSettlementBot";
-    let selectedWatchdog = 5;
+    // Default Generic Starter Seats (if user has no URL params and no localStorage)
+    const DEFAULT_SEATS = [
+      { bot: "@AiSoulSettlementBot", name: "方案主持席", role: "方案推演与会议对账", icon: "🎛️", color: "#a855f7", is_host: true, selected: true },
+      { bot: "@AiSoulJudgeBot", name: "架构审计席", role: "防崩守门与逻辑审计", icon: "⚖️", color: "#00e5ff", is_host: false, selected: true },
+      { bot: "@AiSoulMudSnakeBot", name: "代码施工席", role: "工程定桩与算法落地", icon: "🐍", color: "#10b981", is_host: false, selected: true }
+    ];
 
-    function toggleParticipant(elem) {
-      elem.classList.toggle('selected');
-      updateHostOptions();
+    let seats = [];
+    let selectedHost = "";
+    let selectedWatchdog = 5;
+    let editingIndex = -1;
+
+    // Load seats from URL params -> localStorage -> fallback defaults
+    function initSeats() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const dataParam = urlParams.get("data");
+      const botsParam = urlParams.get("bots");
+
+      let loaded = null;
+
+      // 1. Try URL data JSON
+      if (dataParam) {
+        try {
+          loaded = JSON.parse(decodeURIComponent(dataParam));
+        } catch (e) {
+          console.warn("Failed to parse ?data param", e);
+        }
+      }
+
+      // 2. Try URL bots shorthand: @bot1:Name:Role,@bot2:Name:Role
+      if (!loaded && botsParam) {
+        try {
+          loaded = botsParam.split(",").map((item, idx) => {
+            const parts = item.split(":");
+            const b = (parts[0] || "").trim();
+            const n = parts[1] ? parts[1].trim() : (idx === 0 ? "主持席" : `席位${idx+1}`);
+            const r = parts[2] ? parts[2].trim() : "战队协同";
+            return {
+              bot: b.startsWith("@") ? b : `@${b}`,
+              name: n,
+              role: r,
+              is_host: idx === 0,
+              selected: true
+            };
+          }).filter(s => s.bot.length > 1);
+        } catch (e) {
+          console.warn("Failed to parse ?bots param", e);
+        }
+      }
+
+      // 3. If loaded from URL, save to localStorage
+      if (loaded && loaded.length > 0) {
+        seats = loaded.map((s, idx) => ({
+          bot: s.bot.startsWith("@") ? s.bot : `@${s.bot}`,
+          name: s.name || `席位${idx+1}`,
+          role: s.role || "协同推演",
+          icon: s.icon || (idx === 0 ? "🎛️" : (idx === 1 ? "⚖️" : "💻")),
+          color: s.color || (idx === 0 ? "#a855f7" : (idx === 1 ? "#00e5ff" : "#10b981")),
+          is_host: !!s.is_host,
+          selected: s.selected !== false
+        }));
+        localStorage.setItem("pf_council_seats", JSON.stringify(seats));
+      } else {
+        // 4. Try localStorage
+        const cached = localStorage.getItem("pf_council_seats");
+        if (cached) {
+          try {
+            seats = JSON.parse(cached);
+          } catch (e) {
+            seats = DEFAULT_SEATS;
+          }
+        } else {
+          seats = DEFAULT_SEATS;
+        }
+      }
+
+      // Set initial host
+      const hostSeat = seats.find(s => s.is_host) || seats[0];
+      selectedHost = hostSeat ? hostSeat.bot : "";
+
+      renderSeats();
+      renderHosts();
     }
 
-    function selectHost(elem) {
-      document.querySelectorAll('.host-btn').forEach(btn => btn.classList.remove('active'));
-      elem.classList.add('active');
-      selectedHost = elem.getAttribute('data-bot');
+    function renderSeats() {
+      const container = document.getElementById("participant-list");
+      container.innerHTML = "";
+
+      seats.forEach((seat, idx) => {
+        const item = document.createElement("div");
+        item.className = `participant-item ${seat.selected ? "selected" : ""}`;
+        item.onclick = (e) => {
+          if (e.target.closest(".btn-icon")) return;
+          seat.selected = !seat.selected;
+          item.classList.toggle("selected", seat.selected);
+          updateHostGridAvailability();
+        };
+
+        const isHost = (seat.bot.toLowerCase() === selectedHost.toLowerCase());
+
+        item.innerHTML = `
+          <div class="p-info">
+            <div class="p-avatar" style="color: ${seat.color || '#00e5ff'};">${seat.icon || '🤖'}</div>
+            <div class="p-details">
+              <div class="p-name-row">
+                <span class="p-name">${escapeHtml(seat.name)}</span>
+                ${isHost ? '<span class="p-host-badge">首发主持</span>' : ''}
+              </div>
+              <span class="p-role">${escapeHtml(seat.bot)} · ${escapeHtml(seat.role)}</span>
+            </div>
+          </div>
+          <div class="p-actions">
+            <button class="btn-icon" onclick="openEditSeatModal(${idx})" title="编辑席位">✏️</button>
+            <button class="btn-icon delete" onclick="deleteSeat(${idx})" title="删除席位">🗑️</button>
+            <div class="checkbox-box">
+              <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            </div>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function renderHosts() {
+      const hostGrid = document.getElementById("host-grid");
+      hostGrid.innerHTML = "";
+
+      seats.forEach(seat => {
+        const btn = document.createElement("div");
+        const isActive = (seat.bot.toLowerCase() === selectedHost.toLowerCase());
+        btn.className = `host-btn ${isActive ? "active" : ""}`;
+        btn.setAttribute("data-bot", seat.bot);
+        btn.onclick = () => selectHost(seat.bot);
+        btn.innerHTML = `
+          <span class="host-icon">${seat.icon || '🤖'}</span>
+          <span>${escapeHtml(seat.name)}</span>
+        `;
+        hostGrid.appendChild(btn);
+      });
+    }
+
+    function selectHost(botTag) {
+      selectedHost = botTag;
+      document.querySelectorAll(".host-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.getAttribute("data-bot").toLowerCase() === botTag.toLowerCase());
+      });
+      renderSeats();
+    }
+
+    function updateHostGridAvailability() {
+      // If currently selected host was deselected from participants, pick first selected participant
+      const selectedSeats = seats.filter(s => s.selected);
+      if (selectedSeats.length > 0 && !selectedSeats.some(s => s.bot.toLowerCase() === selectedHost.toLowerCase())) {
+        selectedHost = selectedSeats[0].bot;
+      }
+      renderHosts();
     }
 
     function selectWatchdog(elem) {
-      document.querySelectorAll('.wd-pill').forEach(pill => pill.classList.remove('active'));
-      elem.classList.add('active');
-      selectedWatchdog = parseInt(elem.getAttribute('data-min'), 10) || 5;
+      document.querySelectorAll(".wd-pill").forEach(p => p.classList.remove("active"));
+      elem.classList.add("active");
+      selectedWatchdog = parseInt(elem.getAttribute("data-min"), 10) || 5;
     }
 
     function setTopic(text) {
-      const input = document.getElementById('agenda-input');
+      const input = document.getElementById("agenda-input");
       input.value = text;
       input.focus();
     }
 
-    function updateHostOptions() {
-      // Sync host list if participant toggled
-      const activeBots = Array.from(document.querySelectorAll('.participant-item.selected'))
-                              .map(i => i.getAttribute('data-bot'));
-      if (!activeBots.includes(selectedHost) && activeBots.length > 0) {
-        selectedHost = activeBots[0];
-        document.querySelectorAll('.host-btn').forEach(btn => {
-          if (btn.getAttribute('data-bot') === selectedHost) {
-            btn.classList.add('active');
-          } else {
-            btn.classList.remove('active');
-          }
-        });
+    /* Seat Add & Edit Management */
+    function openAddSeatModal() {
+      editingIndex = -1;
+      document.getElementById("modal-title").innerText = "添加新席位";
+      document.getElementById("modal-name").value = "";
+      document.getElementById("modal-bot").value = "@";
+      document.getElementById("modal-role").value = "";
+      document.getElementById("edit-modal").classList.add("active");
+      document.getElementById("modal-name").focus();
+    }
+
+    function openEditSeatModal(idx) {
+      editingIndex = idx;
+      const s = seats[idx];
+      document.getElementById("modal-title").innerText = `编辑席位 · ${s.name}`;
+      document.getElementById("modal-name").value = s.name;
+      document.getElementById("modal-bot").value = s.bot;
+      document.getElementById("modal-role").value = s.role;
+      document.getElementById("edit-modal").classList.add("active");
+      document.getElementById("modal-name").focus();
+    }
+
+    function closeEditModal() {
+      document.getElementById("edit-modal").classList.remove("active");
+      editingIndex = -1;
+    }
+
+    function saveSeat() {
+      const name = document.getElementById("modal-name").value.trim();
+      let bot = document.getElementById("modal-bot").value.trim();
+      const role = document.getElementById("modal-role").value.trim() || "战队协同";
+
+      if (!name) {
+        showToast("⚠️ 请输入席位名称");
+        return;
       }
+      if (!bot || bot === "@") {
+        showToast("⚠️ 请输入有效的 Telegram Bot 用户名（@...）");
+        return;
+      }
+      if (!bot.startsWith("@")) bot = "@" + bot;
+
+      if (editingIndex >= 0 && editingIndex < seats.length) {
+        // Edit existing
+        seats[editingIndex].name = name;
+        seats[editingIndex].bot = bot;
+        seats[editingIndex].role = role;
+      } else {
+        // Add new
+        seats.push({
+          bot: bot,
+          name: name,
+          role: role,
+          icon: "🤖",
+          color: "#00e5ff",
+          is_host: seats.length === 0,
+          selected: true
+        });
+        if (seats.length === 1) selectedHost = bot;
+      }
+
+      localStorage.setItem("pf_council_seats", JSON.stringify(seats));
+      closeEditModal();
+      renderSeats();
+      renderHosts();
+      showToast("✅ 席位已成功更新并本地保存！");
+    }
+
+    function deleteSeat(idx) {
+      if (seats.length <= 1) {
+        showToast("⚠️ 至少需保留一个席位！");
+        return;
+      }
+      const removed = seats.splice(idx, 1)[0];
+      if (removed.bot.toLowerCase() === selectedHost.toLowerCase()) {
+        selectedHost = seats[0].bot;
+      }
+      localStorage.setItem("pf_council_seats", JSON.stringify(seats));
+      renderSeats();
+      renderHosts();
+      showToast("🗑️ 席位已删除");
     }
 
     function showToast(msg) {
-      const toast = document.getElementById('toast');
-      const text = document.getElementById('toast-text');
+      const toast = document.getElementById("toast");
+      const text = document.getElementById("toast-text");
       text.innerText = msg;
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 2500);
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2500);
     }
 
-    function getSelectedParticipants() {
-      return Array.from(document.querySelectorAll('.participant-item.selected'))
-                  .map(i => i.getAttribute('data-bot'));
+    function escapeHtml(str) {
+      return (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     function submitMeeting() {
-      const topic = document.getElementById('agenda-input').value.trim();
+      const topic = document.getElementById("agenda-input").value.trim();
       if (!topic) {
         showToast("⚠️ 请先输入会议主题或选择预设议题！");
-        document.getElementById('agenda-input').focus();
+        document.getElementById("agenda-input").focus();
         return;
       }
 
-      const participants = getSelectedParticipants();
-      if (participants.length === 0) {
-        showToast("⚠️ 请至少选择一个参会席位！");
+      const selectedParticipants = seats.filter(s => s.selected).map(s => s.bot);
+      if (selectedParticipants.length === 0) {
+        showToast("⚠️ 请至少勾选一个参会席位！");
         return;
       }
 
       const payload = {
         action: "meet",
         topic: topic,
-        host: selectedHost,
-        participants: participants,
+        host: selectedHost || selectedParticipants[0],
+        participants: selectedParticipants,
         watchdog_minutes: selectedWatchdog
       };
 
       const jsonStr = JSON.stringify(payload);
 
       if (tg && tg.sendData) {
-        showToast("🚀 正在向 Telegram 战队群召集会议...");
+        showToast("🚀 正在向战队群发起会议...");
         tg.sendData(jsonStr);
-        setTimeout(() => {
-          tg.close();
-        }, 300);
+        setTimeout(() => tg.close(), 300);
       } else {
-        // Fallback for desktop browser preview
         if (navigator.clipboard) {
           navigator.clipboard.writeText(jsonStr);
         }
@@ -655,17 +988,10 @@
     }
 
     function submitCloseMeeting() {
-      const payload = {
-        action: "meetover",
-        topic: "会议闭幕"
-      };
       const jsonStr = "/meetover";
-
       if (tg && tg.sendData) {
         tg.sendData(jsonStr);
-        setTimeout(() => {
-          tg.close();
-        }, 300);
+        setTimeout(() => tg.close(), 300);
       } else {
         if (navigator.clipboard) {
           navigator.clipboard.writeText(jsonStr);
@@ -673,6 +999,9 @@
         showToast("🏁 闭幕指令 /meetover 已复制");
       }
     }
+
+    // Run on startup
+    window.addEventListener("DOMContentLoaded", initSeats);
   </script>
 </body>
 </html>
