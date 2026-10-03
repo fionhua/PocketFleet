@@ -973,30 +973,59 @@
       };
 
       const jsonStr = JSON.stringify(payload);
+      const meetCommand = `/meet ${topic}`;
 
-      if (tg && tg.sendData) {
-        showToast("🚀 正在向战队群发起会议...");
-        tg.sendData(jsonStr);
-        setTimeout(() => tg.close(), 300);
-      } else {
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(jsonStr);
-        }
-        showToast("📋 召集指令已复制（已按本地模拟模式生成）");
-        alert("【本地调试模式】已生成会议公文 JSON：\n\n" + jsonStr + "\n\n在 Telegram 中通过 Mini App 打开将自动无缝发送！");
+      // 1. Copy to clipboard
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(meetCommand);
       }
+
+      // 2. Try native tg.sendData if in active bot chat
+      if (tg && tg.sendData) {
+        try {
+          tg.sendData(jsonStr);
+          showToast("🚀 正在向战队群发起会议...");
+          setTimeout(() => {
+            try { tg.close(); } catch(e){}
+          }, 350);
+          return;
+        } catch (e) {
+          console.warn("tg.sendData unavailable in current view", e);
+        }
+      }
+
+      // 3. Fallback: Telegram share URL to prefill command into chat with 1 tap
+      showToast("📋 召集指令已复制！正在跳转群聊...");
+      const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
+      setTimeout(() => {
+        if (tg && tg.openTelegramLink) {
+          tg.openTelegramLink(shareUrl);
+        } else {
+          window.location.href = shareUrl;
+        }
+      }, 300);
     }
 
     function submitCloseMeeting() {
-      const jsonStr = "/meetover";
+      const closeCmd = "/meetover";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(closeCmd);
+      }
       if (tg && tg.sendData) {
-        tg.sendData(jsonStr);
-        setTimeout(() => tg.close(), 300);
+        try {
+          tg.sendData(closeCmd);
+          showToast("🏁 正在闭幕会议...");
+          setTimeout(() => {
+            try { tg.close(); } catch(e){}
+          }, 300);
+          return;
+        } catch (e) {}
+      }
+      const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(closeCmd);
+      if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(shareUrl);
       } else {
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(jsonStr);
-        }
-        showToast("🏁 闭幕指令 /meetover 已复制");
+        window.location.href = shareUrl;
       }
     }
 
