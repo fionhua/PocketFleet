@@ -896,25 +896,53 @@
       }
       showToast("🏁 正在闭幕会议...");
 
-      fetch("http://127.0.0.1:18765/api/v1/telegram/post", {
+      let closeDispatched = false;
+
+      // 1. Try Cloudflare Pages /api/meet
+      fetch("/api/meet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: closeCmd, sender: "human" })
+        body: JSON.stringify({ action: "close", human: human })
       })
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
+          closeDispatched = true;
           showToast("🏁 会议已成功闭幕！");
           setTimeout(() => {
             if (tg && tg.close) { try { tg.close(); } catch(e){} }
           }, 600);
         } else {
-          doCloseFallback();
+          tryLocalClose();
         }
       })
       .catch(() => {
-        doCloseFallback();
+        tryLocalClose();
       });
+
+      function tryLocalClose() {
+        if (closeDispatched) return;
+        fetch("http://127.0.0.1:18765/api/v1/telegram/post", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: closeCmd, sender: "human" })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok) {
+            closeDispatched = true;
+            showToast("🏁 会议已成功闭幕！");
+            setTimeout(() => {
+              if (tg && tg.close) { try { tg.close(); } catch(e){} }
+            }, 600);
+          } else {
+            doCloseFallback();
+          }
+        })
+        .catch(() => {
+          doCloseFallback();
+        });
+      }
 
       function doCloseFallback() {
         if (tg && tg.sendData) {

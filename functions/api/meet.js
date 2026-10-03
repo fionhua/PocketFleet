@@ -26,6 +26,27 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
+    if (data.action === "close" || topic === "/meetover") {
+      const closingCard = `🏁 *【AI星舰战队联席会议 · 结案闭幕】*\n` +
+        `🌾 召集人：${human}\n` +
+        `📌 结案状态：研讨完成，议程顺利收敛！\n\n` +
+        `⏱️ 会议推进看门狗守护已正式撤除。感谢各参会席位的深度推演与协同定桩！`;
+      const resp = await fetch(tgUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: closingCard,
+          parse_mode: "Markdown"
+        })
+      });
+      const tgRes = await resp.json();
+      return new Response(JSON.stringify(tgRes), {
+        status: resp.status,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     const hostDisplayName = host.includes("Judge") ? "裁决者" : (host.includes("MudSnake") ? "泥蛇" : "结算主机");
 
     const briefing = `# 🏛️ 【AI星舰战队联席会议公文】\n` +
