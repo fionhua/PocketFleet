@@ -4389,8 +4389,26 @@ class PocketFleetControlApp:
         row["state"] = next_state
 
 
+_SINGLE_INSTANCE_SOCKET = None
+
+
+def acquire_single_instance_lock(port: int = 18766) -> bool:
+    global _SINGLE_INSTANCE_SOCKET
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", port))
+        s.listen(1)
+        _SINGLE_INSTANCE_SOCKET = s
+        return True
+    except Exception:
+        return False
+
+
 def main():
     multiprocessing.freeze_support()
+    if not acquire_single_instance_lock(18766):
+        print("⚠️ [PocketFleet] Another instance of Control Panel is already running. Exiting cleanly.")
+        sys.exit(0)
     root = tk.Tk()
     app = PocketFleetControlApp(root)
     root.mainloop()

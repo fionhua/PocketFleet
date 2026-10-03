@@ -234,6 +234,43 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/v1/seats":
+            seats_payload = []
+            try:
+                cfg_path = Path(__file__).resolve().parent.parent.parent / "pocketfleet.json"
+                if cfg_path.is_file():
+                    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+                    seats_dict = data.get("seats", {})
+                    for rk in ["chat", "lead", "builder"]:
+                        s = seats_dict.get(rk)
+                        if s and s.get("bot_username"):
+                            b_u = s.get("bot_username", "").strip()
+                            if not b_u.startswith("@"):
+                                b_u = "@" + b_u
+                            s_name = s.get("name", rk)
+                            s_desc = "方案推演与会议对账" if rk == "chat" else ("架构守门与审计" if rk == "lead" else "工程定桩与算法落地")
+                            s_icon = "🎛️" if rk == "chat" else ("⚖️" if rk == "lead" else "🐍")
+                            s_color = "#a855f7" if rk == "chat" else ("#00e5ff" if rk == "lead" else "#10b981")
+                            seats_payload.append({
+                                "bot": b_u,
+                                "name": s_name,
+                                "role": s_desc,
+                                "icon": s_icon,
+                                "color": s_color,
+                                "is_host": (rk == "chat"),
+                                "selected": True
+                            })
+            except Exception as e:
+                logger.error("Error reading seats config: %s", e)
+            if not seats_payload:
+                seats_payload = [
+                    {"bot": "@AiSoulSettlementBot", "name": "结算主机", "role": "方案推演与会议对账", "icon": "🎛️", "color": "#a855f7", "is_host": True, "selected": True},
+                    {"bot": "@AiSoulJudgeBot", "name": "裁决者", "role": "架构守门与审计", "icon": "⚖️", "color": "#00e5ff", "is_host": False, "selected": True},
+                    {"bot": "@AiSoulMudSnakeBot", "name": "泥蛇", "role": "工程定桩与算法落地", "icon": "🐍", "color": "#10b981", "is_host": False, "selected": True}
+                ]
+            self._send_json_response(200, {"ok": True, "seats": seats_payload})
+            return
+
         if path in ("/", "/miniapp", "/miniapp/", "/miniapp/index.html"):
             for candidate in [
                 Path(__file__).resolve().parent.parent.parent / "miniapp" / "index.html",

@@ -374,7 +374,7 @@ class DispatchLoop:
                     [
                         {
                             "text": "🏛️ 打开会议召集面板",
-                            "url": miniapp_url
+                            "web_app": {"url": miniapp_url}
                         }
                     ]
                 ]

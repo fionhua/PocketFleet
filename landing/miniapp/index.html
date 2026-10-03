@@ -603,9 +603,9 @@
 
     // Default Generic Starter Seats (if user has no URL params and no localStorage)
     const DEFAULT_SEATS = [
-      { bot: "@AiSoulSettlementBot", name: "方案主持席", role: "方案推演与会议对账", icon: "🎛️", color: "#a855f7", is_host: true, selected: true },
-      { bot: "@AiSoulJudgeBot", name: "架构审计席", role: "防崩守门与逻辑审计", icon: "⚖️", color: "#00e5ff", is_host: false, selected: true },
-      { bot: "@AiSoulMudSnakeBot", name: "代码施工席", role: "工程定桩与算法落地", icon: "🐍", color: "#10b981", is_host: false, selected: true }
+      { bot: "@AiSoulSettlementBot", name: "结算主机", role: "方案推演与会议对账", icon: "🎛️", color: "#a855f7", is_host: true, selected: true },
+      { bot: "@AiSoulJudgeBot", name: "裁决者", role: "架构守门与防崩审计", icon: "⚖️", color: "#00e5ff", is_host: false, selected: true },
+      { bot: "@AiSoulMudSnakeBot", name: "泥蛇", role: "工程定桩与算法落地", icon: "🐍", color: "#10b981", is_host: false, selected: true }
     ];
 
     let seats = [];
@@ -613,18 +613,42 @@
     let selectedWatchdog = 15;
     let editingIndex = -1;
 
-    // Load seats from URL params -> localStorage -> fallback defaults
+    function getUrlParam(name) {
+      let val = null;
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        val = sp.get(name);
+      } catch (e) {}
+      if (!val && window.location.hash) {
+        try {
+          const hp = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+          val = hp.get(name);
+        } catch (e) {}
+      }
+      return val;
+    }
+
+    // Load seats from URL params -> localStorage -> fallback defaults -> background daemon sync
     function initSeats() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const dataParam = urlParams.get("data");
-      const botsParam = urlParams.get("bots");
+      const dataParam = getUrlParam("data");
+      const botsParam = getUrlParam("bots");
 
       let loaded = null;
 
       // 1. Try URL data JSON
       if (dataParam) {
         try {
-          loaded = JSON.parse(decodeURIComponent(dataParam));
+          let str = dataParam;
+          if (str.includes("%")) {
+            try { str = decodeURIComponent(str); } catch (e) {}
+          }
+          let parsed = JSON.parse(str);
+          if (typeof parsed === "string") {
+            try { parsed = JSON.parse(parsed); } catch (e) {}
+          }
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            loaded = parsed;
+          }
         } catch (e) {
           console.warn("Failed to parse ?data param", e);
         }
@@ -651,31 +675,33 @@
         }
       }
 
-      // 3. If loaded from URL, save to localStorage
-      if (loaded && loaded.length > 0) {
-        seats = loaded.map((s, idx) => ({
-          bot: s.bot.startsWith("@") ? s.bot : `@${s.bot}`,
-          name: s.name || `席位${idx+1}`,
-          role: s.role || "协同推演",
-          icon: s.icon || (idx === 0 ? "🎛️" : (idx === 1 ? "⚖️" : "💻")),
-          color: s.color || (idx === 0 ? "#a855f7" : (idx === 1 ? "#00e5ff" : "#10b981")),
-          is_host: !!s.is_host,
-          selected: s.selected !== false
-        }));
-        localStorage.setItem("pf_council_seats", JSON.stringify(seats));
-      } else {
-        // 4. Try localStorage
+      // 3. Try localStorage if not loaded from URL
+      if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
         const cached = localStorage.getItem("pf_council_seats");
         if (cached) {
           try {
-            seats = JSON.parse(cached);
-          } catch (e) {
-            seats = DEFAULT_SEATS;
-          }
-        } else {
-          seats = DEFAULT_SEATS;
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              loaded = parsed;
+            }
+          } catch (e) {}
         }
       }
+
+      // 4. Ultimate Fallback: ALWAYS guaranteed to have Starfleet seats!
+      if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
+        loaded = DEFAULT_SEATS;
+      }
+
+      seats = loaded.map((s, idx) => ({
+        bot: (s.bot && s.bot.startsWith("@")) ? s.bot : `@${s.bot || 'bot' + (idx+1)}`,
+        name: s.name || `席位${idx+1}`,
+        role: s.role || "协同推演",
+        icon: s.icon || (idx === 0 ? "🎛️" : (idx === 1 ? "⚖️" : "🐍")),
+        color: s.color || (idx === 0 ? "#a855f7" : (idx === 1 ? "#00e5ff" : "#10b981")),
+        is_host: s.is_host !== undefined ? !!s.is_host : (idx === 0),
+        selected: s.selected !== false
+      }));
 
       // Set initial host
       const hostSeat = seats.find(s => s.is_host) || seats[0];
@@ -683,6 +709,29 @@
 
       renderSeats();
       renderHosts();
+
+      // 5. Background sync: Probe local PocketFleet daemon for exact live configured seats
+      fetch("http://127.0.0.1:18765/api/v1/seats", { signal: AbortSignal.timeout(1200) })
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.ok && Array.isArray(data.seats) && data.seats.length > 0) {
+            seats = data.seats.map((s, idx) => ({
+              bot: s.bot.startsWith("@") ? s.bot : `@${s.bot}`,
+              name: s.name,
+              role: s.role,
+              icon: s.icon || (idx === 0 ? "🎛️" : (idx === 1 ? "⚖️" : "🐍")),
+              color: s.color || (idx === 0 ? "#a855f7" : (idx === 1 ? "#00e5ff" : "#10b981")),
+              is_host: !!s.is_host,
+              selected: true
+            }));
+            localStorage.setItem("pf_council_seats", JSON.stringify(seats));
+            const newHost = seats.find(s => s.is_host) || seats[0];
+            if (newHost) selectedHost = newHost.bot;
+            renderSeats();
+            renderHosts();
+          }
+        })
+        .catch(() => {});
     }
 
     function renderSeats() {
