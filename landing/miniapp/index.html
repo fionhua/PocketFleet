@@ -51,10 +51,45 @@
 
     .app-container {
       width: 100%;
-      max-width: 1280px;
+      max-width: 820px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
+    }
+
+    .main-layout {
+      display: grid;
+      grid-template-columns: 380px 420px;
+      gap: 20px;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .col-left {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 380px;
+    }
+
+    .col-right {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 420px;
+    }
+
+    @media (max-width: 840px) {
+      .app-container {
+        max-width: 100%;
+      }
+      .main-layout {
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+      .col-left, .col-right {
+        width: 100%;
+      }
     }
 
     /* Header Banner */
@@ -405,14 +440,15 @@
 
     textarea.agenda-input {
       width: 100%;
-      height: 85px;
+      height: 230px;
       background: rgba(0, 0, 0, 0.3);
       border: 1px solid var(--border-card);
       border-radius: var(--radius-sm);
-      padding: 10px 12px;
+      padding: 12px 14px;
       color: var(--text-main);
       font-size: 13px;
       font-family: inherit;
+      line-height: 1.6;
       resize: vertical;
       outline: none;
       transition: border-color 0.2s ease;
@@ -502,7 +538,7 @@
 
     .bottom-bar-inner {
       width: 100%;
-      max-width: 1280px;
+      max-width: 820px;
       margin: 0 auto;
       display: flex;
       gap: 10px;
@@ -605,80 +641,93 @@
     <p class="subtitle">Telegram 原生推演 · 多席位协同 · 防回声闭环</p>
   </div>
 
-  <!-- 1. 参会席位 (Checklist & Dynamic Management) -->
-  <div class="card">
-    <div class="section-header">
-      <div class="section-title">
-        <span class="icon">🤖</span>
-        <span>1. 参会席位选择与管理</span>
+  <div class="main-layout">
+    <!-- Left Column (380px): Cards 1, 2, 4 -->
+    <div class="col-left">
+      <!-- 1. 参会席位 (Checklist & Dynamic Management) -->
+      <div class="card">
+        <div class="section-header">
+          <div class="section-title">
+            <span class="icon">🤖</span>
+            <span>1. 参会席位选择与管理</span>
+          </div>
+          <button class="btn-text-action" onclick="openAddSeatModal()">
+            <span>➕ 添加席位</span>
+          </button>
+        </div>
+
+        <!-- Dynamic Participant List -->
+        <div class="participant-list" id="participant-list">
+          <!-- Injected via JavaScript -->
+        </div>
+
+        <!-- Inline Add/Edit Seat Form -->
+        <div class="edit-modal" id="edit-modal">
+          <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--accent-cyan);" id="modal-title">添加新席位</div>
+          <div class="modal-grid">
+            <input type="text" id="modal-name" class="input-field" placeholder="席位名称（例如：方案主持）" />
+            <input type="text" id="modal-bot" class="input-field" placeholder="Telegram Bot用户名（@...）" />
+          </div>
+          <input type="text" id="modal-role" class="input-field" placeholder="职责分工（例如：方案推演与会议对账）" style="margin-bottom: 10px;" />
+          <div class="modal-actions">
+            <button class="btn-secondary" onclick="closeEditModal()">取消</button>
+            <button class="btn-primary" onclick="saveSeat()">保存席位</button>
+          </div>
+        </div>
       </div>
-      <button class="btn-text-action" onclick="openAddSeatModal()">
-        <span>➕ 添加席位</span>
-      </button>
-    </div>
 
-    <!-- Dynamic Participant List -->
-    <div class="participant-list" id="participant-list">
-      <!-- Injected via JavaScript -->
-    </div>
-
-    <!-- Inline Add/Edit Seat Form -->
-    <div class="edit-modal" id="edit-modal">
-      <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--accent-cyan);" id="modal-title">添加新席位</div>
-      <div class="modal-grid">
-        <input type="text" id="modal-name" class="input-field" placeholder="席位名称（例如：方案主持）" />
-        <input type="text" id="modal-bot" class="input-field" placeholder="Telegram Bot用户名（@...）" />
+      <!-- 2. 指定会议主持人 (Host Selection) -->
+      <div class="card">
+        <div class="section-title" style="margin-bottom: 12px;">
+          <span class="icon">👑</span>
+          <span>2. 指定首发主持人 (Meeting Host)</span>
+        </div>
+        <div class="host-grid" id="host-grid">
+          <!-- Injected via JavaScript -->
+        </div>
       </div>
-      <input type="text" id="modal-role" class="input-field" placeholder="职责分工（例如：方案推演与会议对账）" style="margin-bottom: 10px;" />
-      <div class="modal-actions">
-        <button class="btn-secondary" onclick="closeEditModal()">取消</button>
-        <button class="btn-primary" onclick="saveSeat()">保存席位</button>
+
+      <!-- 4. 超时推进看门狗 (Watchdog) -->
+      <div class="card">
+        <div class="section-title" style="margin-bottom: 12px;">
+          <span class="icon">⏱️</span>
+          <span>4. 超时看门狗自动推进 (Silent Watchdog)</span>
+        </div>
+        <div class="watchdog-options" id="wd-options">
+          <div class="wd-pill" data-min="3" onclick="selectWatchdog(this)">3 分钟</div>
+          <div class="wd-pill active" data-min="5" onclick="selectWatchdog(this)">5 分钟</div>
+          <div class="wd-pill" data-min="10" onclick="selectWatchdog(this)">10 分钟</div>
+          <div class="wd-pill" data-min="15" onclick="selectWatchdog(this)">15 分钟</div>
+        </div>
+        <p class="hint-text">💡 主持人若在设定时间内未收到任何战队动态且未闭幕，看门狗将自动在群内温和提醒推进议程。</p>
       </div>
-    </div>
-  </div>
+    </div> <!-- /col-left -->
 
-  <!-- 2. 指定会议主持人 (Host Selection) -->
-  <div class="card">
-    <div class="section-title" style="margin-bottom: 12px;">
-      <span class="icon">👑</span>
-      <span>2. 指定首发主持人 (Meeting Host)</span>
-    </div>
-    <div class="host-grid" id="host-grid">
-      <!-- Injected via JavaScript -->
-    </div>
-  </div>
-
-  <!-- 3. 会议研讨主题与资料 (Agenda) -->
-  <div class="card">
-    <div class="section-title" style="margin-bottom: 12px;">
-      <span class="icon">📌</span>
-      <span>3. 会议研讨主题与资料 (Agenda)</span>
-    </div>
-    <div class="agenda-input-wrap">
-      <textarea id="agenda-input" class="agenda-input" placeholder="输入本次会议研讨议题或需审查的代码/资料（例如：核心算法防回声审计与定桩、退市新规综合推演）..."></textarea>
-    </div>
-    <div class="quick-tags">
-      <span class="tag-chip" onclick="setTopic('系统方案推演与架构设计')">📐 架构设计</span>
-      <span class="tag-chip" onclick="setTopic('核心代码审查与安全审计')">🔍 代码审查</span>
-      <span class="tag-chip" onclick="setTopic('关键算法落地与工程实现')">⚡ 算法实现</span>
-      <span class="tag-chip" onclick="setTopic('复杂问题诊断与异常排查')">🐞 问题排查</span>
-    </div>
-  </div>
-
-  <!-- 4. 超时推进看门狗 (Watchdog) -->
-  <div class="card">
-    <div class="section-title" style="margin-bottom: 12px;">
-      <span class="icon">⏱️</span>
-      <span>4. 超时看门狗自动推进 (Silent Watchdog)</span>
-    </div>
-    <div class="watchdog-options" id="wd-options">
-      <div class="wd-pill" data-min="3" onclick="selectWatchdog(this)">3 分钟</div>
-      <div class="wd-pill active" data-min="5" onclick="selectWatchdog(this)">5 分钟</div>
-      <div class="wd-pill" data-min="10" onclick="selectWatchdog(this)">10 分钟</div>
-      <div class="wd-pill" data-min="15" onclick="selectWatchdog(this)">15 分钟</div>
-    </div>
-    <p class="hint-text">💡 主持人若在设定时间内未收到任何战队动态且未闭幕，看门狗将自动在群内温和提醒推进议程。</p>
-  </div>
+    <!-- Right Column (420px): Card 3 (Agenda) -->
+    <div class="col-right">
+      <!-- 3. 会议研讨主题与资料 (Agenda) -->
+      <div class="card" style="height: 100%; display: flex; flex-direction: column;">
+        <div class="section-title" style="margin-bottom: 12px;">
+          <span class="icon">📌</span>
+          <span>3. 会议研讨主题与资料 (Agenda)</span>
+        </div>
+        <div class="agenda-input-wrap" style="flex: 1; display: flex; flex-direction: column;">
+          <textarea id="agenda-input" class="agenda-input" style="flex: 1; min-height: 230px;" placeholder="输入本次会议研讨议题或需审查的代码/资料（例如：核心算法防回声审计与定桩、退市新规综合推演）..."></textarea>
+        </div>
+        <div class="quick-tags" style="margin-top: 10px;">
+          <span class="tag-chip" onclick="setTopic('系统方案推演与架构设计')">📐 架构设计</span>
+          <span class="tag-chip" onclick="setTopic('核心代码审查与安全审计')">🔍 代码审查</span>
+          <span class="tag-chip" onclick="setTopic('关键算法落地与工程实现')">⚡ 算法实现</span>
+          <span class="tag-chip" onclick="setTopic('复杂问题诊断与异常排查')">🐞 问题排查</span>
+        </div>
+        <div style="margin-top: 16px; padding: 12px; background: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.15); border-radius: var(--radius-sm); font-size: 11px; color: var(--text-muted); line-height: 1.5;">
+          💡 <strong style="color: var(--accent-cyan);">协同机制提示</strong>：<br>
+          • 会议召集后，首发主持将自动接收推演公文，组织参会席位协同分工。<br>
+          • AI 回复自动带回群聊；免回标记将脱敏触发符，彻底阻断乒乓死循环。
+        </div>
+      </div>
+    </div> <!-- /col-right -->
+  </div> <!-- /main-layout -->
   </div> <!-- /app-container -->
 
   <!-- Bottom Action Bar -->
