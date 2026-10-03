@@ -146,6 +146,7 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             "Access-Control-Allow-Headers",
             "Authorization, Content-Type, X-Folded-Host-Extension-ID, X-Folded-Host-Principal",
         )
+        self.send_header("Access-Control-Allow-Private-Network", "true")
 
     def _send_json_response(self, status_code: int, data: dict) -> None:
         payload = json.dumps(data).encode("utf-8")
@@ -306,6 +307,20 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             self._send_json_response(200, {"ok": True, "delivered": True})
             return
 
+        if path == "/api/v1/meet/kickoff":
+            on_meet = getattr(self.server, "on_meet_kickoff", None)
+            if on_meet and callable(on_meet):
+                try:
+                    on_meet(body)
+                    self._send_json_response(200, {"ok": True, "delivered": True, "message": "Meeting kickoff dispatched"})
+                    return
+                except Exception as ex:
+                    logger.error("Error dispatching meet kickoff: %s", ex)
+                    self._send_json_response(500, {"error": str(ex)})
+                    return
+            self._send_json_response(400, {"error": "on_meet_kickoff not configured"})
+            return
+
         self._send_json_response(404, {"error": f"Not found: {path}"})
 
 
@@ -318,11 +333,13 @@ class PocketFleetBridgeServer:
         port: int = DEFAULT_PORT,
         token: Optional[str] = None,
         on_telegram_post: Optional[Callable[[dict], None]] = None,
+        on_meet_kickoff: Optional[Callable[[dict], None]] = None,
     ) -> None:
         self.host = host
         self.port = port
         self.token = token or get_active_bridge_token()
         self.on_telegram_post = on_telegram_post
+        self.on_meet_kickoff = on_meet_kickoff
         self.active_clients: dict[str, float] = {}
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -357,6 +374,7 @@ class PocketFleetBridgeServer:
             setattr(self._server, "expected_token", self.token)
             setattr(self._server, "kill_switch_active", False)
             setattr(self._server, "on_telegram_post", self.on_telegram_post)
+            setattr(self._server, "on_meet_kickoff", self.on_meet_kickoff)
             setattr(self._server, "active_clients", self.active_clients)
             self._running = True
 
@@ -392,24 +410,31 @@ _global_bridge: Optional[PocketFleetBridgeServer] = None
 def get_global_bridge_server(
     token: Optional[str] = None,
     on_telegram_post: Optional[Callable[[dict], None]] = None,
+    on_meet_kickoff: Optional[Callable[[dict], None]] = None,
 ) -> PocketFleetBridgeServer:
     """Get or create singleton PocketFleetBridgeServer."""
     global _global_bridge
     if _global_bridge is None:
-        _global_bridge = PocketFleetBridgeServer(token=token, on_telegram_post=on_telegram_post)
-    elif on_telegram_post and _global_bridge.on_telegram_post is None:
-        _global_bridge.on_telegram_post = on_telegram_post
-        if _global_bridge._server:
-            setattr(_global_bridge._server, "on_telegram_post", on_telegram_post)
+        _global_bridge = PocketFleetBridgeServer(token=token, on_telegram_post=on_telegram_post, on_meet_kickoff=on_meet_kickoff)
+    else:
+        if on_telegram_post and _global_bridge.on_telegram_post is None:
+            _global_bridge.on_telegram_post = on_telegram_post
+            if _global_bridge._server:
+                setattr(_global_bridge._server, "on_telegram_post", on_telegram_post)
+        if on_meet_kickoff and _global_bridge.on_meet_kickoff is None:
+            _global_bridge.on_meet_kickoff = on_meet_kickoff
+            if _global_bridge._server:
+                setattr(_global_bridge._server, "on_meet_kickoff", on_meet_kickoff)
     return _global_bridge
 
 
 def ensure_bridge_server_running(
     token: Optional[str] = None,
     on_telegram_post: Optional[Callable[[dict], None]] = None,
+    on_meet_kickoff: Optional[Callable[[dict], None]] = None,
 ) -> bool:
     """Ensure port 18765 bridge server is active (starts built-in server if port is unallocated)."""
-    bridge = get_global_bridge_server(token=token, on_telegram_post=on_telegram_post)
+    bridge = get_global_bridge_server(token=token, on_telegram_post=on_telegram_post, on_meet_kickoff=on_meet_kickoff)
     return bridge.start()
 
 

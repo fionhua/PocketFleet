@@ -3316,7 +3316,32 @@ class FleetManager:
                     except Exception as ex:
                         self.log(f"[WARN] Failed to forward web bridge message: {ex}")
 
-            ok = ensure_bridge_server_running(on_telegram_post=_on_telegram_post)
+            def _on_meet_kickoff(payload: dict) -> None:
+                topic = payload.get("topic", "").strip()
+                host = payload.get("host", None)
+                watchdog_minutes = int(payload.get("watchdog_minutes", 15))
+                participants = payload.get("participants", None)
+                self.log(f"🏛️ [MEET] Direct kickoff from Mini App: host={host}, topic={topic[:50]}")
+                if self.dispatch_loop and getattr(self.dispatch_loop, "running", False):
+                    chats = getattr(self.dispatch_loop, "allowed_chat_ids", None)
+                    if chats:
+                        target_chat = list(chats)[0]
+                        from pocketfleet.core import InboundMessage
+                        fake_msg = InboundMessage(
+                            chat_id=target_chat,
+                            sender_name="人类指挥官",
+                            text=f"/meet {host or ''} {topic}".strip(),
+                            message_id=int(time.time()),
+                        )
+                        self.dispatch_loop._handle_fleet_meeting(
+                            msg=fake_msg,
+                            meet_arg=topic,
+                            host_override=host,
+                            watchdog_minutes=watchdog_minutes,
+                            participants=participants,
+                        )
+
+            ok = ensure_bridge_server_running(on_telegram_post=_on_telegram_post, on_meet_kickoff=_on_meet_kickoff)
             self.bridge_server = get_global_bridge_server()
             if ok:
                 self.log(f"[BRIDGE] Local Web Bridge active at http://127.0.0.1:{self.bridge_port}")

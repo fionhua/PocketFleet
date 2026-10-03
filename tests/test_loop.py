@@ -443,7 +443,7 @@ class TestDispatchLoop(unittest.TestCase):
             # 1. Announcement sent to TG
             self.assertEqual(len(self.transport.sent_messages), 1)
             sent = self.transport.sent_messages[0]
-            self.assertIn("【AI星舰联席会议已召开】", sent.text)
+            self.assertIn("【AI星舰战队联席会议公文】", sent.text)
             self.assertIn("招股书退市风险评估", sent.text)
             # 2. Briefing enqueued for host
             mock_enqueue.assert_called_once()

@@ -809,30 +809,58 @@
         navigator.clipboard.writeText(meetCommand);
       }
 
-      // 2. Try native tg.sendData if in active bot chat
-      if (tg && tg.sendData) {
-        try {
-          tg.sendData(jsonStr);
-          showToast("🚀 正在向战队群发起会议...");
-          setTimeout(() => {
-            try { tg.close(); } catch(e){}
-          }, 350);
-          return;
-        } catch (e) {
-          console.warn("tg.sendData unavailable in current view", e);
-        }
-      }
+      showToast("🚀 正在召集会议...");
 
-      // 3. Fallback: Telegram share URL to prefill command into chat with 1 tap
-      showToast("📋 召集指令已复制！正在跳转群聊...");
-      const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
-      setTimeout(() => {
-        if (tg && tg.openTelegramLink) {
-          tg.openTelegramLink(shareUrl);
+      // 1. Direct Kickoff via Local Web Bridge (Zero-hop Telegram dispatch)
+      let bridgeDispatched = false;
+      fetch("http://127.0.0.1:18765/api/v1/meet/kickoff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonStr
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok) {
+          bridgeDispatched = true;
+          showToast("🏛️ 会议公文已发布至战队群！");
+          setTimeout(() => {
+            if (tg && tg.close) { try { tg.close(); } catch(e){} }
+          }, 800);
         } else {
-          window.location.href = shareUrl;
+          doFallback();
         }
-      }, 300);
+      })
+      .catch(() => {
+        doFallback();
+      });
+
+      function doFallback() {
+        if (bridgeDispatched) return;
+        // 2. Try native tg.sendData if in active bot chat
+        if (tg && tg.sendData) {
+          try {
+            tg.sendData(jsonStr);
+            showToast("🚀 正在向战队群发起会议...");
+            setTimeout(() => {
+              try { tg.close(); } catch(e){}
+            }, 350);
+            return;
+          } catch (e) {
+            console.warn("tg.sendData unavailable in current view", e);
+          }
+        }
+
+        // 3. Fallback: Telegram share URL to prefill command into chat with 1 tap
+        showToast("📋 召集指令已复制！正在跳转群聊...");
+        const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
+        setTimeout(() => {
+          if (tg && tg.openTelegramLink) {
+            tg.openTelegramLink(shareUrl);
+          } else {
+            window.location.href = shareUrl;
+          }
+        }, 300);
+      }
     }
 
     function submitCloseMeeting() {
@@ -840,21 +868,44 @@
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(closeCmd);
       }
-      if (tg && tg.sendData) {
-        try {
-          tg.sendData(closeCmd);
-          showToast("🏁 正在闭幕会议...");
+      showToast("🏁 正在闭幕会议...");
+
+      fetch("http://127.0.0.1:18765/api/v1/telegram/post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: closeCmd, sender: "human" })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok) {
+          showToast("🏁 会议已成功闭幕！");
           setTimeout(() => {
-            try { tg.close(); } catch(e){}
-          }, 300);
-          return;
-        } catch (e) {}
-      }
-      const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(closeCmd);
-      if (tg && tg.openTelegramLink) {
-        tg.openTelegramLink(shareUrl);
-      } else {
-        window.location.href = shareUrl;
+            if (tg && tg.close) { try { tg.close(); } catch(e){} }
+          }, 600);
+        } else {
+          doCloseFallback();
+        }
+      })
+      .catch(() => {
+        doCloseFallback();
+      });
+
+      function doCloseFallback() {
+        if (tg && tg.sendData) {
+          try {
+            tg.sendData(closeCmd);
+            setTimeout(() => {
+              try { tg.close(); } catch(e){}
+            }, 300);
+            return;
+          } catch (e) {}
+        }
+        const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(closeCmd);
+        if (tg && tg.openTelegramLink) {
+          tg.openTelegramLink(shareUrl);
+        } else {
+          window.location.href = shareUrl;
+        }
       }
     }
 

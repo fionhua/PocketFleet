@@ -386,19 +386,7 @@ class DispatchLoop:
             ]
         seats_str = "\n".join(seat_lines)
 
-        # 1. Telegram Group Kickoff Announcement
-        announcement = (
-            f"🏛️ *【AI星舰联席会议已召开】*\n"
-            f"📌 *议题*：{topic}\n"
-            f"🌾 *召集人*：{human}\n"
-            f"⏱️ *推进看门狗*：每 {watchdog_minutes} 分钟静默监护\n\n"
-            f"参会席位（基于战队配置自动就位）：\n"
-            f"{seats_str}\n\n"
-            f"📡 议题公文已分发至主持席（`{host_bot}`），正在展开第一手深度推演，请稍候..."
-        )
-        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=announcement, reply_to_message_id=msg.message_id)
-
-        # 2. Resolve Host Role & Host Display Name
+        # 1. Resolve Host Role & Host Display Name
         host_role = "chat"
         host_display_name = chat_name
         if host_bot.lower() == lead_u.lower():
@@ -408,7 +396,7 @@ class DispatchLoop:
             host_role = "builder"
             host_display_name = builder_name
 
-        # 3. Canonical Starfleet Meeting Briefing for Host
+        # 2. Canonical Starfleet Meeting Briefing (posted directly to Telegram Group & dispatched to Host)
         briefing_prompt = (
             f"# 🏛️ 【AI星舰战队联席会议公文】\n"
             f"📌 会议议题：{topic}\n"
@@ -425,8 +413,11 @@ class DispatchLoop:
             f"  - 结案/纯同步（防死循环）：`[Telegram];re:@BotId;[NoReply]`\n"
             f"  - 网桥自动脱敏：检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n"
             f"• 会议闭幕：议程达成共识后，由主持人在群内发送 `/meetover` 正式结案闭幕。\n\n"
-            f"请【{host_display_name}】立即作为首发主持席，就本次研讨议题展开第一手深度推演！"
+            f"注意：请【{host_display_name}】以 `[Telegram];mailto:@BotId;[waitReply]` 向【{human}】确认是否需要有补充信息。其他参会节点以 `[Telegram];mailto:{host_bot};[NoReply]` 发送“收到，已进入议席”。"
         )
+
+        # 3. Post the Official Council Briefing Directly into the Telegram Group Chat!
+        self._send_immediate_or_outbox(chat_id=msg.chat_id, text=briefing_prompt, reply_to_message_id=msg.message_id)
 
         # 4. Dispatch Briefing to the designated Host Node
         if host_role == "chat":
