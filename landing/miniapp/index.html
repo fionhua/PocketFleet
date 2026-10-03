@@ -501,13 +501,46 @@
   <div class="app-container">
     <!-- Header -->
     <div class="header">
-    <div class="badge-starfleet">
-      <span class="dot"></span>
-      PocketFleet Council
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <div class="badge-starfleet">
+          <span class="dot"></span>
+          PocketFleet Council
+        </div>
+        <div id="user-badge" onclick="openQrModal()" style="cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); color: var(--text-muted); transition: all 0.2s ease;">
+          <span id="user-status-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
+          <span id="user-status-text">📱 绑定真人账号</span>
+        </div>
+      </div>
+      <h1 class="title">AI联席会议 · 召集面板</h1>
+      <p class="subtitle">Telegram 原生推演 · 多席位协同 · 防回声闭环</p>
     </div>
-    <h1 class="title">AI联席会议 · 召集面板</h1>
-    <p class="subtitle">Telegram 原生推演 · 多席位协同 · 防回声闭环</p>
-  </div>
+
+    <!-- QR Modal for MTProto Personal Account Binding -->
+    <div id="qr-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 20px;">
+      <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); width: 100%; max-width: 360px; padding: 24px; text-align: center; box-shadow: var(--shadow-card); position: relative;">
+        <button onclick="closeQrModal()" style="position: absolute; top: 14px; right: 14px; background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer;">✕</button>
+        <div style="font-size: 28px; margin-bottom: 8px;">📱</div>
+        <h3 style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 6px;">绑定指挥官 Telegram 真人账号</h3>
+        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;">
+          使用手机 Telegram 扫码，授权 PocketFleet 能够<strong style="color: var(--accent-cyan);">完全以您个人身份</strong>在群内发布会议指令。
+        </p>
+
+        <div style="background: #fff; padding: 12px; border-radius: 12px; display: inline-block; margin-bottom: 14px; min-width: 190px; min-height: 190px;">
+          <div id="qr-loading" style="color: #666; font-size: 12px; padding: 75px 0;">⏳ 正在生成二维码...</div>
+          <img id="qr-image" style="width: 190px; height: 190px; display: none;" alt="Telegram Login QR" />
+        </div>
+
+        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.6; text-align: left; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
+          <div>1. 打开手机 Telegram</div>
+          <div>2. 进入 <strong>设置 (Settings)</strong> ➔ <strong>设备 (Devices)</strong></div>
+          <div>3. 点击 <strong>关联桌面设备 (Link Desktop Device)</strong> 扫码</div>
+        </div>
+
+        <div id="qr-status" style="font-size: 12px; color: var(--accent-cyan); font-weight: 600;">
+          ⏳ 等待手机扫码...
+        </div>
+      </div>
+    </div>
 
   <div class="main-layout">
     <!-- Left Column (380px): Cards 1, 2, 4 -->
@@ -560,9 +593,9 @@
         <button class="btn-secondary" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; padding: 0 14px; cursor: pointer; height: 46px; transition: all 0.2s ease;" onclick="submitMeetingAsBot()" title="由机器人代表直接向群内推公文">
           <span>🤖 机器人代发</span>
         </button>
-        <button class="btn-kickoff" onclick="submitMeeting()" title="以指挥官本人真实账号发送指令入群">
+        <button class="btn-kickoff" onclick="submitMeeting()" title="以指挥官本人真实账号（或机器人代表）发起会议">
           <span>🚀</span>
-          <span>以我账号发入群聊</span>
+          <span>立即召集会议</span>
         </button>
       </div>
     </div> <!-- /col-left -->
@@ -872,33 +905,142 @@
         navigator.clipboard.writeText(meetCommand);
       }
 
-      showToast("🚀 正在以指挥官账号跳转群聊...");
+      showToast("🚀 正在发起联席会议...");
 
-      // 2. Try native tg.sendData if available in current view
-      if (tg && tg.sendData) {
-        try {
-          tg.sendData(meetCommand);
+      // 2. Direct MTProto Dispatch via Local Web Bridge (Zero hop, 100% sent as Commander personal account)
+      fetch("http://127.0.0.1:18765/api/v1/meet/kickoff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonStr
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok && data.mode === "human_user") {
+          showToast("👤 会议指令已完完全全以指挥官真人身份发入群聊！");
           setTimeout(() => {
             if (tg && tg.close) { try { tg.close(); } catch(e){} }
-          }, 350);
-          return;
-        } catch (e) {
-          console.warn("tg.sendData unavailable in current view", e);
+          }, 800);
+        } else if (data.ok) {
+          showToast("🏛️ 会议公文已发布至战队群！");
+          setTimeout(() => {
+            if (tg && tg.close) { try { tg.close(); } catch(e){} }
+          }, 800);
+        } else {
+          doFallback();
         }
+      })
+      .catch(() => {
+        doFallback();
+      });
+
+      function doFallback() {
+        // Fallback: If MTProto not linked, try Cloudflare Pages /api/meet
+        fetch("/api/meet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: jsonStr
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok) {
+            showToast("🏛️ 会议公文已发布至战队群！");
+            setTimeout(() => {
+              if (tg && tg.close) { try { tg.close(); } catch(e){} }
+            }, 800);
+          } else {
+            openQrModal();
+          }
+        })
+        .catch(() => {
+          openQrModal();
+        });
+      }
+    }
+
+    let isUserAuthorized = false;
+    let authorizedUserName = "";
+    let qrPollTimer = null;
+
+    function checkUserStatus() {
+      fetch("http://127.0.0.1:18765/api/v1/user/status")
+        .then(res => res.json())
+        .then(data => {
+          const dot = document.getElementById("user-status-dot");
+          const text = document.getElementById("user-status-text");
+          if (data && data.authorized) {
+            isUserAuthorized = true;
+            authorizedUserName = data.first_name || (data.username ? `@${data.username}` : "ENTJ指挥官");
+            if (dot) dot.style.background = "#10b981";
+            if (text) text.innerText = `🟢 已绑定本人: ${authorizedUserName}`;
+            if (qrPollTimer) {
+              clearInterval(qrPollTimer);
+              qrPollTimer = null;
+              closeQrModal();
+              showToast(`🎉 恭喜！已绑定指挥官本人账号（${authorizedUserName}）`);
+            }
+          } else {
+            isUserAuthorized = false;
+            authorizedUserName = "";
+            if (dot) dot.style.background = "#f59e0b";
+            if (text) text.innerText = "📱 绑定真人账号";
+          }
+        })
+        .catch(() => {
+          // Local bridge unreachable
+        });
+    }
+
+    function openQrModal() {
+      if (isUserAuthorized) {
+        if (confirm(`您已成功绑定 Telegram 真人账号：${authorizedUserName}。\n\n如需解除绑定或更换账号，请点击确定。`)) {
+          fetch("http://127.0.0.1:18765/api/v1/user/logout", { method: "POST" })
+            .then(() => {
+              checkUserStatus();
+              showToast("已退出真人账号绑定");
+            });
+        }
+        return;
       }
 
-      // 3. Telegram native share URL: opens chat with command pre-filled as Human Commander
-      const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
-      setTimeout(() => {
-        if (tg && tg.openTelegramLink) {
-          tg.openTelegramLink(shareUrl);
-        } else {
-          window.location.href = shareUrl;
-        }
-        setTimeout(() => {
-          if (tg && tg.close) { try { tg.close(); } catch(e){} }
-        }, 600);
-      }, 200);
+      const modal = document.getElementById("qr-modal");
+      const loading = document.getElementById("qr-loading");
+      const qrImg = document.getElementById("qr-image");
+      const statusText = document.getElementById("qr-status");
+
+      modal.style.display = "flex";
+      loading.style.display = "block";
+      loading.innerText = "⏳ 正在生成登录二维码...";
+      qrImg.style.display = "none";
+      statusText.innerText = "⏳ 连接本地网桥生成中...";
+
+      fetch("http://127.0.0.1:18765/api/v1/user/qr")
+        .then(res => res.json())
+        .then(data => {
+          if (data.ok && data.qr_image) {
+            loading.style.display = "none";
+            qrImg.src = data.qr_image;
+            qrImg.style.display = "block";
+            statusText.innerText = "⏳ 等待手机 Telegram 扫码确认...";
+            if (qrPollTimer) clearInterval(qrPollTimer);
+            qrPollTimer = setInterval(checkUserStatus, 2000);
+          } else {
+            loading.innerText = "❌ 二维码生成失败，请确认 PocketFleet 已启动";
+            statusText.innerText = data.error || "生成失败";
+          }
+        })
+        .catch(err => {
+          loading.innerText = "❌ 无法连接本地网桥 (127.0.0.1:18765)";
+          statusText.innerText = "请确认 PocketFleet 控制面板处于运行状态";
+        });
+    }
+
+    function closeQrModal() {
+      const modal = document.getElementById("qr-modal");
+      if (modal) modal.style.display = "none";
+      if (qrPollTimer) {
+        clearInterval(qrPollTimer);
+        qrPollTimer = null;
+      }
     }
 
     // Bot Direct Dispatch (Fallback / Secondary Mode)
@@ -1045,10 +1187,15 @@
     }
 
     // Run on startup
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", initSeats);
-    } else {
+    function bootstrap() {
       initSeats();
+      checkUserStatus();
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", bootstrap);
+    } else {
+      bootstrap();
     }
   </script>
 </body>

@@ -271,6 +271,18 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             self._send_json_response(200, {"ok": True, "seats": seats_payload})
             return
 
+        if path == "/api/v1/user/status":
+            from .user_client import UserClientManager
+            mgr = UserClientManager.get_instance()
+            self._send_json_response(200, mgr.get_user_info())
+            return
+
+        if path == "/api/v1/user/qr":
+            from .user_client import UserClientManager
+            mgr = UserClientManager.get_instance()
+            self._send_json_response(200, mgr.start_qr_login())
+            return
+
         if path in ("/", "/miniapp", "/miniapp/", "/miniapp/index.html"):
             for candidate in [
                 Path(__file__).resolve().parent.parent.parent / "miniapp" / "index.html",
@@ -355,12 +367,36 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             self._send_json_response(200, {"ok": True, "delivered": True})
             return
 
+        if path == "/api/v1/user/logout":
+            from .user_client import UserClientManager
+            mgr = UserClientManager.get_instance()
+            ok = mgr.logout()
+            self._send_json_response(200, {"ok": ok})
+            return
+
         if path == "/api/v1/meet/kickoff":
+            from .user_client import UserClientManager
+            mgr = UserClientManager.get_instance()
+            if mgr.is_authorized():
+                topic = body.get("topic", "").strip()
+                host = body.get("host", "@AiSoulJudgeBot")
+                chat_id = body.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID", "-1004309197838")
+                meet_command = f"/meet {host} {topic}".strip()
+                ok = mgr.send_message_as_user(chat_id, meet_command)
+                if ok:
+                    self._send_json_response(200, {
+                        "ok": True,
+                        "delivered": True,
+                        "mode": "human_user",
+                        "message": "Dispatched directly as Commander personal account via MTProto"
+                    })
+                    return
+
             on_meet = getattr(self.server, "on_meet_kickoff", None)
             if on_meet and callable(on_meet):
                 try:
                     on_meet(body)
-                    self._send_json_response(200, {"ok": True, "delivered": True, "message": "Meeting kickoff dispatched"})
+                    self._send_json_response(200, {"ok": True, "delivered": True, "mode": "bot", "message": "Meeting kickoff dispatched"})
                     return
                 except Exception as ex:
                     logger.error("Error dispatching meet kickoff: %s", ex)

@@ -3337,6 +3337,18 @@ class FleetManager:
                     target_chat = -1004309197838
 
                 from pocketfleet.core import InboundMessage
+                # 1. Path 2: If Commander has authorized personal MTProto client, send directly as Commander!
+                try:
+                    from pocketfleet.user_client import UserClientManager
+                    u_mgr = UserClientManager.get_instance()
+                    if u_mgr.is_authorized():
+                        meet_cmd = f"/meet {host or ''} {topic}".strip()
+                        if u_mgr.send_message_as_user(chat_id=int(target_chat), text=meet_cmd):
+                            self.log("👤 [MEET] Convened Starfleet meeting directly as Commander personal account (MTProto).")
+                            return
+                except Exception as u_ex:
+                    self.log(f"[WARN] MTProto dispatch fallback to bot: {u_ex}")
+
                 fake_msg = InboundMessage(
                     message_id=int(time.time()),
                     chat_id=int(target_chat),
