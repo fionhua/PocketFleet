@@ -394,6 +394,27 @@ class TestDispatchLoop(unittest.TestCase):
         ext_task = self.loop.handle_message(ext_bot_msg)
         self.assertIsNone(ext_task)
 
+    def test_chat_seat_routing_truthful_probe(self):
+        """Verify chat seat routes truthfully: alerts when disconnected, never sends fake ACK."""
+        chat_msg = InboundMessage(
+            message_id=3001,
+            chat_id=111,
+            sender_id=12345,
+            sender_name="Commander",
+            text="@AiSoulSettlementBot 帮我对账",
+            is_bot=False,
+        )
+
+        with mock.patch("pocketfleet.bridge_server.is_web_bridge_connected", return_value=(False, "Port 18765 离线")):
+            res = self.loop.handle_message(chat_msg)
+            self.assertIsNone(res)
+            # Must send honest warning via primary transport
+            self.assertEqual(len(self.transport.sent_messages), 1)
+            sent = self.transport.sent_messages[0]
+            self.assertIn("网桥提醒", sent.text)
+            self.assertIn("未就绪", sent.text)
+            self.assertNotIn("已递交至 ChatGPT 网页端网桥处理", sent.text)
+
 
 if __name__ == "__main__":
     unittest.main()

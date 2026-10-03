@@ -7,6 +7,7 @@ import time
 import unittest
 import urllib.request
 import urllib.error
+from unittest import mock
 
 from pocketfleet.bridge_server import PocketFleetBridgeServer
 
@@ -149,6 +150,23 @@ class TestFleetManagerBridgeIntegration(unittest.TestCase):
         mgr.stop_bridge()
         stop_global_bridge_server()
         time.sleep(0.05)
+
+    def test_bridge_active_client_probe(self) -> None:
+        from pocketfleet.bridge_server import PocketFleetBridgeServer, is_web_bridge_connected
+
+        server = PocketFleetBridgeServer(port=18799)
+        self.assertFalse(server.has_active_client())
+
+        # Simulate client checked in
+        server.active_clients["folded-host-chatgpt-web"] = time.time()
+        # Even with client record, if not listening it returns False
+        self.assertFalse(server.has_active_client())
+
+        with mock.patch.object(server, "is_listening", return_value=True):
+            self.assertTrue(server.has_active_client(max_idle_sec=30))
+            # Expired client
+            server.active_clients["folded-host-chatgpt-web"] = time.time() - 100
+            self.assertFalse(server.has_active_client(max_idle_sec=30))
 
 
 if __name__ == "__main__":

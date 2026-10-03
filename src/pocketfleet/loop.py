@@ -467,7 +467,9 @@ class DispatchLoop:
             if not clean_prompt:
                 clean_prompt = raw_text
 
-            from .bridge_server import enqueue_codeai_message
+            from .bridge_server import enqueue_codeai_message, is_web_bridge_connected
+            connected, reason = is_web_bridge_connected(max_idle_sec=60.0)
+
             enqueue_codeai_message(
                 content=clean_prompt,
                 filename=f"Telegram_to_chat_{msg.message_id}.txt",
@@ -477,15 +479,18 @@ class DispatchLoop:
                 target="chat",
             )
             self.state_store.record_message_start(msg.message_id, msg.chat_id, clean_prompt, "chatgpt_web")
-            logger.info("Enqueued message %s for Chat AI / 结算主机 to Web Bridge (Port 18765)", msg.message_id)
+            logger.info("Enqueued message %s for Chat AI / 结算主机 to Web Bridge (Port 18765), connected=%s", msg.message_id, connected)
 
-            ack_text = f"⏳ [结算主机] 收到指令，已递交至 ChatGPT 网页端网桥处理...\n`{clean_prompt[:60]}...`"
-            reply_transport = (
-                self.secondary_transports.get("chat")
-                if (getattr(self, "secondary_transports", None) and "chat" in self.secondary_transports)
-                else self.transport
-            )
-            reply_transport.send_message(OutboundMessage(chat_id=msg.chat_id, text=ack_text, reply_to_message_id=msg.message_id))
+            # 严禁本地擅自冒用结算主机身份签发假回执！
+            # 真实结算主机的回复必须且只能由 ChatGPT 网页端生成后通过 Web Bridge 回传。
+            # 若网桥物理未连通，通过主网关（self.transport）如实向指挥官告警，绝不自欺欺人。
+            if not connected:
+                warning_text = (
+                    f"⚠️ [PocketFleet 网桥提醒] 结算主机网页端未就绪（{reason}）\n\n"
+                    f"📌 任务已在本地网桥队列安全待命（ID: {msg.message_id}），但尚未送达 ChatGPT 页面。\n"
+                    f"👉 请在浏览器中打开 ChatGPT 网页，并确认扩展浮窗显示 🟢「控制链在线，协同网桥已就绪」。"
+                )
+                self.transport.send_message(OutboundMessage(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=msg.message_id))
             return None
 
         # --- Instant Non-Blocking System Commands (P0-1 Fix) ---

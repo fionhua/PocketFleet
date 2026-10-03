@@ -133,7 +133,7 @@ function panel() {
     <div class="bridge-heading">
       <span class="bridge-mark" aria-hidden="true"><span class="bridge-light"></span>PF</span>
       <div>
-        <strong>PocketFleet Bridge</strong>
+        <strong>PocketFleet Bridge <small class="bridge-version" style="font-size:10px;opacity:0.8;font-weight:normal;">v0.8.0</small></strong>
         <span class="bridge-kicker">AI STARFLEET LINK</span>
       </div>
       <button class="bridge-collapse-toggle" type="button" data-action="collapse" title="收起浮层" aria-label="收起浮层">收起</button>
@@ -253,7 +253,11 @@ async function refreshStatus() {
     }
   } catch (error) {
     killSwitchActive = null;
-    setConnection(`未连接：${error.message}`, "disconnected");
+    let msg = error.message || String(error);
+    if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+      msg = "本地网桥未启动 (Port 18765 离线，请在控制面板启动 3. Web Extension Bridge)";
+    }
+    setConnection(`未连接：${msg}`, "disconnected");
   }
 }
 

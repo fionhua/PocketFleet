@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PocketFleet Web Bridge",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Local communication bridge connecting browser AI agents (ChatGPT, Claude, Gemini, Copilot, DeepSeek) to PocketFleet.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmmn5RoBeN2OJhkb8afU1nyS6TDVUNBxn4zb+3woZFO3A9+GJdOfpRzDcp3AaQlanGV3PNWAXR2vtcl2VFeZ+py6uOvMfLb3ZWvQNGguMElcTKHSp3pAp9FhuEPJ6vb1cOU7U6DS01J9W8h7rEr3apz5HBXukSrFEEbXfEsRjucOb4xnNxok8cQ8hXw18LTTzmL1Or+PMhVT1H5RKIrFM03lDOBMRTrMtd+HjlV/m7sBNv8BsnMBLrxKIMY1M9WEs8+CVUymZq+hccXFAqFInqllBXBNFXOj2Rf4StsGDgRx6GTPT86LkC1Z09zSrGl6nmLdp44uOCgHj2bmRHAMOGwIDAQAB",
   "permissions": [

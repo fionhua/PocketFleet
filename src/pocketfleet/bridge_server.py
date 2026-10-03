@@ -328,6 +328,16 @@ class PocketFleetBridgeServer:
         self._thread: Optional[threading.Thread] = None
         self._running = False
 
+    def has_active_client(self, max_idle_sec: float = 60.0) -> bool:
+        """Check if any browser extension has checked in recently."""
+        if not self.is_listening():
+            return False
+        now = time.time()
+        for principal, ts in self.active_clients.items():
+            if (now - ts) <= max_idle_sec:
+                return True
+        return False
+
     def is_listening(self) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -412,6 +422,35 @@ def stop_global_bridge_server() -> None:
         except Exception:
             pass
         _global_bridge = None
+
+
+def is_web_bridge_connected(max_idle_sec: float = 60.0) -> tuple[bool, str]:
+    """Check physical connection state of Web Extension Bridge.
+    Returns (connected: bool, detail: str).
+    """
+    global _global_bridge
+    bridge = _global_bridge
+    if bridge is None:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.08)
+                if s.connect_ex((DEFAULT_HOST, DEFAULT_PORT)) != 0:
+                    return False, "本地网桥端口 18765 离线（服务未启动）"
+        except Exception:
+            return False, "本地网桥端口 18765 离线"
+        return True, "网桥端口 18765 正在监听"
+
+    if not bridge.is_listening():
+        return False, "本地网桥端口 18765 离线（服务未启动）"
+
+    now = time.time()
+    active_principals = [
+        p for p, ts in bridge.active_clients.items()
+        if (now - ts) <= max_idle_sec
+    ]
+    if not active_principals:
+        return False, "网桥已在 18765 启动，但未检测到活跃的浏览器扩展连接（请打开 ChatGPT 网页端）"
+    return True, f"网桥在线（活跃会话: {', '.join(active_principals)}）"
 
 
 if __name__ == "__main__":
