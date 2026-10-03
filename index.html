@@ -557,9 +557,12 @@
           <span>✕</span>
           <span>取消</span>
         </button>
-        <button class="btn-kickoff" onclick="submitMeeting()">
+        <button class="btn-secondary" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; padding: 0 14px; cursor: pointer; height: 46px; transition: all 0.2s ease;" onclick="submitMeetingAsBot()" title="由机器人代表直接向群内推公文">
+          <span>🤖 机器人代发</span>
+        </button>
+        <button class="btn-kickoff" onclick="submitMeeting()" title="以指挥官本人真实账号发送指令入群">
           <span>🚀</span>
-          <span>立即召集会议</span>
+          <span>以我账号发入群聊</span>
         </button>
       </div>
     </div> <!-- /col-left -->
@@ -869,11 +872,72 @@
         navigator.clipboard.writeText(meetCommand);
       }
 
-      showToast("🚀 正在召集会议...");
+      showToast("🚀 正在以指挥官账号跳转群聊...");
 
-      let dispatched = false;
+      // 2. Try native tg.sendData if available in current view
+      if (tg && tg.sendData) {
+        try {
+          tg.sendData(meetCommand);
+          setTimeout(() => {
+            if (tg && tg.close) { try { tg.close(); } catch(e){} }
+          }, 350);
+          return;
+        } catch (e) {
+          console.warn("tg.sendData unavailable in current view", e);
+        }
+      }
 
-      // 1. Try Cloudflare Pages Serverless Function (/api/meet) - Works on HTTPS & Mobile with Zero Mixed-Content
+      // 3. Telegram native share URL: opens chat with command pre-filled as Human Commander
+      const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
+      setTimeout(() => {
+        if (tg && tg.openTelegramLink) {
+          tg.openTelegramLink(shareUrl);
+        } else {
+          window.location.href = shareUrl;
+        }
+        setTimeout(() => {
+          if (tg && tg.close) { try { tg.close(); } catch(e){} }
+        }, 600);
+      }, 200);
+    }
+
+    // Bot Direct Dispatch (Fallback / Secondary Mode)
+    function submitMeetingAsBot() {
+      const topic = document.getElementById("agenda-input").value.trim();
+      if (!topic) {
+        showToast("⚠️ 请先输入会议主题或选择预设议题！");
+        document.getElementById("agenda-input").focus();
+        return;
+      }
+
+      const selectedParticipants = seats.filter(s => s.selected).map(s => s.bot);
+      if (selectedParticipants.length === 0) {
+        showToast("⚠️ 请至少勾选一个参会席位！");
+        return;
+      }
+
+      let humanCaller = "ENTJ指挥官";
+      if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        const u = tg.initDataUnsafe.user;
+        if (u.username) {
+          humanCaller = `@${u.username}`;
+        } else if (u.first_name || u.last_name) {
+          humanCaller = [u.first_name, u.last_name].filter(Boolean).join(" ");
+        }
+      }
+
+      const payload = {
+        action: "meet",
+        topic: topic,
+        host: selectedHost || selectedParticipants[0],
+        participants: selectedParticipants,
+        watchdog_minutes: selectedWatchdog,
+        human: humanCaller
+      };
+
+      const jsonStr = JSON.stringify(payload);
+      showToast("🤖 正在由机器人代表直推公文...");
+
       fetch("/api/meet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -882,71 +946,18 @@
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
-          dispatched = true;
           showToast("🏛️ 会议公文已发布至战队群！");
           setTimeout(() => {
             if (tg && tg.close) { try { tg.close(); } catch(e){} }
           }, 800);
         } else {
-          tryLocalBridge();
+          showToast("⚠️ 机器人推送失败，切换以我账号发送");
+          submitMeeting();
         }
       })
       .catch(() => {
-        tryLocalBridge();
+        submitMeeting();
       });
-
-      function tryLocalBridge() {
-        if (dispatched) return;
-        // 2. Direct Kickoff via Local Web Bridge (Zero-hop Telegram dispatch)
-        fetch("http://127.0.0.1:18765/api/v1/meet/kickoff", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: jsonStr
-        })
-        .then(res => res.json())
-        .then(data => {
-          if (data.ok) {
-            dispatched = true;
-            showToast("🏛️ 会议公文已发布至战队群！");
-            setTimeout(() => {
-              if (tg && tg.close) { try { tg.close(); } catch(e){} }
-            }, 800);
-          } else {
-            doFallback();
-          }
-        })
-        .catch(() => {
-          doFallback();
-        });
-      }
-
-      function doFallback() {
-        if (dispatched) return;
-        // 3. Try native tg.sendData if in active bot chat
-        if (tg && tg.sendData) {
-          try {
-            tg.sendData(jsonStr);
-            showToast("🚀 正在向战队群发起会议...");
-            setTimeout(() => {
-              try { tg.close(); } catch(e){}
-            }, 350);
-            return;
-          } catch (e) {
-            console.warn("tg.sendData unavailable in current view", e);
-          }
-        }
-
-        // 4. Fallback: Telegram share URL to prefill command into chat with 1 tap
-        showToast("📋 召集指令已复制！正在跳转群聊...");
-        const shareUrl = "https://t.me/share/url?url=&text=" + encodeURIComponent(meetCommand);
-        setTimeout(() => {
-          if (tg && tg.openTelegramLink) {
-            tg.openTelegramLink(shareUrl);
-          } else {
-            window.location.href = shareUrl;
-          }
-        }, 300);
-      }
     }
 
     function submitCloseMeeting() {
