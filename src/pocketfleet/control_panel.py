@@ -4363,9 +4363,15 @@ class PocketFleetControlApp:
         self.root.after(0, self._restore_window)
 
     def _restore_window(self) -> None:
-        self.root.deiconify()
-        self.root.lift()
-        self.root.focus_force()
+        try:
+            self.root.deiconify()
+            self.root.state("normal")
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after_idle(self.root.attributes, "-topmost", False)
+            self.root.focus_force()
+        except Exception as e:
+            logger.debug("Failed restoring window: %s", e)
 
     def quit_app(self, icon=None, item=None) -> None:
         self.is_quitting = True
@@ -4409,49 +4415,82 @@ def acquire_single_instance_lock(port: int = 18766) -> bool:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("127.0.0.1", port))
-        s.listen(1)
+        s.listen(5)
         _SINGLE_INSTANCE_SOCKET = s
         return True
     except Exception:
         return False
 
 
+def notify_existing_instance_or_takeover(port: int = 18766) -> bool:
+    """Send RESTORE_WINDOW to the existing instance to bring it to front.
+    If responsive, return True. If unresponsive/stale, kill it and return False.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.5)
+        s.connect(("127.0.0.1", port))
+        s.sendall(b"RESTORE_WINDOW\n")
+        resp = s.recv(1024)
+        s.close()
+        if b"ACK" in resp:
+            logger.info("Existing PocketFleet window notified and restored to front.")
+            return True
+    except Exception as e:
+        logger.debug("Could not notify existing instance: %s", e)
+
+    # If socket did not respond with ACK, it's a stale/frozen zombie. Kill it!
+    try:
+        import subprocess
+        out = subprocess.check_output('netstat -ano | findstr "18766"', shell=True, text=True)
+        for line in out.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and "LISTENING" in parts:
+                pid = parts[-1]
+                if pid != str(os.getpid()):
+                    subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
+        time.sleep(0.5)
+    except Exception as ex:
+        logger.error("Failed to kill stale instance: %s", ex)
+    return False
+
+
+def start_single_instance_listener(app: "PocketFleetControlApp", port: int = 18766) -> None:
+    """Background listener to restore window when another instance tries to launch."""
+    global _SINGLE_INSTANCE_SOCKET
+    if not _SINGLE_INSTANCE_SOCKET:
+        return
+
+    def _listen():
+        while not getattr(app, "is_quitting", False):
+            try:
+                conn, _ = _SINGLE_INSTANCE_SOCKET.accept()
+                data = conn.recv(1024)
+                if b"RESTORE_WINDOW" in data:
+                    app.root.after(0, app._restore_window)
+                    conn.sendall(b"ACK\n")
+                conn.close()
+            except Exception:
+                break
+
+    t = threading.Thread(target=_listen, daemon=True, name="SingleInstanceListener")
+    t.start()
+
+
 def main():
     multiprocessing.freeze_support()
     if not acquire_single_instance_lock(18766):
-        logger.warning("[PocketFleet] Another instance of Control Panel is already running.")
-        try:
-            root = tk.Tk()
-            root.withdraw()
-            from tkinter import messagebox
-            ret = messagebox.askyesno(
-                "PocketFleet 控制面板",
-                "PocketFleet 控制面板当前已在后台或系统托盘中运行。\n\n是否强制结束旧实例并重新启动？"
-            )
-            root.destroy()
-            if ret:
-                import subprocess
-                try:
-                    out = subprocess.check_output('netstat -ano | findstr "18766"', shell=True, text=True)
-                    for line in out.strip().splitlines():
-                        parts = line.split()
-                        if len(parts) >= 5 and "LISTENING" in parts:
-                            pid = parts[-1]
-                            if pid != str(os.getpid()):
-                                subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
-                    time.sleep(0.6)
-                except Exception as ex:
-                    logger.error("Failed to kill existing instance: %s", ex)
-
-                if not acquire_single_instance_lock(18766):
-                    sys.exit(0)
-            else:
-                sys.exit(0)
-        except Exception:
+        # Another instance is already bound. Ask it to bring its window to the front!
+        if notify_existing_instance_or_takeover(18766):
+            # Existing instance has brought its window to front. Exit cleanly.
+            sys.exit(0)
+        # Old zombie was killed, acquire lock now
+        if not acquire_single_instance_lock(18766):
             sys.exit(0)
 
     root = tk.Tk()
     app = PocketFleetControlApp(root)
+    start_single_instance_listener(app, 18766)
     root.mainloop()
 
 
