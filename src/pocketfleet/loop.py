@@ -398,45 +398,97 @@ class DispatchLoop:
         )
         self._send_immediate_or_outbox(chat_id=msg.chat_id, text=announcement, reply_to_message_id=msg.message_id)
 
-        # 2. Canonical Starfleet Meeting Briefing for Host (ChatGPT / Web Bridge)
-        from .bridge_server import enqueue_codeai_message, is_web_bridge_connected
-        connected, reason = is_web_bridge_connected(max_idle_sec=60.0)
+        # 2. Resolve Host Role & Host Display Name
+        host_role = "chat"
+        host_display_name = chat_name
+        if host_bot.lower() == lead_u.lower():
+            host_role = "lead"
+            host_display_name = lead_name
+        elif host_bot.lower() == builder_u.lower():
+            host_role = "builder"
+            host_display_name = builder_name
 
+        # 3. Canonical Starfleet Meeting Briefing for Host
         briefing_prompt = (
             f"# 🏛️ 【AI星舰战队联席会议公文】\n"
             f"📌 会议议题：{topic}\n"
-            f"🌾 召集人：{human}\n\n"
-            f"### 一、 参会席位与会议分工\n"
-            f"1. 🎛️ 【主持席】{chat_name} ({chat_u})\n"
-            f"   分工：牵头破题、方案推演、会议对账与综合结论。\n"
-            f"2. ⚖️ 【审计席】{lead_name} ({lead_u})\n"
-            f"   分工：架构守门、防崩兜底、代码与逻辑严密审计。\n"
-            f"3. 🐍 【施工席】{builder_name} ({builder_u})\n"
-            f"   分工：工程落地、核心算法实现与技术定桩。\n\n"
-            f"### 二、 会议主持与发信规则\n"
-            f"• 谁开始主持：由【{chat_name}】率先开场发言，就议题展开第一手深度剖析与推演；\n"
-            f"• 战友交接：推演中如需代码或审计支持，文末以 [Telegram]re:{lead_u}[waitReply] 或 [Telegram]re:{builder_u}[waitReply] 点名交接；\n"
-            f"• 结案/通知：纯同步信息请带上 [NoReply]；\n"
-            f"• 出站发信：回复首行带 [Telegram]，网桥将自动实时投递至战队群！\n\n"
-            f"请作为主持席立即开始就本次议题展开深入推演！"
+            f"🌾 召集人：{human}\n"
+            f"⏱️ 推进看门狗：每 {watchdog_minutes} 分钟监护\n\n"
+            f"### 一、 参会席位名单与职责 (Participants)\n"
+            f"1. 🎛️ 【主持席】{chat_name} (`{chat_u}`) — 方案推演、会议对账与结论收敛\n"
+            f"2. ⚖️ 【审计席】{lead_name} (`{lead_u}`) — 架构守门、防崩兜底与逻辑审计\n"
+            f"3. 🐍 【施工席】{builder_name} (`{builder_u}`) — 工程落地、核心算法与代码定桩\n\n"
+            f"### 二、 会议主持与发信规则（协议级强制遵循）\n"
+            f"• 首发主持：由【{host_display_name} (`{host_bot}`)】率先开场发言，就议题展开第一手深度剖析与方案推演；\n"
+            f"• 出站发信规范（首行带 [Telegram] 投递回群）：\n"
+            f"  - 点名交锋（需对方回复）：`[Telegram];re:@BotId;[waitReply]` 或 `[Telegram];mailto:@BotId;[waitReply]`\n"
+            f"  - 结案/纯同步（防死循环）：`[Telegram];re:@BotId;[NoReply]`\n"
+            f"  - 网桥自动脱敏：检测到 [NoReply] 时，回复仍会发给人类看，但自动脱敏 @ 触发符，彻底阻断回声！\n"
+            f"• 会议闭幕：议程达成共识后，由主持人在群内发送 `/meetover` 正式结案闭幕。\n\n"
+            f"请【{host_display_name}】立即作为首发主持席，就本次研讨议题展开第一手深度推演！"
         )
 
-        enqueue_codeai_message(
-            content=briefing_prompt,
-            filename=f"Telegram_meet_{msg.message_id}.txt",
-            raw=True,
-            channel="duty-wake",
-            source=f"telegram:{msg.chat_id}:{msg.message_id}",
-            target="chat",
-        )
-        self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "chatgpt_web_meeting")
-
-        if not connected:
-            warning_text = (
-                f"⚠️ [PocketFleet 网桥提醒] 结算主机网页未就绪（{reason}）。\n"
-                f"📌 会议公文已在本地网桥队列安全待命，请在浏览器中打开 ChatGPT 网页，确认扩展显示 🟢 已就绪即可自动推进！"
+        # 4. Dispatch Briefing to the designated Host Node
+        if host_role == "chat":
+            from .bridge_server import enqueue_codeai_message, is_web_bridge_connected
+            connected, reason = is_web_bridge_connected(max_idle_sec=60.0)
+            enqueue_codeai_message(
+                content=briefing_prompt,
+                filename=f"Telegram_meet_{msg.message_id}.txt",
+                raw=True,
+                channel="duty-wake",
+                source=f"telegram:{msg.chat_id}:{msg.message_id}",
+                target="chat",
             )
-            self._send_immediate_or_outbox(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=msg.message_id)
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "chatgpt_web_meeting")
+            if not connected:
+                warning_text = (
+                    f"⚠️ [PocketFleet 网桥提醒] 结算主机网页端未就绪（{reason}）。\n"
+                    f"📌 会议公文已在本地网桥队列安全待命，请在浏览器中打开 ChatGPT 网页，确认扩展显示 🟢 已就绪即可自动推进！"
+                )
+                self._send_immediate_or_outbox(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=msg.message_id)
+
+        elif host_role == "lead":
+            # Host is Lead (e.g. 裁决者 / Antigravity)
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "antigravity_meeting")
+            if hasattr(self, "session_hub") and self.session_hub:
+                self.session_hub.enqueue_event(
+                    seat_id="lead",
+                    prompt=briefing_prompt,
+                    source=f"telegram:{msg.chat_id}:{msg.message_id}",
+                    metadata={"meeting": True, "topic": topic, "watchdog_minutes": watchdog_minutes},
+                )
+                logger.info("Enqueued Starfleet meeting briefing to Lead (Antigravity) via SessionHub")
+            else:
+                task = Task(
+                    prompt=briefing_prompt,
+                    raw_prompt=briefing_prompt,
+                    worker=WorkerType.ANTIGRAVITY,
+                    chat_id=msg.chat_id,
+                    inbound_message_id=msg.message_id,
+                )
+                self.task_queue.put(task)
+
+        elif host_role == "builder":
+            # Host is Builder (e.g. 泥蛇 / Codex)
+            self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "codex_meeting")
+            if hasattr(self, "session_hub") and self.session_hub:
+                self.session_hub.enqueue_event(
+                    seat_id="builder",
+                    prompt=briefing_prompt,
+                    source=f"telegram:{msg.chat_id}:{msg.message_id}",
+                    metadata={"meeting": True, "topic": topic, "watchdog_minutes": watchdog_minutes},
+                )
+                logger.info("Enqueued Starfleet meeting briefing to Builder (Codex) via SessionHub")
+            else:
+                task = Task(
+                    prompt=briefing_prompt,
+                    raw_prompt=briefing_prompt,
+                    worker=WorkerType.CODEX,
+                    chat_id=msg.chat_id,
+                    inbound_message_id=msg.message_id,
+                )
+                self.task_queue.put(task)
 
         return None
 
@@ -576,8 +628,11 @@ class DispatchLoop:
 
         # --- [ECHO-PROOF SHIELD 1: Drop System Status Notifications & Echoes] ---
         # Never process outbox echoes, acks, or task status notifications from any sender
-        if raw_text.startswith(("⏳", "❌", "✅", "🤖", "🎛️")) or any(
-            m in raw_text for m in ("Task Queued", "Task Failed", "Task Completed", "收到指令，已递交至", "PocketFleet Status:")
+        if raw_text.startswith(("⏳", "❌", "✅", "🤖", "🎛️", "🏛️")) or any(
+            m in raw_text for m in (
+                "Task Queued", "Task Failed", "Task Completed", "收到指令，已递交至",
+                "PocketFleet Status:", "【AI战队联席会议中心】已就绪", "【AI星舰联席会议已召开】"
+            )
         ):
             logger.debug("Dropped system status echo/notification ID %s: %s...", msg.message_id, raw_text[:40])
             return None

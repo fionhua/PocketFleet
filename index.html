@@ -801,7 +801,8 @@
       };
 
       const jsonStr = JSON.stringify(payload);
-      const meetCommand = `/meet ${topic}`;
+      const hostTag = selectedHost ? `${selectedHost} ` : "";
+      const meetCommand = `/meet ${hostTag}${topic}`;
 
       // 1. Copy to clipboard
       if (navigator.clipboard && navigator.clipboard.writeText) {
