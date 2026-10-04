@@ -936,36 +936,20 @@ class EngineBadge:
 
 
 
-class ThreeSeatsConfigDialog(tk.Toplevel):
-    def __init__(self, parent, fleet_mgr, on_save_callback=None):
-        super().__init__(parent)
+class ThreeSeatsConfigPanel(tk.Frame):
+    def __init__(self, parent, fleet_mgr, on_save_callback=None, is_dialog=False, show_header=True, **kwargs):
+        super().__init__(parent, bg=COLOR_APP_BG, **kwargs)
         self.parent = parent
         self.mgr = fleet_mgr
         self.on_save_callback = on_save_callback
-
-        self.title("Fleet Triad Seats Configuration (席位战队编排) — PocketFleet")
-        self.geometry("860x820")
-        self.resizable(False, False)
-        self.configure(bg=COLOR_APP_BG)
-        apply_windows_titlebar_theme(self)
-        self.transient(parent)
-        self.grab_set()
+        self.is_dialog = is_dialog
+        self.show_header = show_header
 
         ui_fam = get_ui_font_family()
         self.font_title = tkfont.Font(family=ui_fam, size=13, weight="bold")
         self.font_sub = tkfont.Font(family=ui_fam, size=9)
         self.font_bold = tkfont.Font(family=ui_fam, size=9, weight="bold")
         self.font_mono = tkfont.Font(family="Consolas", size=9)
-
-        # Center on parent
-        self.update_idletasks()
-        pw = parent.winfo_width()
-        ph = parent.winfo_height()
-        px = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        cx = max(0, px + (pw - 860) // 2)
-        cy = max(0, py + (ph - 820) // 2)
-        self.geometry(f"+{cx}+{cy}")
 
         self.active_tab: str = "code"
         self.selected_role: str = "lead"
@@ -985,22 +969,23 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
     def _build_ui(self):
         # Header banner
-        header = tk.Frame(self, bg=COLOR_TITLE_BAR, padx=20, pady=12)
-        header.pack(fill=tk.X)
-        tk.Label(
-            header,
-            text="👥 Fleet Triad Seats Configuration (席位战队编排)",
-            fg=COLOR_TITLE_TEXT,
-            bg=COLOR_TITLE_BAR,
-            font=self.font_title,
-        ).pack(anchor="w")
-        tk.Label(
-            header,
-            text="二元页签架构：左侧【代码 AI】(多席位施工) ｜ 右侧【对话 AI】(人类交互与对账) ｜ 战队群全席位共用",
-            fg=COLOR_TITLE_SUBTEXT,
-            bg=COLOR_TITLE_BAR,
-            font=self.font_sub,
-        ).pack(anchor="w", pady=(2, 0))
+        if self.show_header:
+            header = tk.Frame(self, bg=COLOR_TITLE_BAR, padx=20, pady=10)
+            header.pack(fill=tk.X)
+            tk.Label(
+                header,
+                text="👥 第一步：配置各 AI 席位接入 Telegram (Step 1: Configure AI Seats & Telegram)",
+                fg=COLOR_TITLE_TEXT,
+                bg=COLOR_TITLE_BAR,
+                font=self.font_title,
+            ).pack(anchor="w")
+            tk.Label(
+                header,
+                text="二元页签架构：左侧【代码 AI】(多席位施工) ｜ 右侧【对话 AI】(人类交互与对账) ｜ 战队群全席位共用",
+                fg=COLOR_TITLE_SUBTEXT,
+                bg=COLOR_TITLE_BAR,
+                font=self.font_sub,
+            ).pack(anchor="w", pady=(2, 0))
 
         content = tk.Frame(self, bg=COLOR_APP_BG, padx=20, pady=10)
         content.pack(fill=tk.BOTH, expand=True)
@@ -1352,20 +1337,21 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
         )
         btn_reset.pack(side=tk.RIGHT, padx=(8, 0))
 
-        btn_cancel = tk.Button(
-            actions,
-            text="取消 (Cancel)",
-            bg=COLOR_SURFACE,
-            fg=COLOR_TEXT_MUTED,
-            activebackground=COLOR_CONTROL,
-            font=self.font_sub,
-            relief=tk.FLAT,
-            padx=12,
-            pady=6,
-            cursor="hand2",
-            command=self.destroy,
-        )
-        btn_cancel.pack(side=tk.RIGHT)
+        if self.is_dialog:
+            btn_cancel = tk.Button(
+                actions,
+                text="取消 (Cancel)",
+                bg=COLOR_SURFACE,
+                fg=COLOR_TEXT_MUTED,
+                activebackground=COLOR_CONTROL,
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=12,
+                pady=6,
+                cursor="hand2",
+                command=self._close_panel,
+            )
+            btn_cancel.pack(side=tk.RIGHT)
 
     def _create_seat_card(self, parent: tk.Widget, role_key: str, title: str, color: str, engine_choices: list[str]):
         card = tk.LabelFrame(
@@ -2644,9 +2630,72 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
             except Exception:
                 pass
 
-        self.destroy()
+        if self.is_dialog:
+            self._close_panel()
+        else:
+            show_floating_toast(
+                parent=self,
+                title="席位配置保存成功！",
+                message="✅ AI 席位与 Telegram 接入配置已成功持久化并热应用生效！\n现在可启动下方网关服务开始协同。",
+                icon="💾",
+                duration_ms=2800,
+            )
         if self.on_save_callback:
             self.on_save_callback()
+
+    def _close_panel(self):
+        if self.is_dialog and hasattr(self.parent, "destroy"):
+            self.parent.destroy()
+        else:
+            self.destroy()
+
+
+class ThreeSeatsConfigDialog(tk.Toplevel):
+    """Modal dialog wrapper around ThreeSeatsConfigPanel for backward compatibility and tests."""
+    def __init__(self, parent, fleet_mgr, on_save_callback=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.mgr = fleet_mgr
+        self.on_save_callback = on_save_callback
+
+        self.title("Fleet Triad Seats Configuration (席位战队编排) — PocketFleet")
+        self.geometry("880x840")
+        self.configure(bg=COLOR_APP_BG)
+        apply_windows_titlebar_theme(self)
+        self.transient(parent)
+        self.grab_set()
+
+        try:
+            self.update_idletasks()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            cx = max(0, px + (pw - 880) // 2)
+            cy = max(0, py + (ph - 840) // 2)
+            self.geometry(f"+{cx}+{cy}")
+        except Exception:
+            pass
+
+        self.panel = ThreeSeatsConfigPanel(
+            self,
+            fleet_mgr,
+            on_save_callback=on_save_callback,
+            is_dialog=True,
+            show_header=True,
+        )
+        self.panel.pack(fill=tk.BOTH, expand=True)
+
+    def __getattr__(self, name):
+        return getattr(self.panel, name)
+
+    def __setattr__(self, name, value):
+        if name in ("parent", "mgr", "on_save_callback", "panel") or "panel" not in self.__dict__:
+            super().__setattr__(name, value)
+        elif hasattr(self.panel, name):
+            setattr(self.panel, name, value)
+        else:
+            super().__setattr__(name, value)
 
 
 # ==============================================================================
@@ -3720,8 +3769,8 @@ class PocketFleetControlApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("PocketFleet Control Panel (Solo Hacker Edition)")
-        self.root.geometry("860x720")
-        self.root.minsize(800, 640)
+        self.root.geometry("960x900")
+        self.root.minsize(900, 750)
 
         self.root.configure(bg=COLOR_APP_BG)
         apply_windows_titlebar_theme(self.root)
@@ -3753,11 +3802,48 @@ class PocketFleetControlApp:
             self.root.destroy()
             return
 
+        # 1. Global Header
         self._build_header()
-        self._build_table()
-        self._build_three_seats_panel()
-        self._build_toolbar()
-        self._build_log_console()
+
+        # 2. Scrollable Viewport for Seamless Layout
+        self.main_canvas = tk.Canvas(self.root, bg=COLOR_APP_BG, highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self.root, orient="vertical", command=self.main_canvas.yview)
+        self.scroll_content = tk.Frame(self.main_canvas, bg=COLOR_APP_BG)
+
+        self.scroll_content.bind(
+            "<Configure>",
+            lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+        )
+
+        self.canvas_win_id = self.main_canvas.create_window((0, 0), window=self.scroll_content, anchor="nw")
+        self.main_canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.main_canvas.bind("<Configure>", lambda e: self.main_canvas.itemconfig(self.canvas_win_id, width=e.width))
+
+        def _on_mousewheel(event):
+            try:
+                self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass
+        self.root.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Step 1 (Top / Primary Area): AI Seats & Telegram Setup (Image 1 embedded)
+        self.seats_panel = ThreeSeatsConfigPanel(
+            self.scroll_content,
+            fleet_mgr=self.mgr,
+            on_save_callback=self._on_seats_saved,
+            is_dialog=False,
+            show_header=True,
+        )
+        self.seats_panel.pack(fill=tk.X, padx=12, pady=(4, 12))
+
+        # Step 2 (Bottom / Control Area): Gateway Services (Image 2 moved below)
+        self._build_table(self.scroll_content)
+        self._build_toolbar(self.scroll_content)
+        self._build_log_console(self.scroll_content)
 
 
         self._setup_tray()
@@ -3881,30 +3967,50 @@ class PocketFleetControlApp:
             self.root.after(1000, self._refresh_status)
 
     def _build_header(self) -> None:
-        header = tk.Frame(self.root, bg=COLOR_TITLE_BAR, height=70)
+        header = tk.Frame(self.root, bg=COLOR_TITLE_BAR, height=64)
         header.pack(fill=tk.X)
 
         title_lbl = tk.Label(
             header,
-            text="🚀 PocketFleet Control Panel (Solo Hacker Edition)",
+            text="🚀 PocketFleet 控制中心 (AI 战队网关 / Commercial Edition)",
             fg=COLOR_TITLE_TEXT,
             bg=COLOR_TITLE_BAR,
             font=self.font_title,
         )
-        title_lbl.pack(anchor="w", padx=18, pady=(12, 2))
+        title_lbl.pack(anchor="w", padx=18, pady=(10, 2))
 
         sub_lbl = tk.Label(
             header,
-            text="AI STARFLEET COMMUNICATION HUB | XAMPP-STYLE TRAY CONTROLLER | v0.2.0",
+            text="① 顶部配置各 AI 席位与 Telegram ➔ ② 复制协同 Memo ➔ ③ 下方开启网关服务协同",
             fg=COLOR_TITLE_SUBTEXT,
             bg=COLOR_TITLE_BAR,
             font=self.font_sub,
         )
-        sub_lbl.pack(anchor="w", padx=18, pady=(0, 10))
+        sub_lbl.pack(anchor="w", padx=18, pady=(0, 8))
 
-    def _build_table(self) -> None:
-        table_card = tk.Frame(self.root, bg=COLOR_SURFACE, bd=1, relief=tk.SOLID)
-        table_card.pack(fill=tk.X, padx=16, pady=12)
+    def _build_table(self, parent=None) -> None:
+        p = parent if parent is not None else self.root
+
+        # Section Banner for Step 2
+        sec_hdr = tk.Frame(p, bg=COLOR_TITLE_BAR, padx=16, pady=8)
+        sec_hdr.pack(fill=tk.X, padx=12, pady=(12, 4))
+        tk.Label(
+            sec_hdr,
+            text="📡 第二步：网关网络服务控制台 (Step 2: Gateway Network Services)",
+            fg=COLOR_TITLE_TEXT,
+            bg=COLOR_TITLE_BAR,
+            font=self.font_bold,
+        ).pack(anchor="w")
+        tk.Label(
+            sec_hdr,
+            text="各 AI 席位与 Telegram 接入配置就绪后，启动下方网关即可接收群内消息并协同分发",
+            fg=COLOR_TITLE_SUBTEXT,
+            bg=COLOR_TITLE_BAR,
+            font=self.font_sub,
+        ).pack(anchor="w", pady=(1, 0))
+
+        table_card = tk.Frame(p, bg=COLOR_SURFACE, bd=1, relief=tk.SOLID)
+        table_card.pack(fill=tk.X, padx=12, pady=(0, 8))
 
         header_row = tk.Frame(table_card, bg=COLOR_CONTROL, height=28)
         header_row.pack(fill=tk.X)
@@ -4006,277 +4112,25 @@ class PocketFleetControlApp:
             "state": "unknown",
         }
 
-    def _build_three_seats_panel(self) -> None:
-        card = tk.Frame(self.root, bg=COLOR_SURFACE, bd=1, relief=tk.SOLID)
-        card.pack(fill=tk.X, padx=16, pady=(0, 10))
-
-        hdr = tk.Frame(card, bg=COLOR_SURFACE, padx=12, pady=6)
-        hdr.pack(fill=tk.X)
-
-        title_frame = tk.Frame(hdr, bg=COLOR_SURFACE)
-        title_frame.pack(side=tk.LEFT, fill=tk.Y)
-
-        tk.Label(
-            title_frame,
-            text="👥 AI 研发小队 · Telegram 接入配置 (AI Team Telegram Connectors):",
-            fg=COLOR_INFO,
-            bg=COLOR_SURFACE,
-            font=self.font_bold,
-        ).pack(anchor="w")
-
-        tk.Label(
-            title_frame,
-            text="每个席位对应一个专属 Telegram Bot。在此直接配置代号、用户名与 Token，实现极简接入。",
-            fg=COLOR_TEXT_SOFT,
-            bg=COLOR_SURFACE,
-            font=self.font_sub,
-        ).pack(anchor="w", pady=(2, 0))
-
-        btn_adv = tk.Button(
-            hdr,
-            text="⚙️ 专家/高级设置 (Advanced)...",
-            bg=COLOR_CONTROL,
-            fg=COLOR_TEXT_SECONDARY,
-            activebackground=COLOR_CONTROL_HOVER,
-            activeforeground=COLOR_TEXT,
-            font=self.font_sub,
-            relief=tk.FLAT,
-            padx=10,
-            pady=3,
-            cursor="hand2",
-            command=self.open_three_seats_dialog,
-        )
-        btn_adv.pack(side=tk.RIGHT)
-
-        # Container for the 3 seat cards
-        self.seats_container = tk.Frame(card, bg=COLOR_SURFACE_ALT, padx=8, pady=8)
-        self.seats_container.pack(fill=tk.X, padx=8, pady=(0, 4))
-        self.seats_container.columnconfigure(0, weight=1)
-        self.seats_container.columnconfigure(1, weight=1)
-        self.seats_container.columnconfigure(2, weight=1)
-
-        # Global Action Bar for Direct In-Place Saving
-        action_bar = tk.Frame(card, bg=COLOR_SURFACE, padx=12, pady=8)
-        action_bar.pack(fill=tk.X)
-
-        self.btn_save_seats = tk.Button(
-            action_bar,
-            text="💾 一键保存并应用席位配置 (Save & Apply Seats)",
-            bg=COLOR_PRIMARY,
-            fg="#ffffff",
-            activebackground=COLOR_PRIMARY_HOVER,
-            activeforeground="#ffffff",
-            font=self.font_bold,
-            relief=tk.FLAT,
-            padx=16,
-            pady=5,
-            cursor="hand2",
-            command=self._save_inline_seats_config,
-        )
-        self.btn_save_seats.pack(side=tk.RIGHT)
-
-        self.inline_save_status_lbl = tk.Label(
-            action_bar,
-            text="修改上方 Bot 信息后点击保存即可就地生效，无需弹窗。",
-            fg=COLOR_TEXT_MUTED,
-            bg=COLOR_SURFACE,
-            font=self.font_sub,
-        )
-        self.inline_save_status_lbl.pack(side=tk.LEFT)
-
-        self.seat_entries = {}
-        self._render_seat_cards()
-
-    def _render_seat_cards(self) -> None:
-        for widget in self.seats_container.winfo_children():
-            widget.destroy()
-
-        self.seat_entries = {}
-        seats_cfg = self.mgr.load_seats_config()
-
-        seat_roles = [
-            ("chat", "💬 交互顾问席 (Advisor / Chat)", COLOR_INFO),
-            ("lead", "🎖️ 技术首席席 (Tech Lead / Lead)", COLOR_SUCCESS),
-            ("builder", "🛠️ 主力工程席 (Builder / Core)", COLOR_WARNING),
-        ]
-
-        # Dynamically append any extended code seats if configured
-        for rk, s_cfg in seats_cfg.seats.items():
-            if rk not in ("chat", "lead", "builder"):
-                seat_roles.append((rk, f"⚙️ 扩展席位 ({rk})", COLOR_TEXT_MUTED))
-
-        for col, (role_key, role_label, accent_color) in enumerate(seat_roles):
-            self.seats_container.columnconfigure(col, weight=1)
-            seat = seats_cfg.seats.get(role_key)
-            card_sub = tk.Frame(self.seats_container, bg=COLOR_SURFACE, bd=1, relief=tk.RIDGE, padx=8, pady=8)
-            card_sub.grid(row=0, column=col, sticky="nsew", padx=4)
-
-            # Role Header
-            tk.Label(
-                card_sub,
-                text=role_label,
-                fg=accent_color,
-                bg=COLOR_SURFACE,
-                font=self.font_bold,
-                anchor="w",
-            ).pack(fill=tk.X)
-
-            # Field: AI Name
-            tk.Label(card_sub, text="代号 / 昵称 (Name):", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub, anchor="w").pack(fill=tk.X, pady=(4, 1))
-            commercial_default_names = {
-                "chat": "Advisor",
-                "lead": "TechLead",
-                "builder": "Builder",
-            }
-            raw_name = seat.name if seat else ""
-            if not raw_name or raw_name in ("地球Sandbox", "裁决者", "泥蛇"):
-                name_val = commercial_default_names.get(role_key, role_key.capitalize())
-            else:
-                name_val = raw_name
-            ent_name = tk.Entry(card_sub, bg=COLOR_INPUT_BG, fg=COLOR_TEXT, font=self.font_regular, relief=tk.FLAT)
-            ent_name.insert(0, name_val)
-            ent_name.pack(fill=tk.X, pady=(0, 4))
-
-            # Field: Bot Username
-            tk.Label(card_sub, text="Telegram 用户名 (@Username):", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub, anchor="w").pack(fill=tk.X, pady=(2, 1))
-            raw_user = seat.bot_username if seat else ""
-            if raw_user in ("@AiSoulAlphaSandboxBot", "@AiSoulJudgeBot", "@AiSoulMudSnakeBot"):
-                user_val = f"@{name_val}Bot"
-            else:
-                user_val = raw_user
-            ent_user = tk.Entry(card_sub, bg=COLOR_INPUT_BG, fg=COLOR_TEXT, font=self.font_regular, relief=tk.FLAT)
-            ent_user.insert(0, user_val)
-            ent_user.pack(fill=tk.X, pady=(0, 4))
-
-            # Field: Bot Token
-            token_frame = tk.Frame(card_sub, bg=COLOR_SURFACE)
-            token_frame.pack(fill=tk.X, pady=(2, 1))
-            tk.Label(token_frame, text="Bot Token (HTTP API):", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub).pack(side=tk.LEFT)
-
-            token_val = (seat.get_token() or os.environ.get(seat.bot_token_env if seat else "") or "").strip() if seat else ""
-            ent_token = tk.Entry(card_sub, bg=COLOR_INPUT_BG, fg=COLOR_TEXT, font=self.font_mono, relief=tk.FLAT, show="•")
-            ent_token.insert(0, token_val)
-            ent_token.pack(fill=tk.X, pady=(0, 4))
-
-            # Show/Hide Token Toggle
-            def _toggle_token_visibility(entry_widget=ent_token, btn=None):
-                if entry_widget.cget("show") == "•":
-                    entry_widget.config(show="")
-                    if btn: btn.config(text="🙈 隐藏")
-                else:
-                    entry_widget.config(show="•")
-                    if btn: btn.config(text="👁️ 显示")
-
-            btn_eye = tk.Button(token_frame, text="👁️ 显示", bg=COLOR_SURFACE, fg=COLOR_TEXT_SOFT, font=self.font_sub, relief=tk.FLAT, padx=2, pady=0, cursor="hand2")
-            btn_eye.config(command=lambda e=ent_token, b=btn_eye: _toggle_token_visibility(e, b))
-            btn_eye.pack(side=tk.RIGHT)
-
-            # Status line
-            status_frame = tk.Frame(card_sub, bg=COLOR_SURFACE)
-            status_frame.pack(fill=tk.X, pady=(4, 0))
-
-            has_valid = bool(token_val and user_val)
-            status_icon = "🟢" if has_valid else "🔴"
-            status_text = f"状态: {status_icon} {'已就绪' if has_valid else '待配置'}"
-            status_fg = COLOR_SUCCESS if has_valid else COLOR_DANGER
-            lbl_st = tk.Label(status_frame, text=status_text, fg=status_fg, bg=COLOR_SURFACE, font=self.font_sub)
-            lbl_st.pack(side=tk.LEFT)
-
-            if role_key == "chat":
-                # Quick link for web bridge
-                btn_web = tk.Button(
-                    status_frame,
-                    text="打开网页端",
-                    bg=COLOR_CONTROL,
-                    fg=COLOR_INFO,
-                    font=self.font_sub,
-                    relief=tk.FLAT,
-                    padx=4,
-                    pady=0,
-                    cursor="hand2",
-                    command=lambda: webbrowser.open("https://chatgpt.com"),
-                )
-                btn_web.pack(side=tk.RIGHT)
-
-            self.seat_entries[role_key] = {
-                "name": ent_name,
-                "username": ent_user,
-                "token": ent_token,
-                "status_lbl": lbl_st,
-                "token_env": seat.bot_token_env if seat else f"TELEGRAM_BOT_{role_key.upper()}_TOKEN",
-            }
-
-    def _save_inline_seats_config(self) -> None:
-        try:
-            seats_cfg = self.mgr.load_seats_config()
-            for role_key, fields in self.seat_entries.items():
-                name_in = fields["name"].get().strip()
-                user_in = fields["username"].get().strip()
-                token_in = fields["token"].get().strip()
-                env_var = fields["token_env"]
-
-                if user_in and not user_in.startswith("@"):
-                    user_in = "@" + user_in
-
-                if not name_in:
-                    messagebox.showwarning("提示", f"席位 {role_key} 必须填写名称！", parent=self.root)
-                    return
-
-                seat_obj = seats_cfg.seats.get(role_key)
-                if seat_obj:
-                    seat_obj.name = name_in
-                    seat_obj.bot_username = user_in
-                    seat_obj.bot_token = token_in
-                else:
-                    seats_cfg.seats[role_key] = SeatConfig(
-                        role=role_key,
-                        name=name_in,
-                        engine="gemini" if role_key == "chat" else ("antigravity" if role_key == "lead" else "codex"),
-                        bot_token_env=env_var,
-                        bot_username=user_in,
-                        description=f"{name_in} 席位",
-                        command="gemini" if role_key == "chat" else ("agy" if role_key == "lead" else "codex"),
-                        read_watermark=0,
-                        bot_token=token_in,
-                    )
-
-                if token_in and env_var:
-                    try:
-                        save_token_to_env(token_in, env_path=REPO_ROOT / ".env", var_name=env_var)
-                        os.environ[env_var] = token_in
-                    except Exception as env_err:
-                        logger.warning("Failed saving token to .env for %s: %s", role_key, env_err)
-
-            validate_seats_config(seats_cfg)
-            self.mgr.save_seats_config(seats_cfg)
-            self.append_log("💾 [SEATS] 席位配置已就地保存并成功生效。")
-            if hasattr(self, "inline_save_status_lbl"):
-                now_str = datetime.now().strftime("%H:%M:%S")
-                self.inline_save_status_lbl.config(
-                    text=f"✅ 配置已于 {now_str} 成功就地保存生效！",
-                    fg=COLOR_SUCCESS,
-                )
-            self._render_seat_cards()
-        except Exception as e:
-            messagebox.showerror("保存失败", f"无法保存席位配置:\n{e}", parent=self.root)
-
     def open_three_seats_dialog(self) -> None:
         ThreeSeatsConfigDialog(self.root, fleet_mgr=self.mgr, on_save_callback=self._on_seats_saved)
 
     def _on_seats_saved(self) -> None:
         self.append_log("👥 [SEATS] Fleet Triad seats configuration updated and verified.")
-        self._render_seat_cards()
+        if hasattr(self, "seats_panel") and hasattr(self.seats_panel, "_load_from_config"):
+            self.seats_panel._load_from_config()
 
     def open_antigravity_tracks_dialog(self) -> None:
         AntigravityTracksDialog(self.root, fleet_mgr=self.mgr, on_bind_callback=self._on_track_bound)
 
     def _on_track_bound(self) -> None:
         self.append_log("🧭 [TRACK] Antigravity track bound to lead executor.")
-        self._render_seat_cards()
+        if hasattr(self, "seats_panel") and hasattr(self.seats_panel, "_load_from_config"):
+            self.seats_panel._load_from_config()
 
-    def _build_toolbar(self) -> None:
-
-        toolbar = tk.Frame(self.root, bg=COLOR_APP_BG)
+    def _build_toolbar(self, parent=None) -> None:
+        p = parent if parent is not None else self.root
+        toolbar = tk.Frame(p, bg=COLOR_APP_BG)
         toolbar.pack(fill=tk.X, padx=16, pady=4)
 
         btn_start_all = tk.Button(
@@ -4327,8 +4181,9 @@ class PocketFleetControlApp:
         )
         btn_tray.pack(side=tk.RIGHT)
 
-    def _build_log_console(self) -> None:
-        console_frame = tk.Frame(self.root, bg=COLOR_APP_BG)
+    def _build_log_console(self, parent=None) -> None:
+        p = parent if parent is not None else self.root
+        console_frame = tk.Frame(p, bg=COLOR_APP_BG)
         console_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(8, 16))
 
         hdr = tk.Frame(console_frame, bg=COLOR_SURFACE, height=26)

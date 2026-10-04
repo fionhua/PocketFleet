@@ -47,8 +47,14 @@ class TestPF03R6Acceptance(unittest.TestCase):
         self.state_store = StateStore(self.db_path)
         self.session_hub = SessionHub(self.state_store)
         self.transport = MockTransport()
+        self.exec_patcher = patch("pocketfleet.executors.antigravity.AntigravityExecutor.execute", return_value=(0, "Task executed successfully", ""))
+        self.avail_patcher = patch("pocketfleet.executors.antigravity.AntigravityExecutor.is_available", return_value=True)
+        self.exec_patcher.start()
+        self.avail_patcher.start()
 
     def tearDown(self):
+        self.exec_patcher.stop()
+        self.avail_patcher.stop()
         try:
             shutil.rmtree(self.tmp_dir, ignore_errors=True)
         except Exception:
