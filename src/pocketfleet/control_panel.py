@@ -3293,9 +3293,19 @@ class FleetManager:
             def _on_telegram_post(payload: dict) -> None:
                 text = payload.get("text", "")
                 sender = payload.get("sender", "web_chat")
+                principal = (payload.get("principal") or payload.get("client_principal") or "").strip().lower()
                 if text and self.dispatch_loop and getattr(self.dispatch_loop, "running", False):
                     try:
-                        self.log(f"📨 [BRIDGE] Outbound from {sender}: {text[:60]}...")
+                        self.log(f"📨 [BRIDGE] Outbound from {sender} (principal={principal or 'unspecified'}): {text[:60]}...")
+
+                        # Security check: if principal is explicitly unauthorized for chat seat, reject outbound
+                        if principal and "doubao" in principal:
+                            seats_cfg = self.load_seats_config()
+                            chat_engine = (getattr(seats_cfg.seats.get("chat", None), "engine", "") or "").lower() if hasattr(seats_cfg, "seats") else ""
+                            if "doubao" not in chat_engine:
+                                self.log(f"🛡️ [SECURITY] Blocked unauthorized outbound post from unconfigured principal '{principal}'")
+                                return
+
                         # If message contains [NoReply] / 【免回】, apply defanged mention transformation
                         # so recipients are visible to Human Commander in Telegram without triggering a bot reply
                         t_lower = text.lower()

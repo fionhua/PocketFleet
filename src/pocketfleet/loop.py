@@ -185,6 +185,9 @@ class DispatchLoop:
         self._pending_tg_events: Dict[str, tuple[int, int, str, float]] = {}
         self._active_meeting: Optional[dict[str, Any]] = None
         self._last_meeting_activity_ts: float = 0.0
+        self.meeting_started_at: float = 0.0
+        self.meeting_concluded_at: float = 0.0
+        self.meeting_participants: set[str] = set()
 
         if seats_config:
             self.seats_config = seats_config
@@ -593,6 +596,7 @@ class DispatchLoop:
                 channel="duty-wake",
                 source=f"telegram:{msg.chat_id}:{msg.message_id}",
                 target="chat",
+                original_timestamp=getattr(msg, "timestamp", None),
             )
             self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "chatgpt_web_meeting")
             if not connected:
@@ -644,18 +648,29 @@ class DispatchLoop:
                 self.task_queue.put(task)
 
         # 5. Initialize Active Meeting State with Watchdog & Turn Budget Circuit Breaker
+        now_ts = time.time()
+        self.meeting_started_at = now_ts
+        if participants:
+            self.meeting_participants = {p.lower() if p.startswith("@") else ("@" + p.lower()) for p in participants}
+        else:
+            self.meeting_participants = {u.lower() for u in [chat_u, lead_u, builder_u]}
+
         self._active_meeting = {
             "active": True,
             "chat_id": msg.chat_id,
             "topic": topic,
             "host": host_bot,
+            "participants": list(self.meeting_participants),
             "watchdog_sec": max(60, watchdog_minutes * 60),
-            "created_at": time.time(),
+            "created_at": now_ts,
             "turn_count": 0,
             "max_turns": 12,
         }
-        self._last_meeting_activity_ts = time.time()
-        logger.info("Starfleet meeting started: topic='%s', host='%s', watchdog=%dm, max_turns=12", topic, host_bot, watchdog_minutes)
+        self._last_meeting_activity_ts = now_ts
+        logger.info(
+            "Starfleet meeting started: topic='%s', host='%s', watchdog=%dm, max_turns=12, participants=%s",
+            topic, host_bot, watchdog_minutes, self.meeting_participants
+        )
 
         return None
 
@@ -678,11 +693,17 @@ class DispatchLoop:
         topic = "本次会议"
         duration_min = 1
         turns = 0
+        now_ts = time.time()
+        self.meeting_concluded_at = now_ts
         if self._active_meeting:
             topic = self._active_meeting.get("topic", "本次会议")
-            duration_min = max(1, int((time.time() - self._active_meeting.get("created_at", time.time())) // 60))
+            duration_min = max(1, int((now_ts - self._active_meeting.get("created_at", now_ts)) // 60))
             turns = self._active_meeting.get("turn_count", 0)
             self._active_meeting["active"] = False
+
+        from .bridge_server import cancel_stale_meeting_messages
+        purged = cancel_stale_meeting_messages(self.meeting_concluded_at)
+        logger.info("Meeting closed at ts %.1f, canceled %d stale in-flight/queued meeting messages", self.meeting_concluded_at, purged)
 
         closing_card = (
             f"🏁 *【AI星舰联席会议 · 结案闭幕】*\n\n"
@@ -818,6 +839,26 @@ class DispatchLoop:
         raw_text = (msg.text or "").strip()
         if not raw_text:
             return None
+
+        # --- [TIME WATERMARK GATE 0: Drop Stale Accumulations (>300s)] ---
+        now = time.time()
+        msg_ts = getattr(msg, "timestamp", 0.0)
+        if msg_ts and (now - msg_ts) > 300.0:
+            logger.warning(
+                "Dropped stale inbound message ID %s (original age %.1fs > 300s TTL)",
+                msg.message_id, now - msg_ts
+            )
+            return None
+
+        # --- [MEETING CONCLUSION WATERMARK: Drop In-Flight Residues of Past Meetings] ---
+        if self.meeting_concluded_at > 0 and msg_ts and msg_ts <= self.meeting_concluded_at:
+            if not (self._active_meeting and self._active_meeting.get("active")):
+                if msg.is_bot or "re:" in raw_text.lower():
+                    logger.info(
+                        "Blocked stale in-flight residue from concluded meeting (msg_ts %.1f <= conclusion %.1f, ID %s)",
+                        msg_ts, self.meeting_concluded_at, msg.message_id
+                    )
+                    return None
 
         # --- [ECHO-PROOF SHIELD 1: Drop System Status Notifications & Echoes] ---
         # Never process outbox echoes, acks, or task status notifications from any sender
@@ -1002,8 +1043,10 @@ class DispatchLoop:
             if env.target_role == "chat":
                 is_chat_seat = True
             elif env.target_role == "builder":
+                is_chat_seat = False
                 mentioned_worker = WorkerType.CODEX
             elif env.target_role == "lead":
+                is_chat_seat = False
                 mentioned_worker = WorkerType.ANTIGRAVITY
 
         if env and env.body:
@@ -1015,20 +1058,26 @@ class DispatchLoop:
 
         # Secondary fallback: detect bot mention if not already resolved by envelope
         match_bot = re.search(r"@([a-zA-Z0-9_]+bot)\b", raw_text, flags=re.IGNORECASE)
-        if not is_chat_seat and mentioned_worker is None and match_bot and self.seats_config and getattr(self.seats_config, "seats", None):
+        if mentioned_worker is None and match_bot and self.seats_config and getattr(self.seats_config, "seats", None):
             bot_tag = "@" + match_bot.group(1).lower()
             for r_key, seat in self.seats_config.seats.items():
                 if seat.bot_username and seat.bot_username.lower() == bot_tag:
                     target_role = r_key
                     s_eng = (seat.engine or "").lower().strip()
                     if s_eng == "codex":
+                        is_chat_seat = False
                         mentioned_worker = WorkerType.CODEX
                     elif s_eng in ("antigravity", "agy"):
+                        is_chat_seat = False
                         mentioned_worker = WorkerType.ANTIGRAVITY
                     elif s_eng == "claude_code":
+                        is_chat_seat = False
                         mentioned_worker = WorkerType.CLAUDE_CODE
                     elif s_eng == "aider":
+                        is_chat_seat = False
                         mentioned_worker = WorkerType.AIDER
+                    elif r_key == "chat":
+                        is_chat_seat = True
                     break
 
         # Route Chat AI seat (e.g. 结算主机 / ChatGPT Web via Port 18765 Web Bridge)
@@ -1065,6 +1114,7 @@ class DispatchLoop:
                 channel="duty-wake",
                 source=f"telegram:{msg.chat_id}:{msg.message_id}",
                 target="chat",
+                original_timestamp=getattr(msg, "timestamp", None),
             )
             self.state_store.record_message_start(msg.message_id, msg.chat_id, clean_prompt, "chatgpt_web")
             logger.info("Enqueued message %s for Chat AI / 结算主机 to Web Bridge (Port 18765), connected=%s", msg.message_id, connected)

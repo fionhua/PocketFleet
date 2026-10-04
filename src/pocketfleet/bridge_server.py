@@ -81,6 +81,77 @@ _CODEAI_IN_FLIGHT: dict[str, dict[str, Any]] = {}
 _CODEAI_RECENT_HASHES: dict[str, float] = {}
 
 
+def is_client_authorized_for_target(client_principal: Optional[str], target: str) -> bool:
+    """Check if the requesting client principal is authorized to pull tasks for target.
+    
+    Protects multi-agent setups: prevents unauthorized platforms (e.g. Doubao) from
+    stealing tasks dispatched to ChatGPT/Settlement Host.
+    """
+    if not client_principal:
+        return True  # Fallback for internal / unannotated callers or unit tests
+
+    p_clean = client_principal.lower().strip()
+    t_clean = target.lower().strip()
+
+    # Direct match or substring containment
+    if t_clean in p_clean:
+        return True
+
+    # Role 'chat' mapping: by default in PocketFleet, chat seat maps to folded-host-chatgpt-web
+    if t_clean in ("chat", "@aisoulsettlementbot", "settlement"):
+        if "chatgpt" in p_clean or "folded-host" in p_clean:
+            return True
+        try:
+            cfg_path = Path(__file__).resolve().parent.parent.parent / "pocketfleet.json"
+            if cfg_path.is_file():
+                cfg_data = json.loads(cfg_path.read_text(encoding="utf-8"))
+                chat_engine = (cfg_data.get("seats", {}).get("chat", {}).get("engine", "")).lower()
+                if "doubao" in chat_engine and "doubao" in p_clean:
+                    return True
+                if "claude" in chat_engine and "claude" in p_clean:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    if t_clean in ("doubao", "xinji_shu", "@aisouldoubaobot"):
+        return "doubao" in p_clean
+
+    return False
+
+
+def cancel_stale_meeting_messages(concluded_before_ts: float) -> int:
+    """Purge any pending or in-flight messages that originated before or at concluded_before_ts.
+
+    Provides resilient, timestamp-watermark-based meeting cancellation without needing explicit meeting IDs.
+    """
+    canceled = 0
+    with _CODEAI_LOCK:
+        valid_items = collections.deque()
+        while _CODEAI_QUEUE:
+            item = _CODEAI_QUEUE.popleft()
+            msg_ts = item.get("original_timestamp") or item.get("enqueued_at", 0)
+            if msg_ts <= concluded_before_ts:
+                canceled += 1
+                logger.info(
+                    "Canceled pending meeting message %s due to conclusion watermark (ts %.1f <= %.1f)",
+                    item.get("delivery_id", "")[:8], msg_ts, concluded_before_ts
+                )
+            else:
+                valid_items.append(item)
+        _CODEAI_QUEUE.extend(valid_items)
+
+        expired_inflight = [
+            did for did, it in _CODEAI_IN_FLIGHT.items()
+            if (it.get("original_timestamp") or it.get("enqueued_at", 0)) <= concluded_before_ts
+        ]
+        for did in expired_inflight:
+            _CODEAI_IN_FLIGHT.pop(did, None)
+            canceled += 1
+
+    return canceled
+
+
 def enqueue_codeai_message(
     content: str,
     filename: str = "Telegram_collab.txt",
@@ -89,14 +160,25 @@ def enqueue_codeai_message(
     source: str = "telegram",
     target: str = "chat",
     ttl_seconds: float = MESSAGE_TTL_SECONDS,
+    original_timestamp: Optional[float] = None,
 ) -> str:
     """Thread-safe enqueue a message for the browser extension to pull into ChatGPT Web.
 
     Guarantees:
     1. Strict 300s TTL: messages older than 300 seconds are auto-dropped.
     2. Deduplication: Identical message within 60s is dropped idempotently.
+    3. Original Timestamp Validation: Messages sent >300s ago on Telegram are immediately rejected.
     """
     now = time.time()
+    if original_timestamp and original_timestamp > 0:
+        orig_age = now - original_timestamp
+        if orig_age > ttl_seconds:
+            logger.warning(
+                "Refused to enqueue stale CodeAI message (original message age %.1fs > %ss TTL)",
+                orig_age, int(ttl_seconds)
+            )
+            return "stale_skipped"
+
     sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     with _CODEAI_LOCK:
@@ -114,13 +196,14 @@ def enqueue_codeai_message(
         valid_items = collections.deque()
         while _CODEAI_QUEUE:
             old_item = _CODEAI_QUEUE.popleft()
-            if (now - old_item.get("enqueued_at", 0)) <= old_item.get("ttl_seconds", MESSAGE_TTL_SECONDS):
+            old_ts = old_item.get("original_timestamp") or old_item.get("enqueued_at", 0)
+            if (now - old_ts) <= old_item.get("ttl_seconds", MESSAGE_TTL_SECONDS):
                 valid_items.append(old_item)
             else:
                 logger.warning(
                     "Purged stale CodeAI message %s (age %.1fs > %ss TTL) before enqueue",
                     old_item["delivery_id"][:8],
-                    now - old_item.get("enqueued_at", 0),
+                    now - old_ts,
                     int(old_item.get("ttl_seconds", MESSAGE_TTL_SECONDS)),
                 )
         _CODEAI_QUEUE.extend(valid_items)
@@ -128,7 +211,7 @@ def enqueue_codeai_message(
         # Purge expired in-flight
         expired_inflight = [
             did for did, it in _CODEAI_IN_FLIGHT.items()
-            if (now - it.get("in_flight_at", it.get("enqueued_at", 0))) > MESSAGE_TTL_SECONDS
+            if (now - (it.get("original_timestamp") or it.get("in_flight_at", it.get("enqueued_at", 0)))) > MESSAGE_TTL_SECONDS
         ]
         for did in expired_inflight:
             _CODEAI_IN_FLIGHT.pop(did, None)
@@ -146,24 +229,30 @@ def enqueue_codeai_message(
             "source": source,
             "target": target,
             "enqueued_at": now,
+            "original_timestamp": original_timestamp or now,
             "ttl_seconds": ttl_seconds,
         }
         _CODEAI_QUEUE.append(item)
         _CODEAI_RECENT_HASHES[sha] = now
-    logger.info("Enqueued CodeAI message %s (length %d bytes, TTL %ds)", delivery_id[:8], len(content), int(ttl_seconds))
+    logger.info("Enqueued CodeAI message %s (length %d bytes, TTL %ds, target=%s)", delivery_id[:8], len(content), int(ttl_seconds), target)
     return delivery_id
 
 
-def pop_codeai_message() -> Optional[dict[str, Any]]:
-    """Pop the next pending message and mark in-flight.
+def pop_codeai_message(client_principal: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Pop the next pending message matching client_principal and mark in-flight.
 
     Strictly filters out and purges any message older than 300s TTL.
+    Prevents unauthorized browser clients (e.g. Doubao) from stealing tasks meant for ChatGPT/Settlement Host.
     """
     now = time.time()
     with _CODEAI_LOCK:
+        remaining_items = collections.deque()
+        matched_item = None
+
         while _CODEAI_QUEUE:
             item = _CODEAI_QUEUE.popleft()
-            age = now - item.get("enqueued_at", 0)
+            msg_ts = item.get("original_timestamp") or item.get("enqueued_at", 0)
+            age = now - msg_ts
             ttl = item.get("ttl_seconds", MESSAGE_TTL_SECONDS)
             if age > ttl:
                 logger.warning(
@@ -174,9 +263,22 @@ def pop_codeai_message() -> Optional[dict[str, Any]]:
                 )
                 continue
 
-            item["in_flight_at"] = now
-            _CODEAI_IN_FLIGHT[item["delivery_id"]] = item
-            return item
+            if matched_item is None:
+                item_target = item.get("target", "chat")
+                if is_client_authorized_for_target(client_principal, item_target):
+                    matched_item = item
+                    continue
+
+            remaining_items.append(item)
+
+        _CODEAI_QUEUE.extend(remaining_items)
+
+        if matched_item:
+            matched_item["in_flight_at"] = now
+            matched_item["pulled_by_principal"] = client_principal
+            _CODEAI_IN_FLIGHT[matched_item["delivery_id"]] = matched_item
+            return matched_item
+
     return None
 
 
@@ -342,7 +444,8 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             if getattr(self.server, "kill_switch_active", False):
                 self._send_json_response(503, {"ok": False, "status": "PAUSED", "error": "Bridge execution paused"})
                 return
-            pending_item = pop_codeai_message()
+            principal = self.headers.get("X-Folded-Host-Principal", "").strip()
+            pending_item = pop_codeai_message(client_principal=principal)
             if pending_item:
                 self._send_json_response(200, pending_item)
             else:
@@ -485,6 +588,9 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             if not self._verify_auth():
                 self._send_json_response(401, {"error": "bearer token denied"})
                 return
+            principal = self.headers.get("X-Folded-Host-Principal", "").strip()
+            if isinstance(body, dict) and "principal" not in body and principal:
+                body["principal"] = principal
             on_post = getattr(self.server, "on_telegram_post", None)
             if on_post and callable(on_post):
                 try:
@@ -518,6 +624,9 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             if not self._verify_auth():
                 self._send_json_response(401, {"error": "bearer token denied"})
                 return
+            principal = self.headers.get("X-Folded-Host-Principal", "").strip()
+            if isinstance(body, dict) and "principal" not in body and principal:
+                body["principal"] = principal
             on_post = getattr(self.server, "on_telegram_post", None)
             if on_post and callable(on_post):
                 try:
