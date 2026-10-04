@@ -523,6 +523,10 @@ def get_pil_icon(name: str, size: Tuple[int, int] = (24, 24)) -> Image.Image:
     }
 
     fn = draw_map.get(name)
+    if fn and (name.startswith("icon_") or name == "logo_rocket"):
+        original_fn = fn
+        # These drawings use a 24px coordinate system; scale their geometry too.
+        fn = lambda d, w, h, s: original_fn(d, w, h, s * min(size) / 24)
     if not fn:
         img = Image.new("RGBA", size, (0, 0, 0, 0))
     else:

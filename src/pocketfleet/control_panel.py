@@ -4215,7 +4215,7 @@ class PocketFleetControlApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("PocketFleet Control Panel")
-        self.root.geometry("1060x880")
+        self.root.geometry("1180x860")
         self.root.minsize(980, 780)
 
         self.root.configure(bg=COLOR_MODERN_BG)
@@ -4226,8 +4226,8 @@ class PocketFleetControlApp:
 
         # Fonts
         ui_fam = get_ui_font_family()
-        self.font_title = tkfont.Font(family=ui_fam, size=15, weight="bold")
-        self.font_section = tkfont.Font(family=ui_fam, size=11, weight="bold")
+        self.font_title = tkfont.Font(family=ui_fam, size=20, weight="bold")
+        self.font_section = tkfont.Font(family=ui_fam, size=15, weight="bold")
         self.font_sub = tkfont.Font(family=ui_fam, size=9)
         self.font_bold = tkfont.Font(family=ui_fam, size=10, weight="bold")
         self.font_regular = tkfont.Font(family=ui_fam, size=9)
@@ -4481,7 +4481,7 @@ class PocketFleetControlApp:
 
         tk.Label(
             text_box,
-            text="AI STARFLEET COMMUNICATION HUB  |  XAMPP-STYLE TRAY CONTROLLER  |  v0.2.0",
+            text="连接你的 AI 舰队，在 Telegram 随时派活",
             fg="#8cb4d2",
             bg="#0e3c5d",
             font=tkfont.Font(family=get_ui_font_family(), size=8),
@@ -4506,7 +4506,7 @@ class PocketFleetControlApp:
 
         tk.Label(
             b_text_box,
-            text="桌面端负责 AI 接入与连接管理；会议参与者与主持由 Telegram /meet 面板决定。",
+            text="连接 AI 工具，然后前往 Telegram 开会",
             fg="#ffffff",
             bg="#092d47",
             font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
@@ -4515,7 +4515,7 @@ class PocketFleetControlApp:
 
         tk.Label(
             b_text_box,
-            text="在这里连接和管理你的 AI 工具，然后前往 Telegram 使用 /meet 组建今天的会议，指定参与者并分配任务。",
+            text="使用 /meet 选择参与者、指定主持人并分配任务。",
             fg="#a5c9e8",
             bg="#092d47",
             font=tkfont.Font(family=get_ui_font_family(), size=8),
@@ -4542,7 +4542,7 @@ class PocketFleetControlApp:
 
         sec1_hdr = tk.Frame(sec1, bg="#ffffff")
         sec1_hdr.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(sec1_hdr, text="🔗 绑定AI", fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(sec1_hdr, text=" 连接 AI", image=get_icon("link", (24, 24)), compound=tk.LEFT, fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
         tk.Label(sec1_hdr, text="∧", fg="#94a3b8", bg="#ffffff", font=self.font_sub).pack(side=tk.RIGHT)
 
         self.btn_nav_code = tk.Button(
@@ -4587,12 +4587,14 @@ class PocketFleetControlApp:
 
         sec2_hdr = tk.Frame(sec2, bg="#ffffff")
         sec2_hdr.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(sec2_hdr, text="👥 协作方式", fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(sec2_hdr, text=" 协作起步", image=get_icon("users", (24, 24)), compound=tk.LEFT, fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
         tk.Label(sec2_hdr, text="∧", fg="#94a3b8", bg="#ffffff", font=self.font_sub).pack(side=tk.RIGHT)
 
         self.btn_collab_2ai = tk.Button(
             sec2,
-            text="  👥  Human Root + 2 AI",
+            text="  舰队司令 + 2 AI",
+            image=get_icon("human_circle", (24, 24)),
+            compound=tk.LEFT,
             bg="#dcfce7",
             fg="#047857",
             activebackground="#dcfce7",
@@ -4631,7 +4633,7 @@ class PocketFleetControlApp:
 
         self.btn_collab_3ai = tk.Button(
             self.frame_collab_more,
-            text="Human Root + 3 AI",
+            text="舰队司令 + 3 AI",
             bg="#ffffff",
             fg="#64748b",
             font=self.font_sub,
@@ -4647,7 +4649,7 @@ class PocketFleetControlApp:
 
         self.btn_collab_nai = tk.Button(
             self.frame_collab_more,
-            text="Human Root + N AI",
+            text="舰队司令 + N AI",
             bg="#ffffff",
             fg="#64748b",
             font=self.font_sub,
@@ -4667,7 +4669,7 @@ class PocketFleetControlApp:
 
         sec3_hdr = tk.Frame(sec3, bg="#ffffff")
         sec3_hdr.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(sec3_hdr, text="✈️ Telegram设置", fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(sec3_hdr, text=" Telegram 设置", image=get_icon("tg_circle", (24, 24)), compound=tk.LEFT, fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
         tk.Label(sec3_hdr, text="∧", fg="#94a3b8", bg="#ffffff", font=self.font_sub).pack(side=tk.RIGHT)
 
         btn_set_tg = tk.Button(
@@ -4732,30 +4734,30 @@ class PocketFleetControlApp:
             self.btn_collab_2ai.config(bg="#dcfce7", fg="#047857", font=self.font_bold)
             self.btn_collab_3ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
             self.btn_collab_nai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
-            show_floating_toast(self.root, "协作模式", "已切换至 Human Root + 2 AI 编队模式。")
+            show_floating_toast(self.root, "先跑起来", "先连接两个 AI，完成第一场协作；随后可以继续添加。")
         elif mode == "3ai":
             self.btn_collab_2ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
             self.btn_collab_3ai.config(bg="#dcfce7", fg="#047857", font=self.font_bold)
             self.btn_collab_nai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
-            show_floating_toast(self.root, "协作模式", "已切换至 Human Root + 3 AI (主持/审计/施工) 模式。")
+            show_floating_toast(self.root, "协作引导", "连接三个 AI，会议参与者与分工在 Telegram 中选择。")
         else:
             self.btn_collab_2ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
             self.btn_collab_3ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
             self.btn_collab_nai.config(bg="#dcfce7", fg="#047857", font=self.font_bold)
-            show_floating_toast(self.root, "协作模式", "已切换至 Human Root + N AI 自由扩展模式。")
+            show_floating_toast(self.root, "自由扩展", "继续连接你的 AI 工具，每场会议自由选择参与者。")
 
     def _switch_nav_tab(self, category: str) -> None:
         self.current_ai_category = category
         if category == "code":
             self.btn_nav_code.config(bg="#e0f2fe", fg="#0284c7", font=self.font_bold)
             self.btn_nav_chat.config(bg="#ffffff", fg="#475569", font=self.font_regular)
-            self.lbl_shelf_title.config(text="</> 添加代码AI")
+            self.lbl_shelf_title.config(text="添加代码 AI", image=get_icon("code_circle", (30, 30)))
             self.lbl_shelf_desc.config(text="选择并连接你常用的代码 AI 工具。连接后，它们将可以在 Telegram 会议中被你召唤和使用。")
             self.lbl_connected_title.config(text="已连接的代码AI")
         else:
             self.btn_nav_code.config(bg="#ffffff", fg="#475569", font=self.font_regular)
             self.btn_nav_chat.config(bg="#e0f2fe", fg="#0284c7", font=self.font_bold)
-            self.lbl_shelf_title.config(text="💬 添加对话AI")
+            self.lbl_shelf_title.config(text="添加对话 AI", image=get_icon("chat_circle", (30, 30)))
             self.lbl_shelf_desc.config(text="选择并连接你常用的对话与分析 AI 工具。连接后，它们将在 Telegram 会议中协助多轮推理。")
             self.lbl_connected_title.config(text="已连接的对话AI")
 
@@ -4764,7 +4766,7 @@ class PocketFleetControlApp:
 
     def _build_content_canvas(self, parent) -> None:
         """Right Main Content Viewport: Header Dual Cards, Marketplace Shelf, Connected List."""
-        canvas_box = tk.Frame(parent, bg=COLOR_MODERN_BG, padx=20, pady=16)
+        canvas_box = tk.Frame(parent, bg=COLOR_MODERN_BG, padx=24, pady=20)
         canvas_box.pack(fill=tk.BOTH, expand=True)
 
         # 1. Top Dual Cards
@@ -4785,17 +4787,17 @@ class PocketFleetControlApp:
         )
         card_root.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
-        tk.Label(card_root, image=get_icon("human_circle", (38, 38)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(card_root, image=get_icon("human_circle", (52, 52)), bg="#e2f6eb", padx=8, pady=8).pack(side=tk.LEFT, padx=(0, 16))
 
         root_text_box = tk.Frame(card_root, bg="#ffffff")
         root_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         head_line = tk.Frame(root_text_box, bg="#ffffff")
         head_line.pack(anchor="w")
-        tk.Label(head_line, text="Human Root / 人类指挥官", fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(head_line, text="舰队司令", fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_section).pack(side=tk.LEFT)
         tag = tk.Label(
             head_line,
-            text=" 核心控制中心 ",
+            text=" 由你掌舵 ",
             fg="#ffffff",
             bg=COLOR_ACCENT_GREEN,
             font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
@@ -4804,7 +4806,7 @@ class PocketFleetControlApp:
 
         tk.Label(
             root_text_box,
-            text="你是编队的指挥官，负责在 Telegram 中组建会议、指定参与者并分配任务。",
+            text="在 Telegram 下达任务、查看进展、接收成果。",
             fg=COLOR_TEXT_MUTED,
             bg="#ffffff",
             font=self.font_sub,
@@ -4867,7 +4869,10 @@ class PocketFleetControlApp:
 
         self.lbl_shelf_title = tk.Label(
             shelf_hdr,
-            text="</> 添加代码AI",
+            text="添加代码 AI",
+            image=get_icon("code_circle", (30, 30)),
+            compound=tk.LEFT,
+            padx=8,
             fg=COLOR_TEXT_TITLE,
             bg="#ffffff",
             font=self.font_section,
@@ -4981,8 +4986,8 @@ class PocketFleetControlApp:
             ]
 
         for idx, (name, icon_name, desc, engine_key, is_featured) in enumerate(presets):
-            border_col = "#22c55e" if is_featured else COLOR_CARD_BORDER
-            thick = 2 if is_featured else 1
+            border_col = COLOR_CARD_BORDER
+            thick = 1
             card = tk.Frame(
                 self.shelf_frame,
                 bg="#ffffff",
@@ -4990,12 +4995,12 @@ class PocketFleetControlApp:
                 highlightthickness=thick,
                 bd=0,
                 padx=10,
-                pady=12,
+                pady=18,
             )
             card.grid(row=0, column=idx, sticky="nsew", padx=4)
 
             # Icon
-            tk.Label(card, image=get_icon(icon_name, (36, 36)), bg="#ffffff").pack(pady=(2, 6))
+            tk.Label(card, image=get_icon(icon_name, (58, 58)), bg="#f0f8f5", padx=8, pady=8).pack(pady=(0, 12))
 
             # Name
             tk.Label(card, text=name, fg=COLOR_TEXT_MAIN, bg="#ffffff", font=self.font_bold).pack()
@@ -5007,8 +5012,8 @@ class PocketFleetControlApp:
             btn_conn = tk.Button(
                 card,
                 text="＋ 连接此 AI",
-                bg="#f0fdf4" if is_featured else "#f8fafc",
-                fg="#059669" if is_featured else "#334155",
+                bg="#e2f6eb",
+                fg="#047857",
                 activebackground="#dcfce7",
                 highlightbackground="#86efac" if is_featured else "#e2e8f0",
                 highlightthickness=1,
@@ -5016,7 +5021,7 @@ class PocketFleetControlApp:
                 relief=tk.FLAT,
                 font=self.font_sub,
                 padx=8,
-                pady=4,
+                pady=7,
                 cursor="hand2",
                 command=lambda e_key=engine_key, n=name: self._action_connect_preset(e_key, n),
             )
@@ -5066,7 +5071,7 @@ class PocketFleetControlApp:
                 highlightthickness=1,
                 bd=0,
                 padx=14,
-                pady=10,
+                pady=16,
             )
             card.pack(fill=tk.X, pady=4)
 
@@ -5084,7 +5089,7 @@ class PocketFleetControlApp:
             else:
                 ic = "bot_green" if is_code else "bot_purple"
 
-            tk.Label(card, image=get_icon(ic, (36, 36)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 12))
+            tk.Label(card, image=get_icon(ic, (48, 48)), bg="#e2f6eb", padx=8, pady=8).pack(side=tk.LEFT, padx=(0, 16))
 
             # Main info column
             info_col = tk.Frame(card, bg="#ffffff")
@@ -5109,11 +5114,11 @@ class PocketFleetControlApp:
 
             # Subtitle / Role description
             role_disp = "代码 AI · 主力程序员" if is_code else "对话 AI · 策略分析师"
-            tk.Label(info_col, text=f"{role_disp}  擅长代码编写、架构设计与技术实现。", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w", pady=(2, 0))
+            tk.Label(info_col, text=role_disp, fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w", pady=(5, 8))
 
             # Right Meta Attributes (Engine, TG username, Status dot, More menu)
-            meta_box = tk.Frame(card, bg="#ffffff")
-            meta_box.pack(side=tk.RIGHT)
+            meta_box = tk.Frame(info_col, bg="#ffffff")
+            meta_box.pack(fill=tk.X)
 
             # 1. AI Engine column
             eng_box = tk.Frame(meta_box, bg="#ffffff", padx=10)
@@ -5155,7 +5160,7 @@ class PocketFleetControlApp:
             st_line.pack(anchor="w")
             dot_icon = "dot_green" if is_ready else "dot_gray"
             tk.Label(st_line, image=get_icon(dot_icon, (8, 8)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 4))
-            tk.Label(st_line, text="在线" if is_ready else "离线", fg="#059669" if is_ready else COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(side=tk.LEFT)
+            tk.Label(st_line, text="已绑定" if is_ready else "待配置", fg="#059669" if is_ready else COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(side=tk.LEFT)
 
             # 4. Context Menu Button (⋮)
             btn_more = tk.Button(
