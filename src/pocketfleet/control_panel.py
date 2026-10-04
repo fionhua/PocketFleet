@@ -4465,12 +4465,12 @@ class PocketFleetControlApp:
         header = tk.Frame(header_outer, bg="#0e3c5d", padx=20, pady=10)
         header.pack(fill=tk.X)
 
-        # Left Branding
+        # Left Branding & Commander Identity (图1 + 舰队司令)
         brand_frame = tk.Frame(header, bg="#0e3c5d")
         brand_frame.pack(side=tk.LEFT)
 
-        logo_lbl = tk.Label(brand_frame, image=get_icon("logo_rocket", (38, 38)), bg="#0e3c5d")
-        logo_lbl.pack(side=tk.LEFT, padx=(0, 10))
+        logo_lbl = tk.Label(brand_frame, image=get_icon("logo_rocket", (40, 40)), bg="#0e3c5d")
+        logo_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
         text_box = tk.Frame(brand_frame, bg="#0e3c5d")
         text_box.pack(side=tk.LEFT)
@@ -4479,48 +4479,79 @@ class PocketFleetControlApp:
         title_row.pack(anchor="w")
         tk.Label(title_row, text="PocketFleet Control Panel", fg="#ffffff", bg="#0e3c5d", font=self.font_title).pack(side=tk.LEFT)
 
+        tag = tk.Label(
+            title_row,
+            text=" 舰队司令 · 由你掌舵 ",
+            fg="#ffffff",
+            bg=COLOR_ACCENT_GREEN,
+            font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
+        )
+        tag.pack(side=tk.LEFT, padx=(10, 0))
+
         tk.Label(
             text_box,
-            text="连接你的 AI 舰队，在 Telegram 随时派活",
-            fg="#8cb4d2",
+            text="连接你的 AI 舰队，在 Telegram 下达任务、查看进展、接收成果。",
+            fg="#93c5fd",
             bg="#0e3c5d",
             font=tkfont.Font(family=get_ui_font_family(), size=8),
-        ).pack(anchor="w", pady=(1, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
-        # Right Embedded Tip Banner
-        banner_box = tk.Frame(
+        # Right Telegram Action & Download Card (图2右侧 / 图3)
+        tg_box = tk.Frame(
             header,
             bg="#092d47",
             highlightbackground="#18527a",
             highlightthickness=1,
             bd=0,
             padx=14,
-            pady=6,
+            pady=8,
+            cursor="hand2",
         )
-        banner_box.pack(side=tk.RIGHT)
+        tg_box.pack(side=tk.RIGHT)
+        tg_box.bind("<Button-1>", lambda e: self._action_open_tg())
 
-        tk.Label(banner_box, image=get_icon("lightbulb", (20, 20)), bg="#092d47").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(tg_box, image=get_icon("tg_circle", (38, 38)), bg="#092d47").pack(side=tk.LEFT, padx=(0, 10))
 
-        b_text_box = tk.Frame(banner_box, bg="#092d47")
-        b_text_box.pack(side=tk.LEFT)
+        r_text_col = tk.Frame(tg_box, bg="#092d47")
+        r_text_col.pack(side=tk.LEFT)
 
-        tk.Label(
-            b_text_box,
-            text="连接 AI 工具，然后前往 Telegram 开会",
-            fg="#ffffff",
+        row1 = tk.Frame(r_text_col, bg="#092d47")
+        row1.pack(anchor="w")
+
+        lbl_tg_title = tk.Label(
+            row1,
+            text="前往 Telegram 使用 /meet ❯",
+            fg="#38bdf8",
             bg="#092d47",
-            font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
-            anchor="w",
-        ).pack(anchor="w")
+            font=self.font_bold,
+            cursor="hand2",
+        )
+        lbl_tg_title.pack(side=tk.LEFT)
+        lbl_tg_title.bind("<Button-1>", lambda e: self._action_open_tg())
+
+        row2 = tk.Frame(r_text_col, bg="#092d47")
+        row2.pack(anchor="w", pady=(2, 0))
 
         tk.Label(
-            b_text_box,
-            text="使用 /meet 选择参与者、指定主持人并分配任务。",
+            row2,
+            text="邀请 AI 参与会议并开始协作",
             fg="#a5c9e8",
             bg="#092d47",
-            font=tkfont.Font(family=get_ui_font_family(), size=8),
-            anchor="w",
-        ).pack(anchor="w")
+            font=self.font_sub,
+        ).pack(side=tk.LEFT)
+
+        tk.Label(row2, text=" · ", fg="#64748b", bg="#092d47", font=self.font_sub).pack(side=tk.LEFT)
+
+        lbl_download = tk.Label(
+            row2,
+            text="下载 Telegram",
+            fg="#60a5fa",
+            bg="#092d47",
+            font=tkfont.Font(family=get_ui_font_family(), size=8, underline=True),
+            cursor="hand2",
+        )
+        lbl_download.pack(side=tk.LEFT)
+        lbl_download.bind("<Button-1>", lambda e: webbrowser.open("https://desktop.telegram.org/"))
 
         # Hidden pills references to preserve test suite compatibility
         self.lbl_pill_tg = tk.Label(header_outer, text="Telegram 已连接")
@@ -4765,94 +4796,11 @@ class PocketFleetControlApp:
         self._render_connected_cards()
 
     def _build_content_canvas(self, parent) -> None:
-        """Right Main Content Viewport: Header Dual Cards, Marketplace Shelf, Connected List."""
+        """Right Main Content Viewport: Marketplace Shelf, Connected List."""
         canvas_box = tk.Frame(parent, bg=COLOR_MODERN_BG, padx=24, pady=20)
         canvas_box.pack(fill=tk.BOTH, expand=True)
 
-        # 1. Top Dual Cards
-        top_cards = tk.Frame(canvas_box, bg=COLOR_MODERN_BG)
-        top_cards.pack(fill=tk.X, pady=(0, 14))
-        top_cards.columnconfigure(0, weight=3)
-        top_cards.columnconfigure(1, weight=2)
-
-        # Left: Human Root Card
-        card_root = tk.Frame(
-            top_cards,
-            bg="#ffffff",
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=14,
-            pady=10,
-        )
-        card_root.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-
-        tk.Label(card_root, image=get_icon("human_circle", (52, 52)), bg="#e2f6eb", padx=8, pady=8).pack(side=tk.LEFT, padx=(0, 16))
-
-        root_text_box = tk.Frame(card_root, bg="#ffffff")
-        root_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        head_line = tk.Frame(root_text_box, bg="#ffffff")
-        head_line.pack(anchor="w")
-        tk.Label(head_line, text="舰队司令", fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_section).pack(side=tk.LEFT)
-        tag = tk.Label(
-            head_line,
-            text=" 由你掌舵 ",
-            fg="#ffffff",
-            bg=COLOR_ACCENT_GREEN,
-            font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
-        )
-        tag.pack(side=tk.LEFT, padx=8)
-
-        tk.Label(
-            root_text_box,
-            text="在 Telegram 下达任务、查看进展、接收成果。",
-            fg=COLOR_TEXT_MUTED,
-            bg="#ffffff",
-            font=self.font_sub,
-            anchor="w",
-        ).pack(anchor="w", pady=(2, 0))
-
-        # Right: Quick Telegram Meet Card
-        card_tg_quick = tk.Frame(
-            top_cards,
-            bg="#ffffff",
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=14,
-            pady=10,
-            cursor="hand2",
-        )
-        card_tg_quick.grid(row=0, column=1, sticky="nsew")
-        card_tg_quick.bind("<Button-1>", lambda e: self._action_open_tg())
-
-        tk.Label(card_tg_quick, image=get_icon("tg_circle", (36, 36)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 10))
-
-        q_box = tk.Frame(card_tg_quick, bg="#ffffff")
-        q_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        q_box.bind("<Button-1>", lambda e: self._action_open_tg())
-
-        lbl_tg_link = tk.Label(
-            q_box,
-            text="前往 Telegram 使用 /meet  ❯",
-            fg="#0369a1",
-            bg="#ffffff",
-            font=self.font_bold,
-            cursor="hand2",
-        )
-        lbl_tg_link.pack(anchor="w")
-        lbl_tg_link.bind("<Button-1>", lambda e: self._action_open_tg())
-
-        tk.Label(
-            q_box,
-            text="邀请 AI 参与会议并开始协作",
-            fg=COLOR_TEXT_MUTED,
-            bg="#ffffff",
-            font=self.font_sub,
-        ).pack(anchor="w", pady=(2, 0))
-
-        # 2. Marketplace Shelf Section
+        # 1. Marketplace Shelf Section
         shelf_card = tk.Frame(
             canvas_box,
             bg="#ffffff",
