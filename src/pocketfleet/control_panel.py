@@ -121,6 +121,22 @@ COLOR_DANGER_HOVER = "#bf3934"
 COLOR_WARNING = "#d9901f"
 COLOR_WARNING_HOVER = "#b96e12"
 
+# Modern Flat SaaS Design Tokens (Aligned with Settlement Host UI)
+COLOR_MODERN_BG = "#f6f8fa"
+COLOR_CARD_BG = "#ffffff"
+COLOR_CARD_BORDER = "#e2e8f0"
+COLOR_CARD_BORDER_HOVER = "#cbd5e1"
+COLOR_TEXT_MAIN = "#0f172a"
+COLOR_TEXT_MUTED = "#64748b"
+COLOR_ACCENT_GREEN = "#10b981"
+COLOR_ACCENT_GREEN_BG = "#ecfdf5"
+COLOR_ACCENT_GREEN_HOVER = "#059669"
+COLOR_ACCENT_BLUE = "#0ea5e9"
+COLOR_ACCENT_BLUE_BG = "#f0f9ff"
+COLOR_ACCENT_BLUE_BORDER = "#bae6fd"
+COLOR_ACCENT_PURPLE = "#8b5cf6"
+COLOR_ACCENT_ORANGE = "#f97316"
+
 
 def apply_windows_titlebar_theme(window: tk.Misc) -> None:
     """Give native Windows title bars a clear, consistent drag target."""
@@ -2699,6 +2715,411 @@ class ThreeSeatsConfigDialog(tk.Toplevel):
 
 
 # ==============================================================================
+# Modern Dialogs for Aligned UI (Group Config & AI Connector Management)
+# ==============================================================================
+class TelegramGroupConfigDialog(tk.Toplevel):
+    """Modern modal dialog to configure collaborative Telegram WarRoom group."""
+    def __init__(self, parent, fleet_mgr, on_save_callback=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.mgr = fleet_mgr
+        self.on_save_callback = on_save_callback
+
+        self.title("配置 Telegram 协同战队群 (Telegram Group Settings)")
+        self.geometry("520x360")
+        self.resizable(False, False)
+        self.configure(bg=COLOR_MODERN_BG)
+        apply_windows_titlebar_theme(self)
+        self.transient(parent)
+        self.grab_set()
+
+        try:
+            self.update_idletasks()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            self.geometry(f"+{max(0, px + (pw - 520) // 2)}+{max(0, py + (ph - 360) // 2)}")
+        except Exception:
+            pass
+
+        ui_fam = get_ui_font_family()
+        font_h = tkfont.Font(family=ui_fam, size=12, weight="bold")
+        font_lbl = tkfont.Font(family=ui_fam, size=9, weight="bold")
+        font_reg = tkfont.Font(family=ui_fam, size=9)
+        font_sub = tkfont.Font(family=ui_fam, size=8)
+
+        card = tk.Frame(self, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=20, pady=18)
+        card.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+
+        tk.Label(
+            card,
+            text="📢 配置 Telegram 协同战队群 (WarRoom)",
+            fg=COLOR_TEXT_MAIN,
+            bg=COLOR_CARD_BG,
+            font=font_h,
+            anchor="w",
+        ).pack(fill=tk.X)
+
+        tk.Label(
+            card,
+            text="所有席位将在此群组内接收指令并开展协同会议 (/meet)。",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG,
+            font=font_sub,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(2, 14))
+
+        seats_cfg = self.mgr.load_seats_config()
+        cur_name = seats_cfg.telegram_group_name or "Fleet WarRoom"
+        cur_chat_id = seats_cfg.telegram_chat_id or (os.environ.get("TELEGRAM_GROUP_ID") or "")
+
+        # Field 1: Group Name
+        tk.Label(card, text="群组显示名称 (Group Name):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl, anchor="w").pack(fill=tk.X)
+        self.ent_name = tk.Entry(card, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, font=font_reg, relief=tk.FLAT)
+        self.ent_name.insert(0, cur_name)
+        self.ent_name.pack(fill=tk.X, pady=(3, 10), ipady=3)
+
+        # Field 2: Chat ID
+        tk.Label(card, text="群组 Chat ID (通常为负数，如 -1004309197838):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl, anchor="w").pack(fill=tk.X)
+        self.ent_chat_id = tk.Entry(card, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, font=font_reg, relief=tk.FLAT)
+        self.ent_chat_id.insert(0, cur_chat_id)
+        self.ent_chat_id.pack(fill=tk.X, pady=(3, 16), ipady=3)
+
+        # Actions
+        btn_bar = tk.Frame(card, bg=COLOR_CARD_BG)
+        btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+        btn_cancel = tk.Button(
+            btn_bar,
+            text="取消",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_MAIN,
+            font=font_reg,
+            relief=tk.FLAT,
+            padx=14,
+            pady=4,
+            cursor="hand2",
+            command=self.destroy,
+        )
+        btn_cancel.pack(side=tk.RIGHT, padx=(6, 0))
+
+        btn_save = tk.Button(
+            btn_bar,
+            text="保存并应用",
+            bg=COLOR_ACCENT_GREEN,
+            fg="#ffffff",
+            activebackground=COLOR_ACCENT_GREEN_HOVER,
+            activeforeground="#ffffff",
+            font=font_lbl,
+            relief=tk.FLAT,
+            padx=18,
+            pady=4,
+            cursor="hand2",
+            command=self._save,
+        )
+        btn_save.pack(side=tk.RIGHT)
+
+    def _save(self):
+        new_name = self.ent_name.get().strip() or "Fleet WarRoom"
+        new_chat_id = self.ent_chat_id.get().strip()
+        try:
+            seats_cfg = self.mgr.load_seats_config()
+            seats_cfg.telegram_group_name = new_name
+            seats_cfg.telegram_chat_id = new_chat_id
+            self.mgr.save_seats_config(seats_cfg)
+
+            if new_chat_id:
+                try:
+                    save_token_to_env(new_chat_id, env_path=REPO_ROOT / ".env", var_name="TELEGRAM_GROUP_ID")
+                    os.environ["TELEGRAM_GROUP_ID"] = new_chat_id
+                except Exception as env_e:
+                    logger.warning("Failed saving TELEGRAM_GROUP_ID: %s", env_e)
+
+            show_floating_toast(self.parent, "群组设置已更新", f"协同战队群已配置为: {new_name} ({new_chat_id})")
+            if self.on_save_callback:
+                self.on_save_callback()
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法保存群组配置:\n{e}", parent=self)
+
+
+class AddOrEditAiDialog(tk.Toplevel):
+    """Modern modal dialog to add or edit an AI connector (Code or Chat)."""
+    def __init__(
+        self,
+        parent,
+        fleet_mgr,
+        role_key: Optional[str] = None,
+        default_category: str = "code",
+        on_save_callback=None,
+    ):
+        super().__init__(parent)
+        self.parent = parent
+        self.mgr = fleet_mgr
+        self.role_key = role_key
+        self.category = default_category
+        self.on_save_callback = on_save_callback
+
+        is_edit = bool(role_key)
+        self.title(f"{'管理' if is_edit else '接入'} AI 席位 ({'Edit' if is_edit else 'Add'} AI Connector) — PocketFleet")
+        self.geometry("580x570")
+        self.resizable(False, False)
+        self.configure(bg=COLOR_MODERN_BG)
+        apply_windows_titlebar_theme(self)
+        self.transient(parent)
+        self.grab_set()
+
+        try:
+            self.update_idletasks()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            self.geometry(f"+{max(0, px + (pw - 580) // 2)}+{max(0, py + (ph - 570) // 2)}")
+        except Exception:
+            pass
+
+        ui_fam = get_ui_font_family()
+        font_h = tkfont.Font(family=ui_fam, size=12, weight="bold")
+        font_lbl = tkfont.Font(family=ui_fam, size=9, weight="bold")
+        font_reg = tkfont.Font(family=ui_fam, size=9)
+        font_sub = tkfont.Font(family=ui_fam, size=8)
+        font_mono = tkfont.Font(family="Consolas", size=9)
+
+        card = tk.Frame(self, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=20, pady=16)
+        card.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+
+        title_text = f"⚙️ 管理 AI 席位" if is_edit else f"➕ 接入新 AI 席位 ({'代码 AI' if self.category == 'code' else '对话 AI'})"
+        tk.Label(card, text=title_text, fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_h, anchor="w").pack(fill=tk.X)
+
+        tk.Label(
+            card,
+            text="配置该席位的专属 Telegram Bot 接入信息与本地/远程执行引擎。",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG,
+            font=font_sub,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(2, 12))
+
+        # Load existing seat if edit mode
+        seats_cfg = self.mgr.load_seats_config()
+        seat = seats_cfg.seats.get(role_key) if (is_edit and role_key) else None
+
+        init_name = seat.name if seat else ("TechLead" if self.category == "code" else "Advisor")
+        init_user = seat.bot_username if seat else ""
+        init_token = (seat.get_token() if seat else "") or ""
+        init_engine = seat.engine if seat else ("antigravity" if self.category == "code" else "openai")
+
+        # 1. AI Name
+        tk.Label(card, text="代号 / 昵称 (Name):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl, anchor="w").pack(fill=tk.X)
+        self.ent_name = tk.Entry(card, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, font=font_reg, relief=tk.FLAT)
+        self.ent_name.insert(0, init_name)
+        self.ent_name.pack(fill=tk.X, pady=(2, 8), ipady=3)
+
+        # 2. Category selection (if new)
+        cat_frame = tk.Frame(card, bg=COLOR_CARD_BG)
+        cat_frame.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(cat_frame, text="AI 类别:", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl).pack(side=tk.LEFT, padx=(0, 10))
+
+        self.cat_var = tk.StringVar(value=self.category)
+        rb_code = tk.Radiobutton(cat_frame, text="</> 代码 AI (Code AI)", variable=self.cat_var, value="code", bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN, font=font_reg, command=self._on_category_changed)
+        rb_chat = tk.Radiobutton(cat_frame, text="💬 对话 AI (Chat AI)", variable=self.cat_var, value="chat", bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN, font=font_reg, command=self._on_category_changed)
+        rb_code.pack(side=tk.LEFT, padx=4)
+        rb_chat.pack(side=tk.LEFT, padx=4)
+
+        # 3. Execution Engine
+        tk.Label(card, text="执行引擎 (Engine):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl, anchor="w").pack(fill=tk.X)
+        self.cbo_engine = ttk.Combobox(card, state="readonly", font=font_reg)
+        self._populate_engines(init_engine)
+        self.cbo_engine.pack(fill=tk.X, pady=(2, 8), ipady=2)
+
+        # 4. Telegram Bot Username
+        tk.Label(card, text="Telegram 用户名 (@Username):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl, anchor="w").pack(fill=tk.X)
+        self.ent_user = tk.Entry(card, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, font=font_reg, relief=tk.FLAT)
+        self.ent_user.insert(0, init_user)
+        self.ent_user.pack(fill=tk.X, pady=(2, 8), ipady=3)
+
+        # 5. Telegram Bot Token
+        tok_bar = tk.Frame(card, bg=COLOR_CARD_BG)
+        tok_bar.pack(fill=tk.X)
+        tk.Label(tok_bar, text="Bot Token (HTTP API):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl).pack(side=tk.LEFT)
+
+        btn_eye = tk.Button(tok_bar, text="👁️ 显示", bg=COLOR_CARD_BG, fg=COLOR_ACCENT_BLUE, font=font_sub, relief=tk.FLAT, padx=2, cursor="hand2")
+        btn_eye.pack(side=tk.RIGHT)
+
+        self.ent_token = tk.Entry(card, bg=COLOR_INPUT_BG, fg=COLOR_TEXT_MAIN, font=font_mono, relief=tk.FLAT, show="•")
+        self.ent_token.insert(0, init_token)
+        self.ent_token.pack(fill=tk.X, pady=(2, 6), ipady=3)
+
+        def _toggle_token():
+            if self.ent_token.cget("show") == "•":
+                self.ent_token.config(show="")
+                btn_eye.config(text="🙈 隐藏")
+            else:
+                self.ent_token.config(show="•")
+                btn_eye.config(text="👁️ 显示")
+        btn_eye.config(command=_toggle_token)
+
+        # Token Verification Button & Status Label
+        test_bar = tk.Frame(card, bg=COLOR_CARD_BG)
+        test_bar.pack(fill=tk.X, pady=(2, 14))
+
+        self.btn_test = tk.Button(
+            test_bar,
+            text="🔗 测试连接 (Verify Token)",
+            bg=COLOR_ACCENT_BLUE_BG,
+            fg=COLOR_ACCENT_BLUE,
+            font=font_reg,
+            relief=tk.FLAT,
+            padx=10,
+            pady=2,
+            cursor="hand2",
+            command=self._test_connection,
+        )
+        self.btn_test.pack(side=tk.LEFT)
+
+        self.lbl_test_result = tk.Label(test_bar, text="", bg=COLOR_CARD_BG, font=font_sub)
+        self.lbl_test_result.pack(side=tk.LEFT, padx=10)
+
+        # Bottom Action Bar
+        btn_bar = tk.Frame(card, bg=COLOR_CARD_BG)
+        btn_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+        btn_cancel = tk.Button(
+            btn_bar,
+            text="取消",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_MAIN,
+            font=font_reg,
+            relief=tk.FLAT,
+            padx=14,
+            pady=4,
+            cursor="hand2",
+            command=self.destroy,
+        )
+        btn_cancel.pack(side=tk.RIGHT, padx=(6, 0))
+
+        btn_save = tk.Button(
+            btn_bar,
+            text="保存并生效",
+            bg=COLOR_ACCENT_GREEN,
+            fg="#ffffff",
+            activebackground=COLOR_ACCENT_GREEN_HOVER,
+            activeforeground="#ffffff",
+            font=font_lbl,
+            relief=tk.FLAT,
+            padx=18,
+            pady=4,
+            cursor="hand2",
+            command=self._save,
+        )
+        btn_save.pack(side=tk.RIGHT)
+
+    def _populate_engines(self, selected_engine: str = ""):
+        cur_cat = self.cat_var.get()
+        if cur_cat == "code":
+            engines = ["antigravity", "codex", "claude_code", "cursor", "opencode"]
+        else:
+            engines = ["openai", "gemini", "claude", "deepseek", "groq"]
+        self.cbo_engine["values"] = engines
+        if selected_engine in engines:
+            self.cbo_engine.set(selected_engine)
+        else:
+            self.cbo_engine.set(engines[0])
+
+    def _on_category_changed(self):
+        self._populate_engines()
+
+    def _test_connection(self):
+        token = self.ent_token.get().strip()
+        if not token:
+            self.lbl_test_result.config(text="🔴 请先填写 Token", fg=COLOR_DANGER)
+            return
+
+        self.lbl_test_result.config(text="⏳ 正在探测 Telegram API...", fg=COLOR_TEXT_MUTED)
+        self.btn_test.config(state=tk.DISABLED)
+
+        def _do_test():
+            valid, info = verify_bot_token(token)
+            def _update():
+                self.btn_test.config(state=tk.NORMAL)
+                if valid:
+                    u = info.get("username", "")
+                    self.lbl_test_result.config(text=f"🟢 验证成功: @{u}", fg=COLOR_ACCENT_GREEN)
+                    if u and not self.ent_user.get().strip():
+                        self.ent_user.delete(0, tk.END)
+                        self.ent_user.insert(0, f"@{u}")
+                else:
+                    err = info.get("error", "连接失败")
+                    self.lbl_test_result.config(text=f"🔴 {err}", fg=COLOR_DANGER)
+            self.after(0, _update)
+
+        threading.Thread(target=_do_test, daemon=True).start()
+
+    def _save(self):
+        name = self.ent_name.get().strip()
+        user = self.ent_user.get().strip()
+        token = self.ent_token.get().strip()
+        engine = self.cbo_engine.get().strip()
+        cat = self.cat_var.get()
+
+        if not name:
+            messagebox.showwarning("提示", "AI 席位名称不能为空！", parent=self)
+            return
+
+        if user and not user.startswith("@"):
+            user = "@" + user
+
+        try:
+            seats_cfg = self.mgr.load_seats_config()
+            target_key = self.role_key
+
+            if not target_key:
+                # Generate a unique role_key
+                import re
+                base_slug = re.sub(r"[^a-zA-Z0-9_]+", "", name.lower()) or cat
+                target_key = base_slug
+                idx = 1
+                while target_key in seats_cfg.seats:
+                    target_key = f"{base_slug}_{idx}"
+                    idx += 1
+
+            env_var = f"TELEGRAM_BOT_{target_key.upper()}_TOKEN"
+            seat_obj = seats_cfg.seats.get(target_key)
+            if seat_obj:
+                seat_obj.name = name
+                seat_obj.engine = engine
+                seat_obj.bot_username = user
+                seat_obj.bot_token = token
+            else:
+                seats_cfg.seats[target_key] = SeatConfig(
+                    role=target_key,
+                    name=name,
+                    engine=engine,
+                    bot_token_env=env_var,
+                    bot_username=user,
+                    description=f"{name} 席位",
+                    command=get_default_command_for_engine(engine) or "auto",
+                    read_watermark=0,
+                    bot_token=token,
+                )
+
+            if token:
+                try:
+                    save_token_to_env(token, env_path=REPO_ROOT / ".env", var_name=env_var)
+                    os.environ[env_var] = token
+                except Exception as env_err:
+                    logger.warning("Failed saving token to .env for %s: %s", target_key, env_err)
+
+            validate_seats_config(seats_cfg)
+            self.mgr.save_seats_config(seats_cfg)
+
+            show_floating_toast(self.parent, "席位已保存", f"AI 席位 [{name}] 已就绪并生效。")
+            if self.on_save_callback:
+                self.on_save_callback()
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法保存席位配置:\n{e}", parent=self)
+
+
+# ==============================================================================
 # Modern Floating Toast Notification
 # ==============================================================================
 def show_floating_toast(
@@ -3768,11 +4189,11 @@ class FleetManager:
 class PocketFleetControlApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("PocketFleet Control Panel (Solo Hacker Edition)")
-        self.root.geometry("960x900")
-        self.root.minsize(900, 750)
+        self.root.title("PocketFleet Control Panel")
+        self.root.geometry("1060x880")
+        self.root.minsize(980, 780)
 
-        self.root.configure(bg=COLOR_APP_BG)
+        self.root.configure(bg=COLOR_MODERN_BG)
         apply_windows_titlebar_theme(self.root)
 
         # Thread-safe log queue
@@ -3781,10 +4202,12 @@ class PocketFleetControlApp:
         # Fonts
         ui_fam = get_ui_font_family()
         self.font_title = tkfont.Font(family=ui_fam, size=15, weight="bold")
+        self.font_section = tkfont.Font(family=ui_fam, size=11, weight="bold")
         self.font_sub = tkfont.Font(family=ui_fam, size=9)
         self.font_bold = tkfont.Font(family=ui_fam, size=10, weight="bold")
         self.font_regular = tkfont.Font(family=ui_fam, size=9)
         self.font_mono = tkfont.Font(family="Consolas", size=9)
+        self.font_pill = tkfont.Font(family=ui_fam, size=9, weight="bold")
 
         # Logic
         self.mgr = FleetManager(self.append_log)
@@ -3802,13 +4225,13 @@ class PocketFleetControlApp:
             self.root.destroy()
             return
 
-        # 1. Global Header
-        self._build_header()
+        # 1. Modern Header with 3 Status Pills
+        self._build_modern_header()
 
-        # 2. Scrollable Viewport for Seamless Layout
-        self.main_canvas = tk.Canvas(self.root, bg=COLOR_APP_BG, highlightthickness=0)
+        # 2. Scrollable Viewport for Smooth Modern Layout
+        self.main_canvas = tk.Canvas(self.root, bg=COLOR_MODERN_BG, highlightthickness=0)
         self.scrollbar = tk.Scrollbar(self.root, orient="vertical", command=self.main_canvas.yview)
-        self.scroll_content = tk.Frame(self.main_canvas, bg=COLOR_APP_BG)
+        self.scroll_content = tk.Frame(self.main_canvas, bg=COLOR_MODERN_BG)
 
         self.scroll_content.bind(
             "<Configure>",
@@ -3830,28 +4253,36 @@ class PocketFleetControlApp:
                 pass
         self.root.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # Step 1 (Top / Primary Area): AI Seats & Telegram Setup (Image 1 embedded)
+        # 3. Dismissible Modern Tip Banner
+        self._build_modern_banner(self.scroll_content)
+
+        # 4. Human Root & Telegram Group Dual Cards
+        self._build_root_and_group_cards(self.scroll_content)
+
+        # 5. Dual-Column AI Connector Matrix (Code AI vs Chat AI)
+        self._build_ai_matrix_section(self.scroll_content)
+
+        # 6. Collaboration Templates & Large CTA
+        self._build_collaboration_and_cta_section(self.scroll_content)
+
+        # 7. Collapsible Modern Diagnostics Section (Bottom Services)
+        self._build_diagnostics_section(self.scroll_content)
+
+        # Compatibility panel reference for historical test suites
         self.seats_panel = ThreeSeatsConfigPanel(
-            self.scroll_content,
+            self.root,
             fleet_mgr=self.mgr,
             on_save_callback=self._on_seats_saved,
             is_dialog=False,
-            show_header=True,
+            show_header=False,
         )
-        self.seats_panel.pack(fill=tk.X, padx=12, pady=(4, 12))
-
-        # Step 2 (Bottom / Control Area): Gateway Services (Image 2 moved below)
-        self._build_table(self.scroll_content)
-        self._build_toolbar(self.scroll_content)
-        self._build_log_console(self.scroll_content)
-
 
         self._setup_tray()
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
 
-        self.append_log("🚀 PocketFleet Control Panel initialized. Ready to command.")
+        self.append_log("🚀 PocketFleet Modern Control Panel initialized. Ready to command.")
 
-        # Cached probe status for zero-latency UI responsiveness (fixes drag lag)
+        # Cached probe status for zero-latency UI responsiveness
         self._status_cache = {
             "is_d": False,
             "is_c": False,
@@ -3870,7 +4301,7 @@ class PocketFleetControlApp:
         # Start periodic status refresh on main thread (reads from cache only)
         self.root.after(500, self._refresh_status)
 
-        # Auto-start Web Cockpit & Web Bridge after mainloop starts (zero-poll, background daemons)
+        # Auto-start Web Cockpit & Web Bridge after mainloop starts
         self.root.after(600, lambda: threading.Thread(target=self._auto_start_local_servers, daemon=True).start())
 
     def _auto_start_local_servers(self) -> None:
@@ -3888,14 +4319,15 @@ class PocketFleetControlApp:
         while drained < 80 and not self.log_queue.empty():
             try:
                 msg = self.log_queue.get_nowait()
-                if not has_items:
+                if not has_items and hasattr(self, "log_text"):
                     self.log_text.config(state=tk.NORMAL)
                     has_items = True
-                self.log_text.insert(tk.END, msg)
+                if hasattr(self, "log_text"):
+                    self.log_text.insert(tk.END, msg)
                 drained += 1
             except Exception:
                 break
-        if has_items:
+        if has_items and hasattr(self, "log_text"):
             line_count = int(self.log_text.index("end-1c").split(".", 1)[0])
             if line_count > 1200:
                 self.log_text.delete("1.0", f"{line_count - 1000}.0")
@@ -3913,13 +4345,6 @@ class PocketFleetControlApp:
                 is_d = self.mgr.is_daemon_running()
                 is_c = self.mgr.is_cockpit_running()
                 is_b = self.mgr.is_bridge_running()
-                seats_cfg = self.mgr.load_seats_config()
-                lead_s = seats_cfg.seats.get("lead")
-                builder_s = seats_cfg.seats.get("builder")
-                chat_s = seats_cfg.seats.get("chat")
-                l_info = f"{lead_s.name} ({lead_s.engine})" if lead_s else "Lead"
-                b_info = f"{builder_s.name} ({builder_s.engine})" if builder_s else "Builder"
-                c_info = f"{chat_s.name} ({chat_s.engine})" if chat_s else "Chat"
                 self._status_cache = {
                     "is_d": is_d,
                     "is_c": is_c,
@@ -3927,7 +4352,6 @@ class PocketFleetControlApp:
                     "detail_d": "Active (Polling Telegram)" if is_d else "Stopped",
                     "detail_c": "Listening on http://127.0.0.1:8765" if is_c else "Offline",
                     "detail_b": "Listening on http://127.0.0.1:18765" if is_b else "Offline",
-                    "detail_a": f"Triad: {l_info} ↔ {b_info} ↔ {c_info}",
                 }
             except Exception:
                 pass
@@ -3940,21 +4364,51 @@ class PocketFleetControlApp:
             is_d = cache.get("is_d", False)
             is_c = cache.get("is_c", False)
             is_b = cache.get("is_b", False)
-            self._update_row(
-                self.row_daemon,
-                is_running=is_d,
-                detail=cache.get("detail_d", "Stopped"),
-            )
-            self._update_row(
-                self.row_cockpit,
-                is_running=is_c,
-                detail=cache.get("detail_c", "Offline"),
-            )
-            self._update_row(
-                self.row_bridge,
-                is_running=is_b,
-                detail=cache.get("detail_b", "Offline"),
-            )
+
+            # Update diagnostics rows
+            if hasattr(self, "row_daemon"):
+                self._update_row(self.row_daemon, is_running=is_d, detail=cache.get("detail_d", "Stopped"))
+            if hasattr(self, "row_cockpit"):
+                self._update_row(self.row_cockpit, is_running=is_c, detail=cache.get("detail_c", "Offline"))
+            if hasattr(self, "row_bridge"):
+                self._update_row(self.row_bridge, is_running=is_b, detail=cache.get("detail_b", "Offline"))
+
+            # Calculate connected AI count
+            seats_cfg = self.mgr.load_seats_config()
+            connected_ai_count = 0
+            for s in seats_cfg.seats.values():
+                if s.get_token() and s.bot_username:
+                    connected_ai_count += 1
+
+            # Update Modern Header Pills
+            if hasattr(self, "lbl_pill_tg"):
+                if is_d:
+                    self.lbl_pill_tg.config(text="Telegram 已连接", fg=COLOR_TEXT_MAIN)
+                    self.dot_pill_tg.config(fg=COLOR_ACCENT_GREEN)
+                else:
+                    self.lbl_pill_tg.config(text="Telegram 未连接", fg=COLOR_TEXT_MUTED)
+                    self.dot_pill_tg.config(fg=COLOR_TEXT_MUTED)
+
+            if hasattr(self, "lbl_pill_ai"):
+                self.lbl_pill_ai.config(text=f"{connected_ai_count} 个 AI 已接入", fg=COLOR_TEXT_MAIN)
+                self.dot_pill_ai.config(fg=COLOR_ACCENT_GREEN if connected_ai_count > 0 else COLOR_TEXT_MUTED)
+
+            if hasattr(self, "lbl_pill_meet"):
+                can_meet = is_d and (connected_ai_count >= 2)
+                if can_meet:
+                    self.lbl_pill_meet.config(text="可以开会", fg=COLOR_ACCENT_GREEN)
+                    self.dot_pill_meet.config(fg=COLOR_ACCENT_GREEN)
+                else:
+                    self.lbl_pill_meet.config(text="待配齐开会", fg=COLOR_TEXT_MUTED)
+                    self.dot_pill_meet.config(fg=COLOR_TEXT_MUTED)
+
+            # Update TG Group Card info
+            if hasattr(self, "lbl_group_title"):
+                grp_name = seats_cfg.telegram_group_name or "Fleet WarRoom"
+                self.lbl_group_title.config(text=f"TG 群组: {grp_name}")
+            if hasattr(self, "lbl_group_chat_id"):
+                cid = seats_cfg.telegram_chat_id or (os.environ.get("TELEGRAM_GROUP_ID") or "未配置")
+                self.lbl_group_chat_id.config(text=f"Chat ID: {cid} (全席位共用)")
 
             color = "green" if (is_d and is_c and is_b) else ("cyan" if (is_d or is_c or is_b) else "yellow")
             if self.tray_icon and color != self._tray_status_color:
@@ -3966,258 +4420,636 @@ class PocketFleetControlApp:
         if not self.is_quitting:
             self.root.after(1000, self._refresh_status)
 
-    def _build_header(self) -> None:
-        header = tk.Frame(self.root, bg=COLOR_TITLE_BAR, height=64)
+    def _build_modern_header(self) -> None:
+        """Top Header with clean brand identity and 3 right-aligned status pills."""
+        header_outer = tk.Frame(self.root, bg=COLOR_CARD_BG, height=68)
+        header_outer.pack(fill=tk.X)
+
+        # 1px border line at bottom
+        sep = tk.Frame(header_outer, bg=COLOR_CARD_BORDER, height=1)
+        sep.pack(side=tk.BOTTOM, fill=tk.X)
+
+        header = tk.Frame(header_outer, bg=COLOR_CARD_BG, padx=20, pady=10)
         header.pack(fill=tk.X)
 
-        title_lbl = tk.Label(
-            header,
-            text="🚀 PocketFleet 控制中心 (AI 战队网关 / Commercial Edition)",
-            fg=COLOR_TITLE_TEXT,
-            bg=COLOR_TITLE_BAR,
-            font=self.font_title,
-        )
-        title_lbl.pack(anchor="w", padx=18, pady=(10, 2))
+        # Left Branding
+        brand_frame = tk.Frame(header, bg=COLOR_CARD_BG)
+        brand_frame.pack(side=tk.LEFT)
 
-        sub_lbl = tk.Label(
-            header,
-            text="① 顶部配置各 AI 席位与 Telegram ➔ ② 复制协同 Memo ➔ ③ 下方开启网关服务协同",
-            fg=COLOR_TITLE_SUBTEXT,
-            bg=COLOR_TITLE_BAR,
-            font=self.font_sub,
-        )
-        sub_lbl.pack(anchor="w", padx=18, pady=(0, 8))
+        icon_box = tk.Frame(brand_frame, bg="#e0f2fe", width=38, height=38)
+        icon_box.pack(side=tk.LEFT, padx=(0, 10))
+        icon_box.pack_propagate(False)
+        tk.Label(icon_box, text="🚀", bg="#e0f2fe", font=tkfont.Font(size=14)).pack(expand=True)
 
-    def _build_table(self, parent=None) -> None:
-        p = parent if parent is not None else self.root
+        text_box = tk.Frame(brand_frame, bg=COLOR_CARD_BG)
+        text_box.pack(side=tk.LEFT)
 
-        # Section Banner for Step 2
-        sec_hdr = tk.Frame(p, bg=COLOR_TITLE_BAR, padx=16, pady=8)
-        sec_hdr.pack(fill=tk.X, padx=12, pady=(12, 4))
+        title_row = tk.Frame(text_box, bg=COLOR_CARD_BG)
+        title_row.pack(anchor="w")
+        tk.Label(title_row, text="PocketFleet Control Panel", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_title).pack(side=tk.LEFT)
+        tk.Label(title_row, text="  把你的 AI 接入 Telegram", fg=COLOR_TEXT_SECONDARY, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT, pady=(3, 0))
+
         tk.Label(
-            sec_hdr,
-            text="📡 第二步：网关网络服务控制台 (Step 2: Gateway Network Services)",
-            fg=COLOR_TITLE_TEXT,
-            bg=COLOR_TITLE_BAR,
+            text_box,
+            text="AI STARFLEET COMMUNICATION HUB  |  XAMPP-STYLE TRAY CONTROLLER  |  v0.2.0",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG,
+            font=tkfont.Font(family=get_ui_font_family(), size=8),
+        ).pack(anchor="w", pady=(1, 0))
+
+        # Right Status Pills
+        pills_frame = tk.Frame(header, bg=COLOR_CARD_BG)
+        pills_frame.pack(side=tk.RIGHT)
+
+        def _make_pill(parent, icon: str, default_text: str):
+            f = tk.Frame(parent, bg="#ffffff", bd=1, relief=tk.SOLID, padx=12, pady=5)
+            f.pack(side=tk.LEFT, padx=5)
+            tk.Label(f, text=icon, bg="#ffffff", font=self.font_sub).pack(side=tk.LEFT, padx=(0, 4))
+            lbl = tk.Label(f, text=default_text, fg=COLOR_TEXT_MAIN, bg="#ffffff", font=self.font_pill)
+            lbl.pack(side=tk.LEFT, padx=(0, 4))
+            dot = tk.Label(f, text="●", fg=COLOR_ACCENT_GREEN, bg="#ffffff", font=self.font_sub)
+            dot.pack(side=tk.LEFT)
+            return f, lbl, dot
+
+        self.pill_tg_frame, self.lbl_pill_tg, self.dot_pill_tg = _make_pill(pills_frame, "✈️", "Telegram 已连接")
+        self.pill_ai_frame, self.lbl_pill_ai, self.dot_pill_ai = _make_pill(pills_frame, "🤖", "3 个 AI 已接入")
+        self.pill_meet_frame, self.lbl_pill_meet, self.dot_pill_meet = _make_pill(pills_frame, "👥", "可以开会")
+
+    def _build_modern_banner(self, parent) -> None:
+        """Dismissible modern blue tip banner."""
+        self.banner_frame = tk.Frame(parent, bg=COLOR_ACCENT_BLUE_BG, bd=1, relief=tk.SOLID, padx=16, pady=10)
+        self.banner_frame.pack(fill=tk.X, padx=16, pady=(12, 10))
+
+        icon_lbl = tk.Label(self.banner_frame, text="💡", bg=COLOR_ACCENT_BLUE_BG, font=tkfont.Font(size=14))
+        icon_lbl.pack(side=tk.LEFT, anchor="n", padx=(0, 10))
+
+        text_box = tk.Frame(self.banner_frame, bg=COLOR_ACCENT_BLUE_BG)
+        text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            text_box,
+            text="桌面端负责 AI 接入与连接管理；会议参与者与主持人由 Telegram /meet 面板决定。",
+            fg="#0369a1",
+            bg=COLOR_ACCENT_BLUE_BG,
             font=self.font_bold,
-        ).pack(anchor="w")
+            anchor="w",
+        ).pack(fill=tk.X)
+
         tk.Label(
-            sec_hdr,
-            text="各 AI 席位与 Telegram 接入配置就绪后，启动下方网关即可接收群内消息并协同分发",
-            fg=COLOR_TITLE_SUBTEXT,
-            bg=COLOR_TITLE_BAR,
+            text_box,
+            text="在这里连接和管理你的 AI 工具，然后前往 Telegram 使用 /meet 组建今天的会议，指定参与者并分配任务。",
+            fg="#0284c7",
+            bg=COLOR_ACCENT_BLUE_BG,
+            font=self.font_sub,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(2, 0))
+
+        btn_close = tk.Button(
+            self.banner_frame,
+            text="✕",
+            bg=COLOR_ACCENT_BLUE_BG,
+            fg="#0284c7",
+            activebackground=COLOR_ACCENT_BLUE_BG,
+            activeforeground="#0369a1",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=self.banner_frame.destroy,
+        )
+        btn_close.pack(side=tk.RIGHT, anchor="n")
+
+    def _build_root_and_group_cards(self, parent) -> None:
+        """Human Root card & Telegram Group card in dual-column layout."""
+        cards_row = tk.Frame(parent, bg=COLOR_MODERN_BG)
+        cards_row.pack(fill=tk.X, padx=16, pady=(0, 12))
+        cards_row.columnconfigure(0, weight=1)
+        cards_row.columnconfigure(1, weight=1)
+
+        # 1. Left Card: Human Root / 人类指挥官
+        card_root = tk.Frame(cards_row, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=14, pady=12)
+        card_root.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        avatar_box = tk.Frame(card_root, bg="#d1fae5", width=42, height=42)
+        avatar_box.pack(side=tk.LEFT, padx=(0, 12))
+        avatar_box.pack_propagate(False)
+        tk.Label(avatar_box, text="👤", bg="#d1fae5", font=tkfont.Font(size=14)).pack(expand=True)
+
+        root_text_box = tk.Frame(card_root, bg=COLOR_CARD_BG)
+        root_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        head_line = tk.Frame(root_text_box, bg=COLOR_CARD_BG)
+        head_line.pack(anchor="w")
+        tk.Label(head_line, text="Human Root / 人类指挥官", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
+
+        tag = tk.Label(head_line, text=" 核心控制中心 ", fg="#047857", bg="#d1fae5", font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"))
+        tag.pack(side=tk.LEFT, padx=8)
+
+        tk.Label(
+            root_text_box,
+            text="你是编队的指挥官，负责在 Telegram 中组建会议、指定参与者并分配任务。",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG,
+            font=self.font_sub,
+            anchor="w",
+        ).pack(anchor="w", pady=(3, 0))
+
+        # 2. Right Card: Telegram Group WarRoom
+        card_group = tk.Frame(cards_row, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=14, pady=12)
+        card_group.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        tg_icon_box = tk.Frame(card_group, bg="#e0f2fe", width=42, height=42)
+        tg_icon_box.pack(side=tk.LEFT, padx=(0, 12))
+        tg_icon_box.pack_propagate(False)
+        tk.Label(tg_icon_box, text="✈️", bg="#e0f2fe", font=tkfont.Font(size=14)).pack(expand=True)
+
+        grp_text_box = tk.Frame(card_group, bg=COLOR_CARD_BG)
+        grp_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        seats_cfg = self.mgr.load_seats_config()
+        g_name = seats_cfg.telegram_group_name or "Fleet WarRoom"
+        cid = seats_cfg.telegram_chat_id or (os.environ.get("TELEGRAM_GROUP_ID") or "未配置")
+
+        self.lbl_group_title = tk.Label(grp_text_box, text=f"TG 群组: {g_name}", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_bold)
+        self.lbl_group_title.pack(anchor="w")
+
+        self.lbl_group_chat_id = tk.Label(grp_text_box, text=f"Chat ID: {cid} (全席位共用)", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub)
+        self.lbl_group_chat_id.pack(anchor="w", pady=(3, 0))
+
+        btn_group_cfg = tk.Button(
+            card_group,
+            text="⚙️ 设置",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_MAIN,
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            command=self.open_telegram_group_dialog,
+        )
+        btn_group_cfg.pack(side=tk.RIGHT)
+
+    def _build_ai_matrix_section(self, parent) -> None:
+        """Dual-column matrix for Code AI and Chat AI connectors."""
+        matrix_row = tk.Frame(parent, bg=COLOR_MODERN_BG)
+        matrix_row.pack(fill=tk.X, padx=16, pady=(0, 12))
+        matrix_row.columnconfigure(0, weight=1)
+        matrix_row.columnconfigure(1, weight=1)
+
+        # Column 0: Code AI Card
+        col_code = tk.Frame(matrix_row, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=14, pady=12)
+        col_code.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        hdr_code = tk.Frame(col_code, bg=COLOR_CARD_BG)
+        hdr_code.pack(fill=tk.X, pady=(0, 8))
+
+        left_code_title = tk.Frame(hdr_code, bg=COLOR_CARD_BG)
+        left_code_title.pack(side=tk.LEFT)
+        tk.Label(left_code_title, text="</> 代码 AI (Code AI)", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_section).pack(anchor="w")
+        tk.Label(left_code_title, text="用于编程、架构设计、代码审查与工程开发等任务。", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(anchor="w", pady=(1, 0))
+
+        btn_add_code = tk.Button(
+            hdr_code,
+            text="＋ 接入代码 AI",
+            bg=COLOR_ACCENT_GREEN,
+            fg="#ffffff",
+            activebackground=COLOR_ACCENT_GREEN_HOVER,
+            activeforeground="#ffffff",
+            font=self.font_pill,
+            relief=tk.FLAT,
+            padx=12,
+            pady=4,
+            cursor="hand2",
+            command=lambda: self.action_add_ai("code"),
+        )
+        btn_add_code.pack(side=tk.RIGHT)
+
+        self.code_ai_container = tk.Frame(col_code, bg=COLOR_CARD_BG)
+        self.code_ai_container.pack(fill=tk.BOTH, expand=True)
+
+        # Column 1: Chat AI Card
+        col_chat = tk.Frame(matrix_row, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=14, pady=12)
+        col_chat.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        hdr_chat = tk.Frame(col_chat, bg=COLOR_CARD_BG)
+        hdr_chat.pack(fill=tk.X, pady=(0, 8))
+
+        left_chat_title = tk.Frame(hdr_chat, bg=COLOR_CARD_BG)
+        left_chat_title.pack(side=tk.LEFT)
+        tk.Label(left_chat_title, text="💬 对话 AI (Chat AI)", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_section).pack(anchor="w")
+        tk.Label(left_chat_title, text="用于对话、分析、总结、规划与多轮推理等任务。", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(anchor="w", pady=(1, 0))
+
+        btn_add_chat = tk.Button(
+            hdr_chat,
+            text="＋ 接入对话 AI",
+            bg=COLOR_ACCENT_GREEN,
+            fg="#ffffff",
+            activebackground=COLOR_ACCENT_GREEN_HOVER,
+            activeforeground="#ffffff",
+            font=self.font_pill,
+            relief=tk.FLAT,
+            padx=12,
+            pady=4,
+            cursor="hand2",
+            command=lambda: self.action_add_ai("chat"),
+        )
+        btn_add_chat.pack(side=tk.RIGHT)
+
+        self.chat_ai_container = tk.Frame(col_chat, bg=COLOR_CARD_BG)
+        self.chat_ai_container.pack(fill=tk.BOTH, expand=True)
+
+        # Render list of AI items
+        self._render_ai_cards()
+
+    def _render_ai_cards(self) -> None:
+        """Render discrete AI cards into Code AI and Chat AI columns."""
+        for w in self.code_ai_container.winfo_children():
+            w.destroy()
+        for w in self.chat_ai_container.winfo_children():
+            w.destroy()
+
+        seats_cfg = self.mgr.load_seats_config()
+
+        # Categorize
+        code_seats = []
+        chat_seats = []
+        for r_key, seat in seats_cfg.seats.items():
+            if seat.engine in ALLOWED_CODE_ENGINES or r_key in ("lead", "builder"):
+                code_seats.append((r_key, seat))
+            else:
+                chat_seats.append((r_key, seat))
+
+        def _render_single_seat_card(parent, role_key: str, seat: SeatConfig, is_code: bool):
+            card = tk.Frame(parent, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=12, pady=10)
+            card.pack(fill=tk.X, pady=4)
+
+            # Avatar icon
+            color_bg = "#dcfce7" if role_key == "lead" else ("#fef3c7" if role_key == "builder" else "#ede9fe")
+            avatar_box = tk.Frame(card, bg=color_bg, width=38, height=38)
+            avatar_box.pack(side=tk.LEFT, padx=(0, 10))
+            avatar_box.pack_propagate(False)
+            tk.Label(avatar_box, text="🤖", bg=color_bg, font=tkfont.Font(size=14)).pack(expand=True)
+
+            # Center Info Box
+            info_box = tk.Frame(card, bg=COLOR_CARD_BG)
+            info_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            # Name + Status Tag
+            top_line = tk.Frame(info_box, bg=COLOR_CARD_BG)
+            top_line.pack(anchor="w")
+            tk.Label(top_line, text=seat.name, fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
+
+            token_val = seat.get_token() or (os.environ.get(seat.bot_token_env) or "").strip()
+            is_ready = bool(token_val and seat.bot_username)
+            status_text = "● 在线" if is_ready else "● 待配置"
+            status_fg = COLOR_ACCENT_GREEN if is_ready else COLOR_TEXT_MUTED
+            tk.Label(top_line, text=f"  {status_text}", fg=status_fg, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT)
+
+            # Engine line
+            eng_disp = seat.engine.capitalize() if seat.engine else "Auto"
+            tk.Label(info_box, text=f"引擎: {eng_disp}", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(anchor="w", pady=(2, 0))
+
+            # TG username line
+            u_disp = seat.bot_username or "未配置"
+            tk.Label(info_box, text=f"TG: {u_disp}", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(anchor="w")
+
+            # Right action buttons
+            btn_group = tk.Frame(card, bg=COLOR_CARD_BG)
+            btn_group.pack(side=tk.RIGHT)
+
+            btn_manage = tk.Button(
+                btn_group,
+                text="⚙️ 管理",
+                bg=COLOR_CONTROL,
+                fg=COLOR_TEXT_MAIN,
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=8,
+                pady=3,
+                cursor="hand2",
+                command=lambda rk=role_key: self.open_edit_ai_dialog(rk),
+            )
+            btn_manage.pack(side=tk.LEFT, padx=3)
+
+            btn_test = tk.Button(
+                btn_group,
+                text="🔗 测试连接",
+                bg=COLOR_CONTROL,
+                fg=COLOR_TEXT_MAIN,
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=8,
+                pady=3,
+                cursor="hand2",
+                command=lambda s=seat: self._test_seat_connection(s),
+            )
+            btn_test.pack(side=tk.LEFT, padx=3)
+
+            btn_del = tk.Button(
+                btn_group,
+                text="🗑️ 移除",
+                bg="#fee2e2",
+                fg=COLOR_DANGER,
+                font=self.font_sub,
+                relief=tk.FLAT,
+                padx=8,
+                pady=3,
+                cursor="hand2",
+                command=lambda rk=role_key, nm=seat.name: self._remove_seat(rk, nm),
+            )
+            btn_del.pack(side=tk.LEFT, padx=3)
+
+        for r_key, seat in code_seats:
+            _render_single_seat_card(self.code_ai_container, r_key, seat, is_code=True)
+
+        for r_key, seat in chat_seats:
+            _render_single_seat_card(self.chat_ai_container, r_key, seat, is_code=False)
+
+    def _test_seat_connection(self, seat: SeatConfig):
+        token = seat.get_token() or (os.environ.get(seat.bot_token_env) or "").strip()
+        if not token:
+            messagebox.showinfo("提示", f"席位 [{seat.name}] 尚未配置 Bot Token，请点击【⚙️ 管理】进行配置。")
+            return
+
+        def _do_probe():
+            valid, info = verify_bot_token(token)
+            if valid:
+                show_floating_toast(
+                    self.root,
+                    "连接正常",
+                    f"席位 [{seat.name}] 成功连通 Telegram!\nBot: @{info.get('username')}",
+                    icon="🟢",
+                )
+            else:
+                err = info.get("error", "连接失败")
+                show_floating_toast(
+                    self.root,
+                    "连接失败",
+                    f"席位 [{seat.name}] Token 验证未通过:\n{err}",
+                    icon="🔴",
+                    border_color=COLOR_DANGER,
+                )
+        threading.Thread(target=_do_probe, daemon=True).start()
+
+    def _remove_seat(self, role_key: str, name: str):
+        if messagebox.askyesno("确认移除", f"确定要移除 AI 席位 [{name}] 吗？", parent=self.root):
+            seats_cfg = self.mgr.load_seats_config()
+            if role_key in seats_cfg.seats:
+                del seats_cfg.seats[role_key]
+                self.mgr.save_seats_config(seats_cfg)
+                show_floating_toast(self.root, "席位已移除", f"席位 [{name}] 已从编队配置中移除。")
+                self._render_ai_cards()
+
+    def _build_collaboration_and_cta_section(self, parent) -> None:
+        """Collaboration templates & prominent Telegram call-to-action button."""
+        outer = tk.Frame(parent, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=16, pady=14)
+        outer.pack(fill=tk.X, padx=16, pady=(0, 12))
+
+        # Title row
+        title_row = tk.Frame(outer, bg=COLOR_CARD_BG)
+        title_row.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(title_row, text="👥 协作模板 (编队方式)", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_section).pack(side=tk.LEFT)
+        tk.Label(
+            title_row,
+            text="  选择编队规模，快速组建你的 AI 团队。随后前往 Telegram 使用 /meet 发起会议。",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG,
+            font=self.font_sub,
+        ).pack(side=tk.LEFT, pady=(2, 0))
+
+        # 3 Template Radio Cards
+        tmpl_frame = tk.Frame(outer, bg=COLOR_CARD_BG)
+        tmpl_frame.pack(fill=tk.X, pady=(0, 12))
+        tmpl_frame.columnconfigure(0, weight=1)
+        tmpl_frame.columnconfigure(1, weight=1)
+        tmpl_frame.columnconfigure(2, weight=1)
+
+        def _make_tmpl_card(parent, col: int, is_selected: bool, icon: str, title: str, tag: str, desc: str):
+            bg_col = "#f0fdf4" if is_selected else COLOR_CARD_BG
+            border_col = COLOR_ACCENT_GREEN if is_selected else COLOR_CARD_BORDER
+            c = tk.Frame(parent, bg=bg_col, bd=1, relief=tk.SOLID, padx=12, pady=10)
+            c.grid(row=0, column=col, sticky="nsew", padx=4)
+
+            top = tk.Frame(c, bg=bg_col)
+            top.pack(fill=tk.X)
+
+            radio_icon = "●" if is_selected else "○"
+            radio_fg = COLOR_ACCENT_GREEN if is_selected else COLOR_TEXT_MUTED
+            tk.Label(top, text=radio_icon, fg=radio_fg, bg=bg_col, font=self.font_sub).pack(side=tk.LEFT, padx=(0, 6))
+            tk.Label(top, text=f"{icon}  {title}", fg=COLOR_TEXT_MAIN, bg=bg_col, font=self.font_bold).pack(side=tk.LEFT)
+
+            if tag:
+                tk.Label(top, text=f" {tag} ", fg="#047857", bg="#d1fae5", font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold")).pack(side=tk.LEFT, padx=6)
+
+            tk.Label(c, text=desc, fg=COLOR_TEXT_MUTED, bg=bg_col, font=self.font_sub).pack(anchor="w", padx=(20, 0), pady=(3, 0))
+
+        _make_tmpl_card(tmpl_frame, 0, True, "👤+🤖🤖", "Human Root + 2 AI", "推荐", "最小可用，先跑起来")
+        _make_tmpl_card(tmpl_frame, 1, False, "👤+🤖🤖🤖", "Human Root + 3 AI", "", "主持 / 审计 / 施工")
+        _make_tmpl_card(tmpl_frame, 2, False, "👤+🤖🤖🤖...", "Human Root + N AI", "", "自由扩展，适应更多场景")
+
+        # Bottom Action Banner
+        cta_bar = tk.Frame(outer, bg="#f8fafc", bd=1, relief=tk.SOLID, padx=16, pady=12)
+        cta_bar.pack(fill=tk.X)
+
+        icon_cta = tk.Frame(cta_bar, bg="#e0f2fe", width=36, height=36)
+        icon_cta.pack(side=tk.LEFT, padx=(0, 10))
+        icon_cta.pack_propagate(False)
+        tk.Label(icon_cta, text="✈️", bg="#e0f2fe", font=tkfont.Font(size=13)).pack(expand=True)
+
+        cta_text_box = tk.Frame(cta_bar, bg="#f8fafc")
+        cta_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        tk.Label(cta_text_box, text="在 Telegram 中发起会议", fg=COLOR_TEXT_MAIN, bg="#f8fafc", font=self.font_bold).pack(anchor="w")
+        tk.Label(
+            cta_text_box,
+            text="至少接入 2 个 AI 后即可在 Telegram 中使用 /meet 发起会议。",
+            fg=COLOR_TEXT_MUTED,
+            bg="#f8fafc",
             font=self.font_sub,
         ).pack(anchor="w", pady=(1, 0))
 
-        table_card = tk.Frame(p, bg=COLOR_SURFACE, bd=1, relief=tk.SOLID)
-        table_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-
-        header_row = tk.Frame(table_card, bg=COLOR_CONTROL, height=28)
-        header_row.pack(fill=tk.X)
-        tk.Label(header_row, text="Status", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=8).pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Service Name", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=24, anchor="w").pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Runtime / Port / PID Details", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=32, anchor="w").pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Action", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=12).pack(side=tk.LEFT, padx=6)
-        tk.Label(header_row, text="Shortcut", fg=COLOR_TEXT, bg=COLOR_CONTROL, font=self.font_bold, width=12).pack(side=tk.LEFT, padx=6)
-
-        # Row 1: Telegram Daemon
-        self.row_daemon = self._create_service_row(
-            table_card,
-            name="1. Telegram Starfleet Gateway",
-            on_start=self._action_start_daemon,
-            on_stop=lambda: threading.Thread(target=self.mgr.stop_daemon, daemon=True).start(),
-            aux_text="Open TG",
-            aux_cmd=self._action_open_tg,
+        btn_go_tg = tk.Button(
+            cta_bar,
+            text="✈️ 前往 Telegram 开会 ❯",
+            bg=COLOR_ACCENT_GREEN,
+            fg="#ffffff",
+            activebackground=COLOR_ACCENT_GREEN_HOVER,
+            activeforeground="#ffffff",
+            font=tkfont.Font(family=get_ui_font_family(), size=11, weight="bold"),
+            relief=tk.FLAT,
+            padx=20,
+            pady=8,
+            cursor="hand2",
+            command=self._action_open_tg,
         )
+        btn_go_tg.pack(side=tk.RIGHT)
 
-        # Row 2: Web Extension Bridge (Port 18765)
-        self.row_bridge = self._create_service_row(
-            table_card,
-            name="2. Web Extension Bridge (18765)",
-            on_start=lambda: threading.Thread(target=self.mgr.start_bridge, daemon=True).start(),
-            on_stop=lambda: threading.Thread(target=self.mgr.stop_bridge, daemon=True).start(),
-            aux_text="Install Ext",
-            aux_cmd=self._action_install_ext,
-        )
+    def _build_diagnostics_section(self, parent) -> None:
+        """Collapsible diagnostics area containing 4 compact gateway runtime status cards."""
+        diag_card = tk.Frame(parent, bg=COLOR_CARD_BG, bd=1, relief=tk.SOLID, padx=16, pady=10)
+        diag_card.pack(fill=tk.X, padx=16, pady=(0, 16))
 
-        # Row 3: Local Web Cockpit (Port 8765)
-        self.row_cockpit = self._create_service_row(
-            table_card,
-            name="3. Local Web Cockpit (UI)",
-            on_start=lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, True), daemon=True).start(),
-            on_stop=lambda: threading.Thread(target=self.mgr.stop_cockpit, daemon=True).start(),
-            aux_text="Open Browser",
-            aux_cmd=self._action_open_browser,
-        )
+        hdr = tk.Frame(diag_card, bg=COLOR_CARD_BG)
+        hdr.pack(fill=tk.X, pady=(0, 6))
 
-    def _create_service_row(
-        self, parent, name: str, on_start, on_stop, aux_text: str, aux_cmd, is_readonly: bool = False
-    ) -> dict:
-        row = tk.Frame(parent, bg=COLOR_SURFACE, height=42)
-        row.pack(fill=tk.X, pady=2)
+        tk.Label(hdr, text="⚙️ 运行状态 / 高级诊断", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(hdr, text="  核心服务运行状态 (通常无需手动操作)", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT, pady=(1, 0))
 
-        canvas = tk.Canvas(row, width=24, height=24, bg=COLOR_SURFACE, highlightthickness=0)
-        canvas.pack(side=tk.LEFT, padx=12)
-        light = canvas.create_oval(4, 4, 20, 20, fill=COLOR_DANGER, outline="")
+        self.diag_content = tk.Frame(diag_card, bg=COLOR_CARD_BG)
+        self.diag_content.pack(fill=tk.X)
 
-        name_lbl = tk.Label(row, text=name, fg=COLOR_TEXT, bg=COLOR_SURFACE, font=self.font_bold, width=24, anchor="w")
-        name_lbl.pack(side=tk.LEFT, padx=6)
+        self.diag_content.columnconfigure(0, weight=1)
+        self.diag_content.columnconfigure(1, weight=1)
+        self.diag_content.columnconfigure(2, weight=1)
+        self.diag_content.columnconfigure(3, weight=1)
 
-        detail_lbl = tk.Label(row, text="Probing...", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_mono, width=32, anchor="w")
-        detail_lbl.pack(side=tk.LEFT, padx=6)
+        def _make_diag_card(parent, col: int, icon: str, name: str, sub: str, on_restart):
+            card = tk.Frame(parent, bg="#ffffff", bd=1, relief=tk.SOLID, padx=10, pady=8)
+            card.grid(row=0, column=col, sticky="nsew", padx=3)
 
-        btn_frame = tk.Frame(row, bg=COLOR_SURFACE, width=12)
-        btn_frame.pack(side=tk.LEFT, padx=6)
+            top = tk.Frame(card, bg="#ffffff")
+            top.pack(fill=tk.X)
 
-        if not is_readonly:
-            action_btn = tk.Button(
-                btn_frame,
-                text="Start",
-                bg=COLOR_SUCCESS,
-                fg="#ffffff",
-                activebackground=COLOR_SUCCESS_HOVER,
-                activeforeground="#ffffff",
-                font=self.font_bold,
+            tk.Label(top, text=f"{icon} {name}", fg=COLOR_TEXT_MAIN, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+
+            canvas = tk.Canvas(top, width=14, height=14, bg="#ffffff", highlightthickness=0)
+            canvas.pack(side=tk.RIGHT)
+            light = canvas.create_oval(2, 2, 12, 12, fill=COLOR_DANGER, outline="")
+
+            tk.Label(card, text=sub, fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w", pady=(2, 6))
+
+            btn_re = tk.Button(
+                card,
+                text="🔄 重启",
+                bg=COLOR_CONTROL,
+                fg=COLOR_TEXT_MAIN,
+                font=self.font_sub,
                 relief=tk.FLAT,
-                width=8,
+                padx=6,
+                pady=2,
                 cursor="hand2",
+                command=on_restart,
             )
-            action_btn.pack()
-        else:
-            action_btn = tk.Label(btn_frame, text="Auto/Local", fg=COLOR_TEXT_SOFT, bg=COLOR_SURFACE, font=self.font_regular, width=8)
-            action_btn.pack()
+            btn_re.pack(anchor="w")
 
-        aux_btn = tk.Button(
-            row,
-            text=aux_text,
-            bg=COLOR_CONTROL,
-            fg=COLOR_TEXT,
-            activebackground=COLOR_CONTROL_HOVER,
-            activeforeground=COLOR_TEXT,
-            font=self.font_regular,
-            relief=tk.FLAT,
-            width=11,
-            cursor="hand2",
-            command=aux_cmd,
+            detail_lbl = tk.Label(card, text="Stopped", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_mono)
+
+            return {
+                "canvas": canvas,
+                "light": light,
+                "detail": detail_lbl,
+                "button": btn_re,
+                "on_start": on_restart,
+                "on_stop": on_restart,
+                "state": "unknown",
+            }
+
+        self.row_daemon = _make_diag_card(
+            self.diag_content,
+            col=0,
+            icon="✈️",
+            name="1. Telegram Bridge",
+            sub="Telegram 连接守护进程",
+            on_restart=self._action_start_daemon,
         )
-        aux_btn.pack(side=tk.LEFT, padx=6)
 
-        return {
-            "canvas": canvas,
-            "light": light,
-            "detail": detail_lbl,
-            "button": action_btn,
-            "on_start": on_start,
-            "on_stop": on_stop,
-            "state": "unknown",
-        }
-
-    def open_three_seats_dialog(self) -> None:
-        ThreeSeatsConfigDialog(self.root, fleet_mgr=self.mgr, on_save_callback=self._on_seats_saved)
-
-    def _on_seats_saved(self) -> None:
-        self.append_log("👥 [SEATS] Fleet Triad seats configuration updated and verified.")
-        if hasattr(self, "seats_panel") and hasattr(self.seats_panel, "_load_from_config"):
-            self.seats_panel._load_from_config()
-
-    def open_antigravity_tracks_dialog(self) -> None:
-        AntigravityTracksDialog(self.root, fleet_mgr=self.mgr, on_bind_callback=self._on_track_bound)
-
-    def _on_track_bound(self) -> None:
-        self.append_log("🧭 [TRACK] Antigravity track bound to lead executor.")
-        if hasattr(self, "seats_panel") and hasattr(self.seats_panel, "_load_from_config"):
-            self.seats_panel._load_from_config()
-
-    def _build_toolbar(self, parent=None) -> None:
-        p = parent if parent is not None else self.root
-        toolbar = tk.Frame(p, bg=COLOR_APP_BG)
-        toolbar.pack(fill=tk.X, padx=16, pady=4)
-
-        btn_start_all = tk.Button(
-            toolbar,
-            text="🚀 Start All Services",
-            bg=COLOR_SUCCESS,
-            fg="#ffffff",
-            activebackground=COLOR_SUCCESS_HOVER,
-            activeforeground="#ffffff",
-            font=self.font_bold,
-            relief=tk.FLAT,
-            padx=12,
-            pady=4,
-            cursor="hand2",
-            command=self.action_start_all,
+        self.row_cockpit = _make_diag_card(
+            self.diag_content,
+            col=1,
+            icon="🌐",
+            name="2. Local Web Cockpit",
+            sub="本地 Web 控制台 (8765)",
+            on_restart=lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, True), daemon=True).start(),
         )
-        btn_start_all.pack(side=tk.LEFT, padx=(0, 8))
 
-        btn_stop_all = tk.Button(
-            toolbar,
-            text="🛑 Stop All Services",
-            bg=COLOR_DANGER,
-            fg="#ffffff",
-            activebackground=COLOR_DANGER_HOVER,
-            activeforeground="#ffffff",
-            font=self.font_bold,
-            relief=tk.FLAT,
-            padx=12,
-            pady=4,
-            cursor="hand2",
-            command=self.action_stop_all,
+        self.row_bridge = _make_diag_card(
+            self.diag_content,
+            col=2,
+            icon="🧩",
+            name="3. Web Extension Bridge",
+            sub="浏览器扩展桥接 (18765)",
+            on_restart=lambda: threading.Thread(target=self.mgr.start_bridge, daemon=True).start(),
         )
-        btn_stop_all.pack(side=tk.LEFT, padx=(0, 8))
 
-        btn_tray = tk.Button(
-            toolbar,
-            text="⬇ Minimize to Tray",
-            bg=COLOR_INFO,
-            fg=COLOR_SURFACE_ALT,
-            activebackground=COLOR_PRIMARY,
-            activeforeground="#ffffff",
-            font=self.font_bold,
-            relief=tk.FLAT,
-            padx=12,
-            pady=4,
-            cursor="hand2",
-            command=self.hide_to_tray,
+        self.row_agent = _make_diag_card(
+            self.diag_content,
+            col=3,
+            icon="📦",
+            name="4. Runtime Agent",
+            sub="AI 运行代理 (本地/自动)",
+            on_restart=lambda: show_floating_toast(self.root, "Runtime Agent", "AI 运行代理服务正常运行。"),
         )
-        btn_tray.pack(side=tk.RIGHT)
+        self.row_agent["canvas"].itemconfig(self.row_agent["light"], fill=COLOR_ACCENT_GREEN)
+
+        # Embedded Console Log area
+        self._build_log_console(diag_card)
 
     def _build_log_console(self, parent=None) -> None:
         p = parent if parent is not None else self.root
-        console_frame = tk.Frame(p, bg=COLOR_APP_BG)
-        console_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(8, 16))
+        console_frame = tk.Frame(p, bg=COLOR_CARD_BG)
+        console_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
-        hdr = tk.Frame(console_frame, bg=COLOR_SURFACE, height=26)
+        hdr = tk.Frame(console_frame, bg=COLOR_CARD_BG, height=22)
         hdr.pack(fill=tk.X)
-        tk.Label(hdr, text="Live Console Output & Bridge Activity", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_bold).pack(side=tk.LEFT, padx=8)
+        tk.Label(hdr, text="实时控制台输出 (Live Logs):", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT)
 
         btn_clear = tk.Button(
             hdr,
-            text="Clear",
+            text="清屏",
             bg=COLOR_CONTROL,
-            fg=COLOR_TEXT_SECONDARY,
+            fg=COLOR_TEXT_MAIN,
             font=self.font_sub,
             relief=tk.FLAT,
-            padx=6,
+            padx=4,
+            pady=0,
             command=self._clear_log,
         )
-        btn_clear.pack(side=tk.RIGHT, padx=4)
+        btn_clear.pack(side=tk.RIGHT)
 
         self.log_text = tk.Text(
             console_frame,
             bg=COLOR_INPUT_BG,
-            fg=COLOR_INFO,
+            fg=COLOR_TEXT_MAIN,
             font=self.font_mono,
-            insertbackground=COLOR_INFO,
+            height=4,
             relief=tk.FLAT,
-            bd=4,
+            bd=2,
             state=tk.DISABLED,
         )
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
     def _clear_log(self) -> None:
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
+
+    def open_telegram_group_dialog(self) -> None:
+        TelegramGroupConfigDialog(self.root, fleet_mgr=self.mgr, on_save_callback=self._on_seats_saved)
+
+    def action_add_ai(self, category: str = "code") -> None:
+        AddOrEditAiDialog(self.root, fleet_mgr=self.mgr, role_key=None, default_category=category, on_save_callback=self._on_seats_saved)
+
+    def open_edit_ai_dialog(self, role_key: str) -> None:
+        seats_cfg = self.mgr.load_seats_config()
+        seat = seats_cfg.seats.get(role_key)
+        cat = "code" if (seat and seat.engine in ALLOWED_CODE_ENGINES) else "chat"
+        AddOrEditAiDialog(self.root, fleet_mgr=self.mgr, role_key=role_key, default_category=cat, on_save_callback=self._on_seats_saved)
+
+    def open_three_seats_dialog(self) -> None:
+        ThreeSeatsConfigDialog(self.root, fleet_mgr=self.mgr, on_save_callback=self._on_seats_saved)
+
+    def _on_seats_saved(self) -> None:
+        self.append_log("👥 [SEATS] 席位与群组配置已保存并同步。")
+        self._render_ai_cards()
+        self._refresh_status()
+
+    def open_antigravity_tracks_dialog(self) -> None:
+        AntigravityTracksDialog(self.root, fleet_mgr=self.mgr, on_bind_callback=self._on_track_bound)
+
+    def _on_track_bound(self) -> None:
+        self.append_log("🧭 [TRACK] Antigravity 轨道已绑定。")
+        self._render_ai_cards()
 
     def open_setup_wizard(self) -> None:
         self.open_three_seats_dialog()
@@ -4229,160 +5061,109 @@ class PocketFleetControlApp:
             webbrowser.open("http://127.0.0.1:8765")
 
     def _action_open_tg(self) -> None:
-        """Open Telegram Web or Bot in browser / desktop client."""
+        """Open Telegram group, client or bot."""
         cfg = self.mgr.load_seats_config()
-        lead = cfg.seats.get("lead")
-        if lead and lead.bot_username:
-            uname = lead.bot_username.lstrip("@")
-            webbrowser.open(f"https://t.me/{uname}")
-        elif cfg.telegram_chat_id:
-            webbrowser.open("https://web.telegram.org/")
+        if cfg.telegram_chat_id:
+            # If standard negative chat ID, attempt Telegram deep link or web
+            cid = cfg.telegram_chat_id.replace("-100", "").replace("-", "")
+            webbrowser.open(f"https://t.me/c/{cid}")
         else:
-            webbrowser.open("https://web.telegram.org/")
+            lead = cfg.seats.get("lead")
+            if lead and lead.bot_username:
+                uname = lead.bot_username.lstrip("@")
+                webbrowser.open(f"https://t.me/{uname}")
+            else:
+                webbrowser.open("https://web.telegram.org/")
 
     def _action_install_ext(self) -> None:
-        """Locate extension directory, seed token, and guide browser installation."""
-        ext_dir = REPO_ROOT / "browser-extension"
-        if not ext_dir.is_dir():
-            ext_dir = REPO_ROOT / "assets" / "browser-extension"
-        if ext_dir.is_dir():
-            from pocketfleet.bridge_server import seed_extension_token
-            seed_extension_token(repo_root=REPO_ROOT, ext_path=ext_dir)
-            try:
-                os.startfile(str(ext_dir))
-            except Exception:
-                pass
-            messagebox.showinfo(
-                "浏览器扩展安装指引",
-                f"已为您自动打开浏览器扩展目录：\n{ext_dir}\n\n"
-                "【Chrome / Edge 安装两步法】：\n"
-                "1. 打开浏览器并访问 chrome://extensions 页面；\n"
-                "2. 打开右上角【开发者模式】，点击【加载已解压的扩展程序】，选择当前打开的文件夹即可！\n\n"
-                "（通信令牌已由 PocketFleet 自动配置就绪，无需手动复制）",
-                parent=self.root,
-            )
+        ext_dir = REPO_ROOT / "web-extension"
+        if ext_dir.exists():
+            webbrowser.open(f"file:///{ext_dir.as_posix()}")
+        webbrowser.open("chrome://extensions")
 
     def _action_start_daemon(self) -> None:
-        def _task():
-            ok = self.mgr.start_daemon()
-            if not ok:
-                self.root.after(0, self._on_daemon_start_failed)
-        threading.Thread(target=_task, daemon=True).start()
-
-    def _on_daemon_start_failed(self) -> None:
-        token, _, _ = self.mgr._load_credentials()
-        if not token:
-            messagebox.showwarning(
-                "启动提示: 缺少 Bot Token",
-                "未能启动 Telegram Bridge Daemon：未检测到有效的 Telegram Bot Token。\n\n"
-                "已为您打开【配置三席位】，请在席位中填入您的 Bot Token 并点击保存后再启动！",
-                parent=self.root,
-            )
-            self.open_three_seats_dialog()
-        else:
-            messagebox.showerror(
-                "启动失败",
-                "未能启动 Telegram Bridge Daemon，请查看下方日志控制台获取详细报错信息。",
-                parent=self.root,
-            )
+        def _run():
+            started = self.mgr.start_daemon()
+            if not started:
+                self.append_log("🔴 [ERROR] 无法启动 Telegram 守护网关，请先检查 Bot Token 与白名单配置。")
+            else:
+                self.append_log("🟢 [DAEMON] Telegram 守护网关已成功启动。")
+        threading.Thread(target=_run, daemon=True).start()
 
     def action_start_all(self) -> None:
-        self.append_log("Starting all PocketFleet services...")
-        def _run():
-            self.mgr.start_bridge()
-            self.mgr.start_cockpit(8765, open_browser=False)
-            time.sleep(0.3)
-            self._action_start_daemon()
-        threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(target=self._action_start_daemon, daemon=True).start()
+        threading.Thread(target=self.mgr.start_bridge, daemon=True).start()
+        threading.Thread(target=lambda: self.mgr.start_cockpit(8765, False), daemon=True).start()
+        show_floating_toast(self.root, "正在启动所有服务", "已发送全部网关服务启动指令。")
 
     def action_stop_all(self) -> None:
-        self.append_log("Stopping all PocketFleet services...")
-        def _run():
-            self.mgr.stop_daemon()
-            self.mgr.stop_cockpit()
-            self.mgr.stop_bridge()
-            self.append_log("All services stopped.")
-        threading.Thread(target=_run, daemon=True).start()
-
-    # ---------------- System Tray ----------------
-    def _setup_tray(self) -> None:
-        if not HAS_TRAY or pystray is None:
-            return
-        menu = pystray.Menu(
-            pystray.MenuItem("🚀 Open PocketFleet Control Panel", self.show_from_tray, default=True),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("👥 Configure Seats (三席位编排)", self.open_three_seats_dialog),
-            pystray.MenuItem("🌐 Open Web Cockpit (Port 8765)", self._action_open_browser),
-            pystray.MenuItem("⚡ Start All Services", self.action_start_all),
-            pystray.MenuItem("🛑 Stop All Services", self.action_stop_all),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("❌ Exit PocketFleet", self.quit_app),
-        )
-        self.tray_icon = pystray.Icon(
-            "PocketFleetControl",
-            create_tray_image("cyan"),
-            "PocketFleet Control Panel",
-            menu,
-        )
-        self.tray_icon.run_detached()
-
-    def hide_to_tray(self) -> None:
-        self.root.withdraw()
-        if self.tray_icon:
-            try:
-                self.tray_icon.notify("PocketFleet is minimized to the system tray and running in background.", "PocketFleet")
-            except Exception:
-                pass
-
-    def show_from_tray(self, icon=None, item=None) -> None:
-        self.root.after(0, self._restore_window)
-
-    def _restore_window(self) -> None:
-        try:
-            self.root.deiconify()
-            self.root.state("normal")
-            self.root.lift()
-            self.root.attributes("-topmost", True)
-            self.root.after_idle(self.root.attributes, "-topmost", False)
-            self.root.focus_force()
-        except Exception as e:
-            logger.debug("Failed restoring window: %s", e)
-
-    def quit_app(self, icon=None, item=None) -> None:
-        self.is_quitting = True
-        self.mgr.stop_daemon()
-        self.mgr.stop_cockpit()
-        self.mgr.stop_bridge()
-        if self.tray_icon:
-            self.tray_icon.stop()
-        self.root.after(0, self.root.destroy)
+        threading.Thread(target=self.mgr.stop_daemon, daemon=True).start()
+        threading.Thread(target=self.mgr.stop_bridge, daemon=True).start()
+        threading.Thread(target=self.mgr.stop_cockpit, daemon=True).start()
+        show_floating_toast(self.root, "正在停止服务", "已发送网关停止指令。")
 
     def _update_row(self, row: dict, is_running: bool, detail: str) -> None:
-        next_state = (is_running, detail)
-        if row.get("state") == next_state:
-            return
+        color = COLOR_ACCENT_GREEN if is_running else COLOR_DANGER
+        row["canvas"].itemconfig(row["light"], fill=color)
         row["detail"].config(text=detail)
-        fill_color = COLOR_SUCCESS if is_running else COLOR_DANGER
-        row["canvas"].itemconfig(row["light"], fill=fill_color)
-        if row.get("button") and row.get("on_start"):
+        if "button" in row:
             if is_running:
                 row["button"].config(
                     text="Stop",
                     bg=COLOR_DANGER,
-                    activebackground=COLOR_DANGER_HOVER,
                     command=row["on_stop"],
                 )
             else:
                 row["button"].config(
                     text="Start",
-                    bg=COLOR_SUCCESS,
-                    activebackground=COLOR_SUCCESS_HOVER,
+                    bg=COLOR_ACCENT_GREEN,
                     command=row["on_start"],
                 )
-        row["state"] = next_state
+
+    def _setup_tray(self) -> None:
+        if not HAS_TRAY or pystray is None:
+            return
+
+        icon_img = create_tray_image("cyan")
+        if not icon_img:
+            return
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Restore Window", lambda: self.root.after(0, self._restore_window)),
+            pystray.MenuItem("Start All", lambda: self.root.after(0, self.action_start_all)),
+            pystray.MenuItem("Stop All", lambda: self.root.after(0, self.action_stop_all)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Exit", lambda: self.root.after(0, self.quit_app)),
+        )
+
+        self.tray_icon = pystray.Icon("pocketfleet", icon_img, "PocketFleet Control", menu)
+        threading.Thread(target=self.tray_icon.run, daemon=True, name="SystemTrayThread").start()
+
+    def hide_to_tray(self) -> None:
+        if self.tray_icon:
+            self.root.withdraw()
+        else:
+            self.quit_app()
+
+    def _restore_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def quit_app(self) -> None:
+        self.is_quitting = True
+        if self.tray_icon:
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
+        self.mgr.stop_daemon()
+        self.mgr.stop_bridge()
+        self.root.destroy()
 
 
 _SINGLE_INSTANCE_SOCKET = None
+
 
 
 def acquire_single_instance_lock(port: int = 18766) -> bool:
