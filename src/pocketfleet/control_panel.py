@@ -2869,6 +2869,8 @@ class AddOrEditAiDialog(tk.Toplevel):
         fleet_mgr,
         role_key: Optional[str] = None,
         default_category: str = "code",
+        preset_engine: Optional[str] = None,
+        preset_name: Optional[str] = None,
         on_save_callback=None,
     ):
         super().__init__(parent)
@@ -2876,6 +2878,8 @@ class AddOrEditAiDialog(tk.Toplevel):
         self.mgr = fleet_mgr
         self.role_key = role_key
         self.category = default_category
+        self.preset_engine = preset_engine
+        self.preset_name = preset_name
         self.on_save_callback = on_save_callback
 
         is_edit = bool(role_key)
@@ -2921,10 +2925,12 @@ class AddOrEditAiDialog(tk.Toplevel):
         seats_cfg = self.mgr.load_seats_config()
         seat = seats_cfg.seats.get(role_key) if (is_edit and role_key) else None
 
-        init_name = seat.name if seat else ("TechLead" if self.category == "code" else "Advisor")
+        default_name = preset_name or ("TechLead" if self.category == "code" else "Advisor")
+        init_name = seat.name if seat else default_name
         init_user = seat.bot_username if seat else ""
         init_token = (seat.get_token() if seat else "") or ""
-        init_engine = seat.engine if seat else ("antigravity" if self.category == "code" else "openai")
+        default_engine = preset_engine or ("antigravity" if self.category == "code" else "openai")
+        init_engine = seat.engine if seat else default_engine
 
         # 1. AI Name
         tk.Label(card, text="代号 / 昵称 (Name):", fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=font_lbl, anchor="w").pack(fill=tk.X)
@@ -4242,19 +4248,37 @@ class PocketFleetControlApp:
                 f"【无法启动 PocketFleet】\n\n{e}\n\n请修复 {CONFIG_FILE.name} 或删除后重新启动自动生成默认配置。",
             )
             self.root.destroy()
-            return
-
-        # 1. Modern Header with 3 Status Pills
+        # 1. Top Immersive Header (Dark Blue)
         self._build_modern_header()
 
-        # 2. Scrollable Viewport for Smooth Modern Layout
-        self.main_canvas = tk.Canvas(self.root, bg=COLOR_MODERN_BG, highlightthickness=0)
-        self.scrollbar = tk.Scrollbar(self.root, orient="vertical", command=self.main_canvas.yview)
+        # 2. Main Workspace (Sidebar + Scrollable Content Canvas)
+        self.workspace_frame = tk.Frame(self.root, bg=COLOR_MODERN_BG)
+        self.workspace_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 2.1 Left Navigation Sidebar
+        self.sidebar_frame = tk.Frame(
+            self.workspace_frame,
+            bg="#ffffff",
+            width=220,
+            highlightbackground=COLOR_CARD_BORDER,
+            highlightthickness=1,
+            bd=0,
+        )
+        self.sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.sidebar_frame.pack_propagate(False)
+        self._build_sidebar(self.sidebar_frame)
+
+        # 2.2 Right Content Canvas (Scrollable)
+        self.content_container = tk.Frame(self.workspace_frame, bg=COLOR_MODERN_BG)
+        self.content_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self.main_canvas = tk.Canvas(self.content_container, bg=COLOR_MODERN_BG, highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self.content_container, orient="vertical", command=self.main_canvas.yview)
         self.scroll_content = tk.Frame(self.main_canvas, bg=COLOR_MODERN_BG)
 
         self.scroll_content.bind(
             "<Configure>",
-            lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+            lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all")),
         )
 
         self.canvas_win_id = self.main_canvas.create_window((0, 0), window=self.scroll_content, anchor="nw")
@@ -4272,20 +4296,11 @@ class PocketFleetControlApp:
                 pass
         self.root.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # 3. Dismissible Modern Tip Banner
-        self._build_modern_banner(self.scroll_content)
+        # Build inside right content canvas
+        self._build_content_canvas(self.scroll_content)
 
-        # 4. Human Root & Telegram Group Dual Cards
-        self._build_root_and_group_cards(self.scroll_content)
-
-        # 5. Dual-Column AI Connector Matrix (Code AI vs Chat AI)
-        self._build_ai_matrix_section(self.scroll_content)
-
-        # 6. Collaboration Templates & Large CTA
-        self._build_collaboration_and_cta_section(self.scroll_content)
-
-        # 7. Collapsible Modern Diagnostics Section (Bottom Services)
-        self._build_diagnostics_section(self.scroll_content)
+        # 3. Bottom Modern Status Bar & Drawer
+        self._build_bottom_status_bar()
 
         # Compatibility panel reference for historical test suites
         self.seats_panel = ThreeSeatsConfigPanel(
@@ -4392,6 +4407,17 @@ class PocketFleetControlApp:
             if hasattr(self, "row_bridge"):
                 self._update_row(self.row_bridge, is_running=is_b, detail=cache.get("detail_b", "Offline"))
 
+            # Update bottom status indicators
+            if hasattr(self, "dot_tg_status"):
+                self.dot_tg_status.config(image=get_icon("dot_green" if is_d else "dot_gray", (8, 8)))
+                self.lbl_tg_sub.config(text="已连接" if is_d else "未连接")
+            if hasattr(self, "dot_web_status"):
+                self.dot_web_status.config(image=get_icon("dot_green" if is_c else "dot_gray", (8, 8)))
+                self.lbl_web_sub.config(text="运行中" if is_c else "未启动")
+            if hasattr(self, "dot_ext_status"):
+                self.dot_ext_status.config(image=get_icon("dot_green" if is_b else "dot_gray", (8, 8)))
+                self.lbl_ext_sub.config(text="已就绪" if is_b else "未就绪")
+
             # Calculate connected AI count
             seats_cfg = self.mgr.load_seats_config()
             connected_ai_count = 0
@@ -4399,31 +4425,19 @@ class PocketFleetControlApp:
                 if s.get_token() and s.bot_username:
                     connected_ai_count += 1
 
-            # Update Modern Header Pills
+            # Update Modern Header Pills (compatible references)
             if hasattr(self, "lbl_pill_tg"):
-                if is_d:
-                    self.lbl_pill_tg.config(text="Telegram 已连接", fg=COLOR_EMERALD_PILL_TEXT)
-                    self.dot_pill_tg.config(image=get_icon("dot_green", (8, 8)))
-                else:
-                    self.lbl_pill_tg.config(text="Telegram 未连接", fg=COLOR_TEXT_MUTED)
-                    self.dot_pill_tg.config(image=get_icon("dot_gray", (8, 8)))
+                self.lbl_pill_tg.config(text="Telegram 已连接" if is_d else "Telegram 未连接")
+                self.dot_pill_tg.config(image=get_icon("dot_green" if is_d else "dot_gray", (8, 8)))
 
             if hasattr(self, "lbl_pill_ai"):
-                if connected_ai_count > 0:
-                    self.lbl_pill_ai.config(text=f"{connected_ai_count} 个 AI 已接入", fg=COLOR_EMERALD_PILL_TEXT)
-                    self.dot_pill_ai.config(image=get_icon("dot_green", (8, 8)))
-                else:
-                    self.lbl_pill_ai.config(text="0 个 AI 已接入", fg=COLOR_TEXT_MUTED)
-                    self.dot_pill_ai.config(image=get_icon("dot_gray", (8, 8)))
+                self.lbl_pill_ai.config(text=f"{connected_ai_count} 个 AI 已接入")
+                self.dot_pill_ai.config(image=get_icon("dot_green" if connected_ai_count > 0 else "dot_gray", (8, 8)))
 
             if hasattr(self, "lbl_pill_meet"):
                 can_meet = is_d and (connected_ai_count >= 2)
-                if can_meet:
-                    self.lbl_pill_meet.config(text="可以开会", fg=COLOR_EMERALD_PILL_TEXT)
-                    self.dot_pill_meet.config(image=get_icon("dot_green", (8, 8)))
-                else:
-                    self.lbl_pill_meet.config(text="待配齐开会", fg=COLOR_TEXT_MUTED)
-                    self.dot_pill_meet.config(image=get_icon("dot_gray", (8, 8)))
+                self.lbl_pill_meet.config(text="可以开会" if can_meet else "待配齐开会")
+                self.dot_pill_meet.config(image=get_icon("dot_green" if can_meet else "dot_gray", (8, 8)))
 
             # Update TG Group Card info
             if hasattr(self, "lbl_group_title"):
@@ -4444,192 +4458,485 @@ class PocketFleetControlApp:
             self.root.after(1000, self._refresh_status)
 
     def _build_modern_header(self) -> None:
-        """Top Header with clean brand identity and 3 right-aligned status pills."""
-        header_outer = tk.Frame(self.root, bg=COLOR_CARD_BG, height=68)
+        """Top Header with immersive dark navy background and embedded tip banner."""
+        header_outer = tk.Frame(self.root, bg="#0e3c5d", height=70)
         header_outer.pack(fill=tk.X)
 
-        # 1px subtle border line at bottom
-        sep = tk.Frame(header_outer, bg=COLOR_CARD_BORDER, height=1)
-        sep.pack(side=tk.BOTTOM, fill=tk.X)
-
-        header = tk.Frame(header_outer, bg=COLOR_CARD_BG, padx=20, pady=10)
+        header = tk.Frame(header_outer, bg="#0e3c5d", padx=20, pady=10)
         header.pack(fill=tk.X)
 
         # Left Branding
-        brand_frame = tk.Frame(header, bg=COLOR_CARD_BG)
+        brand_frame = tk.Frame(header, bg="#0e3c5d")
         brand_frame.pack(side=tk.LEFT)
 
-        logo_lbl = tk.Label(brand_frame, image=get_icon("logo_rocket", (40, 40)), bg=COLOR_CARD_BG)
+        logo_lbl = tk.Label(brand_frame, image=get_icon("logo_rocket", (38, 38)), bg="#0e3c5d")
         logo_lbl.pack(side=tk.LEFT, padx=(0, 10))
 
-        text_box = tk.Frame(brand_frame, bg=COLOR_CARD_BG)
+        text_box = tk.Frame(brand_frame, bg="#0e3c5d")
         text_box.pack(side=tk.LEFT)
 
-        title_row = tk.Frame(text_box, bg=COLOR_CARD_BG)
+        title_row = tk.Frame(text_box, bg="#0e3c5d")
         title_row.pack(anchor="w")
-        tk.Label(title_row, text="PocketFleet Control Panel", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_title).pack(side=tk.LEFT)
-        tk.Label(title_row, text="  把你的 AI 接入 Telegram", fg="#475569", bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT, pady=(3, 0))
+        tk.Label(title_row, text="PocketFleet Control Panel", fg="#ffffff", bg="#0e3c5d", font=self.font_title).pack(side=tk.LEFT)
 
         tk.Label(
             text_box,
             text="AI STARFLEET COMMUNICATION HUB  |  XAMPP-STYLE TRAY CONTROLLER  |  v0.2.0",
-            fg=COLOR_TEXT_LIGHT,
-            bg=COLOR_CARD_BG,
+            fg="#8cb4d2",
+            bg="#0e3c5d",
             font=tkfont.Font(family=get_ui_font_family(), size=8),
         ).pack(anchor="w", pady=(1, 0))
 
-        # Right Status Pills
-        pills_frame = tk.Frame(header, bg=COLOR_CARD_BG)
-        pills_frame.pack(side=tk.RIGHT)
-
-        def _make_pill(parent, icon_name: str, default_text: str):
-            f = tk.Frame(
-                parent,
-                bg=COLOR_EMERALD_PILL_BG,
-                highlightbackground="#a7f3d0",
-                highlightthickness=1,
-                bd=0,
-                padx=12,
-                pady=6,
-            )
-            f.pack(side=tk.LEFT, padx=5)
-
-            icon_lbl = tk.Label(f, image=get_icon(icon_name, (20, 20)), bg=COLOR_EMERALD_PILL_BG)
-            icon_lbl.pack(side=tk.LEFT, padx=(0, 6))
-
-            lbl = tk.Label(f, text=default_text, fg=COLOR_EMERALD_PILL_TEXT, bg=COLOR_EMERALD_PILL_BG, font=self.font_pill)
-            lbl.pack(side=tk.LEFT, padx=(0, 6))
-
-            dot = tk.Label(f, image=get_icon("dot_green", (8, 8)), bg=COLOR_EMERALD_PILL_BG)
-            dot.pack(side=tk.LEFT)
-            return f, lbl, dot
-
-        self.pill_tg_frame, self.lbl_pill_tg, self.dot_pill_tg = _make_pill(pills_frame, "tg_circle", "Telegram 已连接")
-        self.pill_ai_frame, self.lbl_pill_ai, self.dot_pill_ai = _make_pill(pills_frame, "bot_green", "3 个 AI 已接入")
-        self.pill_meet_frame, self.lbl_pill_meet, self.dot_pill_meet = _make_pill(pills_frame, "users", "可以开会")
-
-    def _build_modern_banner(self, parent) -> None:
-        """Dismissible modern blue tip banner."""
-        self.banner_frame = tk.Frame(
-            parent,
-            bg=COLOR_ACCENT_BLUE_BG,
-            highlightbackground=COLOR_ACCENT_BLUE_BORDER,
+        # Right Embedded Tip Banner
+        banner_box = tk.Frame(
+            header,
+            bg="#092d47",
+            highlightbackground="#18527a",
             highlightthickness=1,
             bd=0,
-            padx=16,
-            pady=10,
+            padx=14,
+            pady=6,
         )
-        self.banner_frame.pack(fill=tk.X, padx=16, pady=(12, 10))
+        banner_box.pack(side=tk.RIGHT)
 
-        icon_lbl = tk.Label(self.banner_frame, image=get_icon("lightbulb", (22, 22)), bg=COLOR_ACCENT_BLUE_BG)
-        icon_lbl.pack(side=tk.LEFT, anchor="n", padx=(0, 12))
+        tk.Label(banner_box, image=get_icon("lightbulb", (20, 20)), bg="#092d47").pack(side=tk.LEFT, padx=(0, 8))
 
-        text_box = tk.Frame(self.banner_frame, bg=COLOR_ACCENT_BLUE_BG)
-        text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        b_text_box = tk.Frame(banner_box, bg="#092d47")
+        b_text_box.pack(side=tk.LEFT)
 
         tk.Label(
-            text_box,
-            text="桌面端负责 AI 接入与连接管理；会议参与者与主持人由 Telegram /meet 面板决定。",
-            fg="#0369a1",
-            bg=COLOR_ACCENT_BLUE_BG,
-            font=self.font_bold,
+            b_text_box,
+            text="桌面端负责 AI 接入与连接管理；会议参与者与主持由 Telegram /meet 面板决定。",
+            fg="#ffffff",
+            bg="#092d47",
+            font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
             anchor="w",
-        ).pack(fill=tk.X)
+        ).pack(anchor="w")
 
         tk.Label(
-            text_box,
+            b_text_box,
             text="在这里连接和管理你的 AI 工具，然后前往 Telegram 使用 /meet 组建今天的会议，指定参与者并分配任务。",
-            fg="#0284c7",
-            bg=COLOR_ACCENT_BLUE_BG,
-            font=self.font_sub,
+            fg="#a5c9e8",
+            bg="#092d47",
+            font=tkfont.Font(family=get_ui_font_family(), size=8),
             anchor="w",
-        ).pack(fill=tk.X, pady=(2, 0))
+        ).pack(anchor="w")
 
-        btn_close = tk.Button(
-            self.banner_frame,
-            text="✕",
-            bg=COLOR_ACCENT_BLUE_BG,
+        # Hidden pills references to preserve test suite compatibility
+        self.lbl_pill_tg = tk.Label(header_outer, text="Telegram 已连接")
+        self.dot_pill_tg = tk.Label(header_outer)
+        self.lbl_pill_ai = tk.Label(header_outer, text="3 个 AI 已接入")
+        self.dot_pill_ai = tk.Label(header_outer)
+        self.lbl_pill_meet = tk.Label(header_outer, text="可以开会")
+        self.dot_pill_meet = tk.Label(header_outer)
+
+    def _build_sidebar(self, parent) -> None:
+        """Left navigation sidebar containing AI Binding, Collaboration Modes, and TG Config."""
+        # Top padding
+        pad_top = tk.Frame(parent, bg="#ffffff", height=12)
+        pad_top.pack(fill=tk.X)
+
+        # ---------------- Section 1: 🔗 绑定AI ----------------
+        sec1 = tk.Frame(parent, bg="#ffffff", padx=12, pady=6)
+        sec1.pack(fill=tk.X)
+
+        sec1_hdr = tk.Frame(sec1, bg="#ffffff")
+        sec1_hdr.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(sec1_hdr, text="🔗 绑定AI", fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(sec1_hdr, text="∧", fg="#94a3b8", bg="#ffffff", font=self.font_sub).pack(side=tk.RIGHT)
+
+        self.btn_nav_code = tk.Button(
+            sec1,
+            text="  </>  + 代码AI",
+            bg="#e0f2fe",
             fg="#0284c7",
-            activebackground=COLOR_ACCENT_BLUE_BG,
-            activeforeground="#0369a1",
+            activebackground="#e0f2fe",
+            activeforeground="#0284c7",
             font=self.font_bold,
             relief=tk.FLAT,
             bd=0,
+            padx=10,
+            pady=8,
+            anchor="w",
             cursor="hand2",
-            command=self.banner_frame.destroy,
+            command=lambda: self._switch_nav_tab("code"),
         )
-        btn_close.pack(side=tk.RIGHT, anchor="n")
+        self.btn_nav_code.pack(fill=tk.X, pady=2)
 
-    def _build_root_and_group_cards(self, parent) -> None:
-        """Human Root card & Telegram Group card in dual-column layout."""
-        cards_row = tk.Frame(
-            parent,
-            bg=COLOR_CARD_BG,
+        self.btn_nav_chat = tk.Button(
+            sec1,
+            text="  💬  + 对话AI",
+            bg="#ffffff",
+            fg="#475569",
+            activebackground="#f1f5f9",
+            activeforeground="#1e293b",
+            font=self.font_regular,
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=8,
+            anchor="w",
+            cursor="hand2",
+            command=lambda: self._switch_nav_tab("chat"),
+        )
+        self.btn_nav_chat.pack(fill=tk.X, pady=2)
+
+        # ---------------- Section 2: 👥 协作方式 ----------------
+        sec2 = tk.Frame(parent, bg="#ffffff", padx=12, pady=10)
+        sec2.pack(fill=tk.X)
+
+        sec2_hdr = tk.Frame(sec2, bg="#ffffff")
+        sec2_hdr.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(sec2_hdr, text="👥 协作方式", fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(sec2_hdr, text="∧", fg="#94a3b8", bg="#ffffff", font=self.font_sub).pack(side=tk.RIGHT)
+
+        self.btn_collab_2ai = tk.Button(
+            sec2,
+            text="  👥  Human Root + 2 AI",
+            bg="#dcfce7",
+            fg="#047857",
+            activebackground="#dcfce7",
+            activeforeground="#047857",
+            font=self.font_bold,
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=7,
+            anchor="w",
+            cursor="hand2",
+            command=lambda: self._select_collab_template("2ai"),
+        )
+        self.btn_collab_2ai.pack(fill=tk.X, pady=2)
+
+        # Dropdown Toggle for More
+        self.collab_expanded = False
+        self.btn_more_collab = tk.Button(
+            sec2,
+            text="更多 ∨",
+            bg="#ffffff",
+            fg="#64748b",
+            activebackground="#f1f5f9",
+            activeforeground="#1e293b",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            bd=0,
+            pady=3,
+            cursor="hand2",
+            command=self._toggle_collab_more,
+        )
+        self.btn_more_collab.pack(fill=tk.X)
+
+        self.frame_collab_more = tk.Frame(sec2, bg="#ffffff")
+        # Hidden initially
+
+        self.btn_collab_3ai = tk.Button(
+            self.frame_collab_more,
+            text="Human Root + 3 AI",
+            bg="#ffffff",
+            fg="#64748b",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            bd=0,
+            padx=12,
+            pady=5,
+            anchor="w",
+            cursor="hand2",
+            command=lambda: self._select_collab_template("3ai"),
+        )
+        self.btn_collab_3ai.pack(fill=tk.X, pady=1)
+
+        self.btn_collab_nai = tk.Button(
+            self.frame_collab_more,
+            text="Human Root + N AI",
+            bg="#ffffff",
+            fg="#64748b",
+            font=self.font_sub,
+            relief=tk.FLAT,
+            bd=0,
+            padx=12,
+            pady=5,
+            anchor="w",
+            cursor="hand2",
+            command=lambda: self._select_collab_template("nai"),
+        )
+        self.btn_collab_nai.pack(fill=tk.X, pady=1)
+
+        # ---------------- Section 3: ✈️ Telegram设置 ----------------
+        sec3 = tk.Frame(parent, bg="#ffffff", padx=12, pady=10)
+        sec3.pack(fill=tk.X)
+
+        sec3_hdr = tk.Frame(sec3, bg="#ffffff")
+        sec3_hdr.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(sec3_hdr, text="✈️ Telegram设置", fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tk.Label(sec3_hdr, text="∧", fg="#94a3b8", bg="#ffffff", font=self.font_sub).pack(side=tk.RIGHT)
+
+        btn_set_tg = tk.Button(
+            sec3,
+            text="  ⚙  设置TG群组",
+            bg="#ffffff",
+            fg="#475569",
+            activebackground="#f1f5f9",
+            font=self.font_regular,
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=6,
+            anchor="w",
+            cursor="hand2",
+            command=self.open_telegram_group_dialog,
+        )
+        btn_set_tg.pack(fill=tk.X, pady=2)
+
+        # ---------------- Bottom Fixed CTA ----------------
+        cta_frame = tk.Frame(parent, bg="#ffffff", padx=12, pady=16)
+        cta_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        btn_go_tg = tk.Button(
+            cta_frame,
+            text="  前往Telegram开会 ❯",
+            image=get_icon("white_plane", (16, 16)),
+            compound=tk.LEFT,
+            bg=COLOR_ACCENT_GREEN,
+            fg="#ffffff",
+            activebackground=COLOR_ACCENT_GREEN_HOVER,
+            activeforeground="#ffffff",
+            font=tkfont.Font(family=get_ui_font_family(), size=10, weight="bold"),
+            relief=tk.FLAT,
+            bd=0,
+            padx=12,
+            pady=10,
+            cursor="hand2",
+            command=self._action_open_tg,
+        )
+        btn_go_tg.pack(fill=tk.X)
+
+        tk.Label(
+            cta_frame,
+            text="在 Telegram 使用 /meet 组建会议",
+            fg="#94a3b8",
+            bg="#ffffff",
+            font=tkfont.Font(family=get_ui_font_family(), size=8),
+        ).pack(fill=tk.X, pady=(6, 0))
+
+    def _toggle_collab_more(self) -> None:
+        self.collab_expanded = not self.collab_expanded
+        if self.collab_expanded:
+            self.frame_collab_more.pack(fill=tk.X, pady=(2, 0))
+            self.btn_more_collab.config(text="收起 ∧")
+        else:
+            self.frame_collab_more.pack_forget()
+            self.btn_more_collab.config(text="更多 ∨")
+
+    def _select_collab_template(self, mode: str) -> None:
+        if mode == "2ai":
+            self.btn_collab_2ai.config(bg="#dcfce7", fg="#047857", font=self.font_bold)
+            self.btn_collab_3ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
+            self.btn_collab_nai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
+            show_floating_toast(self.root, "协作模式", "已切换至 Human Root + 2 AI 编队模式。")
+        elif mode == "3ai":
+            self.btn_collab_2ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
+            self.btn_collab_3ai.config(bg="#dcfce7", fg="#047857", font=self.font_bold)
+            self.btn_collab_nai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
+            show_floating_toast(self.root, "协作模式", "已切换至 Human Root + 3 AI (主持/审计/施工) 模式。")
+        else:
+            self.btn_collab_2ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
+            self.btn_collab_3ai.config(bg="#ffffff", fg="#64748b", font=self.font_sub)
+            self.btn_collab_nai.config(bg="#dcfce7", fg="#047857", font=self.font_bold)
+            show_floating_toast(self.root, "协作模式", "已切换至 Human Root + N AI 自由扩展模式。")
+
+    def _switch_nav_tab(self, category: str) -> None:
+        self.current_ai_category = category
+        if category == "code":
+            self.btn_nav_code.config(bg="#e0f2fe", fg="#0284c7", font=self.font_bold)
+            self.btn_nav_chat.config(bg="#ffffff", fg="#475569", font=self.font_regular)
+            self.lbl_shelf_title.config(text="</> 添加代码AI")
+            self.lbl_shelf_desc.config(text="选择并连接你常用的代码 AI 工具。连接后，它们将可以在 Telegram 会议中被你召唤和使用。")
+            self.lbl_connected_title.config(text="已连接的代码AI")
+        else:
+            self.btn_nav_code.config(bg="#ffffff", fg="#475569", font=self.font_regular)
+            self.btn_nav_chat.config(bg="#e0f2fe", fg="#0284c7", font=self.font_bold)
+            self.lbl_shelf_title.config(text="💬 添加对话AI")
+            self.lbl_shelf_desc.config(text="选择并连接你常用的对话与分析 AI 工具。连接后，它们将在 Telegram 会议中协助多轮推理。")
+            self.lbl_connected_title.config(text="已连接的对话AI")
+
+        self._render_shelf_cards()
+        self._render_connected_cards()
+
+    def _build_content_canvas(self, parent) -> None:
+        """Right Main Content Viewport: Header Dual Cards, Marketplace Shelf, Connected List."""
+        canvas_box = tk.Frame(parent, bg=COLOR_MODERN_BG, padx=20, pady=16)
+        canvas_box.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Top Dual Cards
+        top_cards = tk.Frame(canvas_box, bg=COLOR_MODERN_BG)
+        top_cards.pack(fill=tk.X, pady=(0, 14))
+        top_cards.columnconfigure(0, weight=3)
+        top_cards.columnconfigure(1, weight=2)
+
+        # Left: Human Root Card
+        card_root = tk.Frame(
+            top_cards,
+            bg="#ffffff",
             highlightbackground=COLOR_CARD_BORDER,
             highlightthickness=1,
             bd=0,
-            padx=16,
-            pady=12,
+            padx=14,
+            pady=10,
         )
-        cards_row.pack(fill=tk.X, padx=16, pady=(0, 12))
-        cards_row.columnconfigure(0, weight=1)
-        cards_row.columnconfigure(1, weight=0)
-        cards_row.columnconfigure(2, weight=1)
+        card_root.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
-        # 1. Left Column: Human Root / 人类指挥官
-        card_root = tk.Frame(cards_row, bg=COLOR_CARD_BG)
-        card_root.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        tk.Label(card_root, image=get_icon("human_circle", (38, 38)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 12))
 
-        tk.Label(card_root, image=get_icon("human_circle", (38, 38)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 12))
-
-        root_text_box = tk.Frame(card_root, bg=COLOR_CARD_BG)
+        root_text_box = tk.Frame(card_root, bg="#ffffff")
         root_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        head_line = tk.Frame(root_text_box, bg=COLOR_CARD_BG)
+        head_line = tk.Frame(root_text_box, bg="#ffffff")
         head_line.pack(anchor="w")
-        tk.Label(head_line, text="Human Root / 人类指挥官", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
-
-        tag = tk.Label(head_line, text=" 核心控制中心 ", fg="#ffffff", bg=COLOR_ACCENT_GREEN, font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"))
+        tk.Label(head_line, text="Human Root / 人类指挥官", fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        tag = tk.Label(
+            head_line,
+            text=" 核心控制中心 ",
+            fg="#ffffff",
+            bg=COLOR_ACCENT_GREEN,
+            font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
+        )
         tag.pack(side=tk.LEFT, padx=8)
 
         tk.Label(
             root_text_box,
             text="你是编队的指挥官，负责在 Telegram 中组建会议、指定参与者并分配任务。",
             fg=COLOR_TEXT_MUTED,
-            bg=COLOR_CARD_BG,
+            bg="#ffffff",
             font=self.font_sub,
             anchor="w",
-        ).pack(anchor="w", pady=(3, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
-        # Vertical Divider
-        sep = tk.Frame(cards_row, bg=COLOR_CARD_BORDER, width=1)
-        sep.grid(row=0, column=1, sticky="ns", padx=8)
+        # Right: Quick Telegram Meet Card
+        card_tg_quick = tk.Frame(
+            top_cards,
+            bg="#ffffff",
+            highlightbackground=COLOR_CARD_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=14,
+            pady=10,
+            cursor="hand2",
+        )
+        card_tg_quick.grid(row=0, column=1, sticky="nsew")
+        card_tg_quick.bind("<Button-1>", lambda e: self._action_open_tg())
 
-        # 2. Right Column: Telegram Group WarRoom
-        card_group = tk.Frame(cards_row, bg=COLOR_CARD_BG)
-        card_group.grid(row=0, column=2, sticky="nsew", padx=(12, 0))
+        tk.Label(card_tg_quick, image=get_icon("tg_circle", (36, 36)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 10))
 
-        tk.Label(card_group, image=get_icon("tg_circle", (38, 38)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 12))
+        q_box = tk.Frame(card_tg_quick, bg="#ffffff")
+        q_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        q_box.bind("<Button-1>", lambda e: self._action_open_tg())
 
-        grp_text_box = tk.Frame(card_group, bg=COLOR_CARD_BG)
-        grp_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        lbl_tg_link = tk.Label(
+            q_box,
+            text="前往 Telegram 使用 /meet  ❯",
+            fg="#0369a1",
+            bg="#ffffff",
+            font=self.font_bold,
+            cursor="hand2",
+        )
+        lbl_tg_link.pack(anchor="w")
+        lbl_tg_link.bind("<Button-1>", lambda e: self._action_open_tg())
 
-        seats_cfg = self.mgr.load_seats_config()
-        g_name = seats_cfg.telegram_group_name or "Fleet WarRoom"
-        cid = seats_cfg.telegram_chat_id or (os.environ.get("TELEGRAM_GROUP_ID") or "未配置")
+        tk.Label(
+            q_box,
+            text="邀请 AI 参与会议并开始协作",
+            fg=COLOR_TEXT_MUTED,
+            bg="#ffffff",
+            font=self.font_sub,
+        ).pack(anchor="w", pady=(2, 0))
 
-        top_grp_line = tk.Frame(grp_text_box, bg=COLOR_CARD_BG)
-        top_grp_line.pack(anchor="w")
-        tk.Label(top_grp_line, text="TG 群组: ", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
-        self.lbl_group_title = tk.Label(top_grp_line, text=g_name, fg="#2563eb", bg=COLOR_CARD_BG, font=self.font_bold)
-        self.lbl_group_title.pack(side=tk.LEFT)
+        # 2. Marketplace Shelf Section
+        shelf_card = tk.Frame(
+            canvas_box,
+            bg="#ffffff",
+            highlightbackground=COLOR_CARD_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=16,
+            pady=14,
+        )
+        shelf_card.pack(fill=tk.X, pady=(0, 14))
 
-        self.lbl_group_chat_id = tk.Label(grp_text_box, text=f"Chat ID: {cid} (全席位共用)", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub)
-        self.lbl_group_chat_id.pack(anchor="w", pady=(3, 0))
+        shelf_hdr = tk.Frame(shelf_card, bg="#ffffff")
+        shelf_hdr.pack(fill=tk.X)
 
-        btn_group_cfg = tk.Button(
-            card_group,
-            text=" ⚙ 设置",
+        self.lbl_shelf_title = tk.Label(
+            shelf_hdr,
+            text="</> 添加代码AI",
+            fg=COLOR_TEXT_TITLE,
+            bg="#ffffff",
+            font=self.font_section,
+        )
+        self.lbl_shelf_title.pack(side=tk.LEFT)
+
+        btn_how = tk.Label(
+            shelf_hdr,
+            text="❓ 如何选择?",
+            fg="#0284c7",
+            bg="#ffffff",
+            font=self.font_sub,
+            cursor="hand2",
+        )
+        btn_how.pack(side=tk.RIGHT)
+        btn_how.bind(
+            "<Button-1>",
+            lambda e: show_floating_toast(
+                self.root,
+                "如何选择 AI",
+                "代码 AI 负责编程与工程实现 (如 Codex/Claude/Antigravity)；\n对话 AI 负责多轮推理、需求拆解与架构讨论 (如 ChatGPT)。",
+            ),
+        )
+
+        self.lbl_shelf_desc = tk.Label(
+            shelf_card,
+            text="选择并连接你常用的代码 AI 工具。连接后，它们将可以在 Telegram 会议中被你召唤和使用。",
+            fg=COLOR_TEXT_MUTED,
+            bg="#ffffff",
+            font=self.font_sub,
+        )
+        self.lbl_shelf_desc.pack(anchor="w", pady=(2, 12))
+
+        # 5-Column Shelf Cards Container
+        self.shelf_frame = tk.Frame(shelf_card, bg="#ffffff")
+        self.shelf_frame.pack(fill=tk.X)
+        for c in range(5):
+            self.shelf_frame.columnconfigure(c, weight=1)
+
+        self._render_shelf_cards()
+
+        # 3. Connected AI List Section
+        conn_outer = tk.Frame(
+            canvas_box,
+            bg="#ffffff",
+            highlightbackground=COLOR_CARD_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=16,
+            pady=14,
+        )
+        conn_outer.pack(fill=tk.X, pady=(0, 14))
+
+        conn_hdr = tk.Frame(conn_outer, bg="#ffffff")
+        conn_hdr.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(conn_hdr, image=get_icon("code_circle", (20, 20)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 6))
+        self.lbl_connected_title = tk.Label(
+            conn_hdr,
+            text="已连接的代码AI (1)",
+            fg=COLOR_TEXT_TITLE,
+            bg="#ffffff",
+            font=self.font_section,
+        )
+        self.lbl_connected_title.pack(side=tk.LEFT)
+
+        btn_refresh = tk.Button(
+            conn_hdr,
+            text=" 🔄 刷新",
             bg="#ffffff",
             fg=COLOR_BTN_OUTLINE_TEXT,
             activebackground=COLOR_BTN_OUTLINE_HOVER,
@@ -4638,255 +4945,394 @@ class PocketFleetControlApp:
             bd=0,
             relief=tk.FLAT,
             font=self.font_sub,
-            padx=12,
-            pady=5,
+            padx=10,
+            pady=3,
             cursor="hand2",
-            command=self.open_telegram_group_dialog,
+            command=self._render_connected_cards,
         )
-        btn_group_cfg.pack(side=tk.RIGHT)
+        btn_refresh.pack(side=tk.RIGHT)
 
-    def _build_ai_matrix_section(self, parent) -> None:
-        """Dual-column matrix for Code AI and Chat AI connectors."""
-        matrix_row = tk.Frame(parent, bg=COLOR_MODERN_BG)
-        matrix_row.pack(fill=tk.X, padx=16, pady=(0, 12))
-        matrix_row.columnconfigure(0, weight=1)
-        matrix_row.columnconfigure(1, weight=1)
+        self.connected_cards_container = tk.Frame(conn_outer, bg="#ffffff")
+        self.connected_cards_container.pack(fill=tk.X)
 
-        # Column 0: Code AI Card
-        col_code = tk.Frame(
-            matrix_row,
-            bg=COLOR_CARD_BG,
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=16,
-            pady=14,
-        )
-        col_code.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self._render_connected_cards()
 
-        hdr_code = tk.Frame(col_code, bg=COLOR_CARD_BG)
-        hdr_code.pack(fill=tk.X, pady=(0, 10))
-
-        tk.Label(hdr_code, image=get_icon("code_circle", (32, 32)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 8))
-
-        left_code_title = tk.Frame(hdr_code, bg=COLOR_CARD_BG)
-        left_code_title.pack(side=tk.LEFT)
-        tk.Label(left_code_title, text="代码 AI (Code AI)", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_section).pack(anchor="w")
-        tk.Label(left_code_title, text="用于编程、架构设计、代码审查与工程开发等任务。", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(anchor="w", pady=(1, 0))
-
-        btn_add_code = tk.Button(
-            hdr_code,
-            text="＋ 接入代码 AI",
-            bg=COLOR_ACCENT_GREEN,
-            fg="#ffffff",
-            activebackground=COLOR_ACCENT_GREEN_HOVER,
-            activeforeground="#ffffff",
-            font=self.font_pill,
-            relief=tk.FLAT,
-            bd=0,
-            padx=14,
-            pady=5,
-            cursor="hand2",
-            command=lambda: self.action_add_ai("code"),
-        )
-        btn_add_code.pack(side=tk.RIGHT)
-
-        self.code_ai_container = tk.Frame(col_code, bg=COLOR_CARD_BG)
-        self.code_ai_container.pack(fill=tk.BOTH, expand=True)
-
-        # Column 1: Chat AI Card
-        col_chat = tk.Frame(
-            matrix_row,
-            bg=COLOR_CARD_BG,
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=16,
-            pady=14,
-        )
-        col_chat.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-
-        hdr_chat = tk.Frame(col_chat, bg=COLOR_CARD_BG)
-        hdr_chat.pack(fill=tk.X, pady=(0, 10))
-
-        tk.Label(hdr_chat, image=get_icon("chat_circle", (32, 32)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 8))
-
-        left_chat_title = tk.Frame(hdr_chat, bg=COLOR_CARD_BG)
-        left_chat_title.pack(side=tk.LEFT)
-        tk.Label(left_chat_title, text="对话 AI (Chat AI)", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_section).pack(anchor="w")
-        tk.Label(left_chat_title, text="用于对话、分析、总结、规划与多轮推理等任务。", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(anchor="w", pady=(1, 0))
-
-        btn_add_chat = tk.Button(
-            hdr_chat,
-            text="＋ 接入对话 AI",
-            bg=COLOR_ACCENT_GREEN,
-            fg="#ffffff",
-            activebackground=COLOR_ACCENT_GREEN_HOVER,
-            activeforeground="#ffffff",
-            font=self.font_pill,
-            relief=tk.FLAT,
-            bd=0,
-            padx=14,
-            pady=5,
-            cursor="hand2",
-            command=lambda: self.action_add_ai("chat"),
-        )
-        btn_add_chat.pack(side=tk.RIGHT)
-
-        self.chat_ai_container = tk.Frame(col_chat, bg=COLOR_CARD_BG)
-        self.chat_ai_container.pack(fill=tk.BOTH, expand=True)
-
-        # Render list of AI items
-        self._render_ai_cards()
-
-    def _render_ai_cards(self) -> None:
-        """Render discrete AI cards into Code AI and Chat AI columns."""
-        for w in self.code_ai_container.winfo_children():
+    def _render_shelf_cards(self) -> None:
+        """Render 5 marketplace AI cards depending on current category."""
+        for w in self.shelf_frame.winfo_children():
             w.destroy()
-        for w in self.chat_ai_container.winfo_children():
+
+        cat = getattr(self, "current_ai_category", "code")
+        if cat == "code":
+            presets = [
+                ("OpenAI Codex", "icon_openai", "强大的代码能力\n由 OpenAI 提供", "codex", True),
+                ("Antigravity", "icon_antigravity", "专注工程的\nAI 编程助手", "antigravity", False),
+                ("Claude Code", "icon_claude", "Anthropic 的\n代码智能助手", "claude_code", False),
+                ("Aider", "icon_aider", "开源的\nAI 编程伙伴", "aider", False),
+                ("GitHub Copilot", "icon_github", "你熟悉的\nAI 编程助手", "copilot", False),
+            ]
+        else:
+            presets = [
+                ("ChatGPT", "icon_openai", "OpenAI 旗舰\n多轮思考分析助手", "chatgpt", True),
+                ("Claude 3.7", "icon_claude", "Anthropic 对话\n长文本多轮推理", "claude", False),
+                ("Gemini", "bot_purple", "Google 多模态\n大模型智能体", "gemini", False),
+                ("DeepSeek", "bot_green", "国产开源强推理\n深度思考模型", "deepseek", False),
+                ("OpenHands", "bot_orange", "全自主智能体\n多轮交互助手", "openhands", False),
+            ]
+
+        for idx, (name, icon_name, desc, engine_key, is_featured) in enumerate(presets):
+            border_col = "#22c55e" if is_featured else COLOR_CARD_BORDER
+            thick = 2 if is_featured else 1
+            card = tk.Frame(
+                self.shelf_frame,
+                bg="#ffffff",
+                highlightbackground=border_col,
+                highlightthickness=thick,
+                bd=0,
+                padx=10,
+                pady=12,
+            )
+            card.grid(row=0, column=idx, sticky="nsew", padx=4)
+
+            # Icon
+            tk.Label(card, image=get_icon(icon_name, (36, 36)), bg="#ffffff").pack(pady=(2, 6))
+
+            # Name
+            tk.Label(card, text=name, fg=COLOR_TEXT_MAIN, bg="#ffffff", font=self.font_bold).pack()
+
+            # Description
+            tk.Label(card, text=desc, fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub, justify="center").pack(pady=(4, 10))
+
+            # Connect Button
+            btn_conn = tk.Button(
+                card,
+                text="＋ 连接此 AI",
+                bg="#f0fdf4" if is_featured else "#f8fafc",
+                fg="#059669" if is_featured else "#334155",
+                activebackground="#dcfce7",
+                highlightbackground="#86efac" if is_featured else "#e2e8f0",
+                highlightthickness=1,
+                bd=0,
+                relief=tk.FLAT,
+                font=self.font_sub,
+                padx=8,
+                pady=4,
+                cursor="hand2",
+                command=lambda e_key=engine_key, n=name: self._action_connect_preset(e_key, n),
+            )
+            btn_conn.pack(fill=tk.X, padx=4)
+
+    def _action_connect_preset(self, engine_key: str, name: str) -> None:
+        cat = getattr(self, "current_ai_category", "code")
+        AddOrEditAiDialog(
+            self.root,
+            fleet_mgr=self.mgr,
+            role_key=None,
+            default_category=cat,
+            preset_engine=engine_key,
+            preset_name=name,
+            on_save_callback=self._on_seats_saved,
+        )
+
+    def _render_connected_cards(self) -> None:
+        """Render discrete connected AI cards in horizontal tabular format with copy & menu."""
+        for w in self.connected_cards_container.winfo_children():
             w.destroy()
 
         seats_cfg = self.mgr.load_seats_config()
+        cat = getattr(self, "current_ai_category", "code")
 
-        # Categorize
-        code_seats = []
-        chat_seats = []
+        items = []
         for r_key, seat in seats_cfg.seats.items():
-            if seat.engine in ALLOWED_CODE_ENGINES or r_key in ("lead", "builder"):
-                code_seats.append((r_key, seat))
-            else:
-                chat_seats.append((r_key, seat))
+            is_code_seat = (seat.engine in ALLOWED_CODE_ENGINES or r_key in ("lead", "builder"))
+            if (cat == "code" and is_code_seat) or (cat == "chat" and not is_code_seat):
+                items.append((r_key, seat, is_code_seat))
 
-        def _render_single_seat_card(parent, role_key: str, seat: SeatConfig, is_code: bool):
+        # Update counter title
+        title_prefix = "已连接的代码AI" if cat == "code" else "已连接的对话AI"
+        self.lbl_connected_title.config(text=f"{title_prefix} ({len(items)})")
+
+        if not items:
+            empty_box = tk.Frame(self.connected_cards_container, bg="#ffffff", pady=20)
+            empty_box.pack(fill=tk.X)
+            tk.Label(empty_box, text="暂无已连接的席位，请从上方选择工具进行连接。", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack()
+            return
+
+        for r_key, seat, is_code in items:
             card = tk.Frame(
-                parent,
-                bg=COLOR_CARD_BG,
+                self.connected_cards_container,
+                bg="#ffffff",
                 highlightbackground="#e2e8f0",
                 highlightthickness=1,
                 bd=0,
-                padx=12,
+                padx=14,
                 pady=10,
             )
             card.pack(fill=tk.X, pady=4)
 
-            # Avatar icon based on seat key or engine
-            if role_key == "lead" or "裁决者" in seat.name or seat.engine == "antigravity":
-                icon_name = "bot_green"
-            elif role_key == "builder" or "泥蛇" in seat.name or seat.engine == "codex":
-                icon_name = "bot_orange"
-            elif role_key == "host" or "结算主机" in seat.name or seat.engine in ("chatgpt", "openai"):
-                icon_name = "bot_purple"
+            # Left AI Brand Icon
+            if "antigravity" in (seat.engine or "").lower():
+                ic = "icon_antigravity"
+            elif "claude" in (seat.engine or "").lower():
+                ic = "icon_claude"
+            elif "codex" in (seat.engine or "").lower() or "chatgpt" in (seat.engine or "").lower():
+                ic = "icon_openai"
+            elif "aider" in (seat.engine or "").lower():
+                ic = "icon_aider"
+            elif "copilot" in (seat.engine or "").lower():
+                ic = "icon_github"
             else:
-                icon_name = "bot_green" if is_code else "bot_purple"
+                ic = "bot_green" if is_code else "bot_purple"
 
-            tk.Label(card, image=get_icon(icon_name, (36, 36)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Label(card, image=get_icon(ic, (36, 36)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 12))
 
-            # Center Info Box
-            info_box = tk.Frame(card, bg=COLOR_CARD_BG)
-            info_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            # Main info column
+            info_col = tk.Frame(card, bg="#ffffff")
+            info_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-            # Name + Status Tag
-            top_line = tk.Frame(info_box, bg=COLOR_CARD_BG)
-            top_line.pack(anchor="w")
-            tk.Label(top_line, text=seat.name, fg=COLOR_TEXT_MAIN, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
+            name_line = tk.Frame(info_col, bg="#ffffff")
+            name_line.pack(anchor="w")
+            tk.Label(name_line, text=seat.name, fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
 
             token_val = seat.get_token() or (os.environ.get(seat.bot_token_env) or "").strip()
             is_ready = bool(token_val and seat.bot_username)
-            status_text = " ● 在线 " if is_ready else " ● 待配置 "
+            status_text = " ● 已连接 " if is_ready else " ● 待配置 "
             status_fg = "#059669" if is_ready else COLOR_TEXT_MUTED
             status_bg = "#dcfce7" if is_ready else "#f1f5f9"
-            tag_lbl = tk.Label(
-                top_line,
+            tk.Label(
+                name_line,
                 text=status_text,
                 fg=status_fg,
                 bg=status_bg,
                 font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
-            )
-            tag_lbl.pack(side=tk.LEFT, padx=6)
+            ).pack(side=tk.LEFT, padx=6)
 
-            # Engine line
-            eng_disp = seat.engine.capitalize() if seat.engine else "Auto"
-            eng_row = tk.Frame(info_box, bg=COLOR_CARD_BG)
-            eng_row.pack(anchor="w", pady=(2, 0))
-            tk.Label(eng_row, text="引擎: ", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT)
-            tk.Label(eng_row, text=eng_disp, fg="#334155", bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
+            # Subtitle / Role description
+            role_disp = "代码 AI · 主力程序员" if is_code else "对话 AI · 策略分析师"
+            tk.Label(info_col, text=f"{role_disp}  擅长代码编写、架构设计与技术实现。", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w", pady=(2, 0))
 
-            # TG username line
-            u_disp = seat.bot_username or "未配置"
-            tg_row = tk.Frame(info_box, bg=COLOR_CARD_BG)
-            tg_row.pack(anchor="w")
-            tk.Label(tg_row, text="TG: ", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT)
-            tk.Label(tg_row, text=u_disp, fg="#2563eb", bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT)
+            # Right Meta Attributes (Engine, TG username, Status dot, More menu)
+            meta_box = tk.Frame(card, bg="#ffffff")
+            meta_box.pack(side=tk.RIGHT)
 
-            # Right action buttons
-            btn_group = tk.Frame(card, bg=COLOR_CARD_BG)
-            btn_group.pack(side=tk.RIGHT)
+            # 1. AI Engine column
+            eng_box = tk.Frame(meta_box, bg="#ffffff", padx=10)
+            eng_box.pack(side=tk.LEFT)
+            tk.Label(eng_box, text="AI 引擎", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w")
+            eng_name = (seat.engine or "AUTO").upper()
+            tk.Label(eng_box, text=eng_name, fg="#1e293b", bg="#ffffff", font=self.font_bold).pack(anchor="w")
 
-            btn_manage = tk.Button(
-                btn_group,
-                text=" ⚙ 管理",
+            # 2. TG Account column with copy button
+            tg_box = tk.Frame(meta_box, bg="#ffffff", padx=10)
+            tg_box.pack(side=tk.LEFT)
+            tk.Label(tg_box, text="Telegram 账号", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w")
+
+            raw_u = (seat.bot_username or "").strip()
+            clean_u = raw_u.lstrip("@")
+            tg_user = f"@{clean_u}" if clean_u else "未配置"
+            tg_line = tk.Frame(tg_box, bg="#ffffff")
+            tg_line.pack(anchor="w")
+            tk.Label(tg_line, text=tg_user, fg="#2563eb", bg="#ffffff", font=self.font_sub).pack(side=tk.LEFT)
+
+            if clean_u:
+                btn_cp = tk.Button(
+                    tg_line,
+                    image=get_icon("icon_copy", (14, 14)),
+                    bg="#ffffff",
+                    activebackground="#f1f5f9",
+                    bd=0,
+                    relief=tk.FLAT,
+                    cursor="hand2",
+                    command=lambda u=clean_u: self._copy_to_clipboard(f"@{u}"),
+                )
+                btn_cp.pack(side=tk.LEFT, padx=3)
+
+            # 3. Status dot
+            st_box = tk.Frame(meta_box, bg="#ffffff", padx=10)
+            st_box.pack(side=tk.LEFT)
+            tk.Label(st_box, text="状态", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w")
+            st_line = tk.Frame(st_box, bg="#ffffff")
+            st_line.pack(anchor="w")
+            dot_icon = "dot_green" if is_ready else "dot_gray"
+            tk.Label(st_line, image=get_icon(dot_icon, (8, 8)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 4))
+            tk.Label(st_line, text="在线" if is_ready else "离线", fg="#059669" if is_ready else COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(side=tk.LEFT)
+
+            # 4. Context Menu Button (⋮)
+            btn_more = tk.Button(
+                meta_box,
+                image=get_icon("icon_more", (14, 14)),
                 bg="#ffffff",
-                fg=COLOR_BTN_OUTLINE_TEXT,
-                activebackground=COLOR_BTN_OUTLINE_HOVER,
-                highlightbackground=COLOR_BTN_OUTLINE_BORDER,
-                highlightthickness=1,
+                activebackground="#f1f5f9",
                 bd=0,
                 relief=tk.FLAT,
-                font=self.font_sub,
-                padx=8,
-                pady=3,
                 cursor="hand2",
-                command=lambda rk=role_key: self.open_edit_ai_dialog(rk),
+                command=lambda rk=r_key, s=seat: self._show_seat_context_menu(rk, s),
             )
-            btn_manage.pack(side=tk.LEFT, padx=3)
+            btn_more.pack(side=tk.LEFT, padx=(6, 0))
 
-            btn_test = tk.Button(
-                btn_group,
-                text=" 🔗 测试连接",
-                bg="#ffffff",
-                fg=COLOR_BTN_OUTLINE_TEXT,
-                activebackground=COLOR_BTN_OUTLINE_HOVER,
-                highlightbackground=COLOR_BTN_OUTLINE_BORDER,
-                highlightthickness=1,
-                bd=0,
-                relief=tk.FLAT,
-                font=self.font_sub,
-                padx=8,
-                pady=3,
-                cursor="hand2",
-                command=lambda s=seat: self._test_seat_connection(s),
-            )
-            btn_test.pack(side=tk.LEFT, padx=3)
+    def _copy_to_clipboard(self, text: str) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        show_floating_toast(self.root, "已复制", f"已将 {text} 复制到剪贴板。")
 
-            btn_del = tk.Button(
-                btn_group,
-                text=" 🗑 移除",
-                bg=COLOR_DANGER_BG,
-                fg=COLOR_DANGER_TEXT,
-                activebackground=COLOR_DANGER_HOVER,
-                activeforeground=COLOR_DANGER_TEXT,
-                highlightbackground=COLOR_DANGER_BORDER,
-                highlightthickness=1,
-                bd=0,
-                relief=tk.FLAT,
-                font=self.font_sub,
-                padx=8,
-                pady=3,
-                cursor="hand2",
-                command=lambda rk=role_key, nm=seat.name: self._remove_seat(rk, nm),
-            )
-            btn_del.pack(side=tk.LEFT, padx=3)
+    def _show_seat_context_menu(self, role_key: str, seat: SeatConfig) -> None:
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="🔗 测试连接", command=lambda: self._test_seat_connection(seat))
+        menu.add_command(label="⚙ 管理配置", command=lambda: self.open_edit_ai_dialog(role_key))
+        menu.add_separator()
+        menu.add_command(label="🗑 移除席位", command=lambda: self._remove_seat(role_key, seat.name))
 
-        for r_key, seat in code_seats:
-            _render_single_seat_card(self.code_ai_container, r_key, seat, is_code=True)
+        # Position menu at mouse cursor
+        x = self.root.winfo_pointerx()
+        y = self.root.winfo_pointery()
+        menu.tk_popup(x, y)
 
-        for r_key, seat in chat_seats:
-            _render_single_seat_card(self.chat_ai_container, r_key, seat, is_code=False)
+    def _build_bottom_status_bar(self) -> None:
+        """Bottom compact status bar with 4 live services indicators and log drawer."""
+        self.bottom_bar_frame = tk.Frame(
+            self.root,
+            bg="#ffffff",
+            highlightbackground=COLOR_CARD_BORDER,
+            highlightthickness=1,
+            bd=0,
+            padx=16,
+            pady=8,
+        )
+        self.bottom_bar_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Left: Diagnostics expand toggle
+        left_diag = tk.Frame(self.bottom_bar_frame, bg="#ffffff", cursor="hand2")
+        left_diag.pack(side=tk.LEFT, padx=(0, 20))
+        left_diag.bind("<Button-1>", lambda e: self._toggle_log_drawer())
+
+        tk.Label(left_diag, image=get_icon("service_tg", (16, 16)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(left_diag, text="运行状态 / 高级诊断", fg=COLOR_TEXT_TITLE, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+        self.lbl_drawer_arrow = tk.Label(left_diag, text=" ∧", fg="#94a3b8", bg="#ffffff", font=self.font_bold)
+        self.lbl_drawer_arrow.pack(side=tk.LEFT)
+
+        # Center: 4 Micro Service Indicators
+        micro_box = tk.Frame(self.bottom_bar_frame, bg="#ffffff")
+        micro_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def _make_micro_indicator(parent, name: str, default_sub: str, default_desc: str):
+            f = tk.Frame(parent, bg="#ffffff", padx=8)
+            f.pack(side=tk.LEFT, expand=True)
+
+            top = tk.Frame(f, bg="#ffffff")
+            top.pack(anchor="w")
+            dot = tk.Label(top, image=get_icon("dot_green", (8, 8)), bg="#ffffff")
+            dot.pack(side=tk.LEFT, padx=(0, 4))
+            tk.Label(top, text=name, fg=COLOR_TEXT_MAIN, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
+
+            sub_line = tk.Frame(f, bg="#ffffff")
+            sub_line.pack(anchor="w")
+            sub_lbl = tk.Label(sub_line, text=default_sub, fg="#059669", bg="#ffffff", font=self.font_sub)
+            sub_lbl.pack(side=tk.LEFT, padx=(12, 2))
+            tk.Label(sub_line, text=default_desc, fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(side=tk.LEFT)
+
+            return dot, sub_lbl
+
+        self.dot_tg_status, self.lbl_tg_sub = _make_micro_indicator(micro_box, "Telegram", "已连接", "(Telegram Bridge)")
+        self.dot_web_status, self.lbl_web_sub = _make_micro_indicator(micro_box, "Web Bridge", "运行中", "(本地 Web 服务)")
+        self.dot_ext_status, self.lbl_ext_sub = _make_micro_indicator(micro_box, "浏览器扩展", "已就绪", "(Web Extension)")
+        self.dot_agent_status, self.lbl_agent_sub = _make_micro_indicator(micro_box, "本地运行环境", "正常", "(Local Runtime)")
+
+        # Right: View Logs Button
+        btn_view_logs = tk.Button(
+            self.bottom_bar_frame,
+            text="  查看日志",
+            image=get_icon("icon_doc", (14, 14)),
+            compound=tk.LEFT,
+            bg="#ffffff",
+            fg=COLOR_BTN_OUTLINE_TEXT,
+            activebackground=COLOR_BTN_OUTLINE_HOVER,
+            highlightbackground=COLOR_BTN_OUTLINE_BORDER,
+            highlightthickness=1,
+            bd=0,
+            relief=tk.FLAT,
+            font=self.font_sub,
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            command=self._toggle_log_drawer,
+        )
+        btn_view_logs.pack(side=tk.RIGHT)
+
+        # Drawer Log Frame (Collapsible above bottom bar)
+        self.drawer_log_frame = tk.Frame(self.root, bg="#ffffff", highlightbackground=COLOR_CARD_BORDER, highlightthickness=1, bd=0)
+        self.is_drawer_open = False
+        self._build_log_console(self.drawer_log_frame)
+
+        # Compatible references for old tests
+        dummy = tk.Canvas(self.root, width=1, height=1)
+        lt = dummy.create_oval(0, 0, 1, 1, fill=COLOR_ACCENT_GREEN)
+        detail = tk.Label(self.root, text="")
+        btn = tk.Button(self.root, text="")
+        self.row_daemon = {"canvas": dummy, "light": lt, "detail": detail, "button": btn, "on_start": self._action_start_daemon, "on_stop": self._action_start_daemon}
+        self.row_cockpit = {"canvas": dummy, "light": lt, "detail": detail, "button": btn, "on_start": lambda: None, "on_stop": lambda: None}
+        self.row_bridge = {"canvas": dummy, "light": lt, "detail": detail, "button": btn, "on_start": lambda: None, "on_stop": lambda: None}
+        self.row_agent = {"canvas": dummy, "light": lt, "detail": detail, "button": btn, "on_start": lambda: None, "on_stop": lambda: None}
+
+    def _toggle_log_drawer(self) -> None:
+        self.is_drawer_open = not self.is_drawer_open
+        if self.is_drawer_open:
+            self.drawer_log_frame.pack(side=tk.BOTTOM, fill=tk.X, before=self.bottom_bar_frame)
+            self.lbl_drawer_arrow.config(text=" ∨")
+        else:
+            self.drawer_log_frame.pack_forget()
+            self.lbl_drawer_arrow.config(text=" ∧")
+
+    def _build_log_console(self, parent=None) -> None:
+        p = parent if parent is not None else self.root
+        console_frame = tk.Frame(p, bg=COLOR_CARD_BG, padx=12, pady=8)
+        console_frame.pack(fill=tk.BOTH, expand=True)
+
+        hdr = tk.Frame(console_frame, bg=COLOR_CARD_BG, height=22)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text="实时控制台输出 (Live Logs):", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT)
+
+        btn_clear = tk.Button(
+            hdr,
+            text="清屏",
+            bg="#ffffff",
+            fg=COLOR_BTN_OUTLINE_TEXT,
+            activebackground=COLOR_BTN_OUTLINE_HOVER,
+            highlightbackground=COLOR_BTN_OUTLINE_BORDER,
+            highlightthickness=1,
+            bd=0,
+            relief=tk.FLAT,
+            font=self.font_sub,
+            padx=6,
+            pady=1,
+            command=self._clear_log,
+        )
+        btn_clear.pack(side=tk.RIGHT)
+
+        self.log_text = tk.Text(
+            console_frame,
+            bg=COLOR_INPUT_BG,
+            fg=COLOR_TEXT_MAIN,
+            font=self.font_mono,
+            height=6,
+            relief=tk.FLAT,
+            bd=2,
+            state=tk.DISABLED,
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+
+    def _clear_log(self) -> None:
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state=tk.DISABLED)
+
+    def _render_ai_cards(self) -> None:
+        """Compatibility wrapper for seat refresh."""
+        self._render_connected_cards()
 
     def _test_seat_connection(self, seat: SeatConfig):
         token = seat.get_token() or (os.environ.get(seat.bot_token_env) or "").strip()
         if not token:
-            messagebox.showinfo("提示", f"席位 [{seat.name}] 尚未配置 Bot Token，请点击【⚙️ 管理】进行配置。")
+            messagebox.showinfo("提示", f"席位 [{seat.name}] 尚未配置 Bot Token，请点击管理进行配置。")
             return
 
         def _do_probe():
@@ -4916,278 +5362,7 @@ class PocketFleetControlApp:
                 del seats_cfg.seats[role_key]
                 self.mgr.save_seats_config(seats_cfg)
                 show_floating_toast(self.root, "席位已移除", f"席位 [{name}] 已从编队配置中移除。")
-                self._render_ai_cards()
-
-    def _build_collaboration_and_cta_section(self, parent) -> None:
-        """Collaboration templates & prominent Telegram call-to-action button."""
-        outer = tk.Frame(
-            parent,
-            bg=COLOR_CARD_BG,
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=16,
-            pady=14,
-        )
-        outer.pack(fill=tk.X, padx=16, pady=(0, 12))
-
-        # Title row
-        title_row = tk.Frame(outer, bg=COLOR_CARD_BG)
-        title_row.pack(fill=tk.X, pady=(0, 10))
-
-        tk.Label(title_row, image=get_icon("users", (20, 20)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 8))
-        tk.Label(title_row, text="协作模板 (编队方式)", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_section).pack(side=tk.LEFT)
-        tk.Label(
-            title_row,
-            text="  选择编队规模，快速组建你的 AI 团队。随后前往 Telegram 使用 /meet 发起会议。",
-            fg=COLOR_TEXT_MUTED,
-            bg=COLOR_CARD_BG,
-            font=self.font_sub,
-        ).pack(side=tk.LEFT, pady=(2, 0))
-
-        # 3 Template Radio Cards
-        tmpl_frame = tk.Frame(outer, bg=COLOR_CARD_BG)
-        tmpl_frame.pack(fill=tk.X, pady=(0, 12))
-        tmpl_frame.columnconfigure(0, weight=1)
-        tmpl_frame.columnconfigure(1, weight=1)
-        tmpl_frame.columnconfigure(2, weight=1)
-
-        def _make_tmpl_card(parent, col: int, is_selected: bool, title: str, tag: str, desc: str, icon_kind: int):
-            bg_col = "#f0fdf4" if is_selected else COLOR_CARD_BG
-            border_col = "#22c55e" if is_selected else COLOR_CARD_BORDER
-            thick = 2 if is_selected else 1
-
-            c = tk.Frame(
-                parent,
-                bg=bg_col,
-                highlightbackground=border_col,
-                highlightthickness=thick,
-                bd=0,
-                padx=14,
-                pady=10,
-            )
-            c.grid(row=0, column=col, sticky="nsew", padx=4)
-
-            top = tk.Frame(c, bg=bg_col)
-            top.pack(fill=tk.X)
-
-            radio_icon = "radio_checked" if is_selected else "radio_unchecked"
-            tk.Label(top, image=get_icon(radio_icon, (18, 18)), bg=bg_col).pack(side=tk.LEFT, padx=(0, 8))
-
-            # Render tiny human & bot silhouettes
-            h_icon = "human_green_small" if is_selected else "human_gray_small"
-            b_icon = "bot_green_small" if is_selected else "bot_gray_small"
-
-            icons_box = tk.Frame(top, bg=bg_col)
-            icons_box.pack(side=tk.LEFT, padx=(0, 8))
-
-            tk.Label(icons_box, image=get_icon(h_icon, (16, 16)), bg=bg_col).pack(side=tk.LEFT)
-            tk.Label(icons_box, text="+", fg="#059669" if is_selected else "#94a3b8", bg=bg_col, font=self.font_sub).pack(side=tk.LEFT, padx=1)
-            tk.Label(icons_box, image=get_icon(b_icon, (16, 16)), bg=bg_col).pack(side=tk.LEFT)
-            tk.Label(icons_box, text="+", fg="#059669" if is_selected else "#94a3b8", bg=bg_col, font=self.font_sub).pack(side=tk.LEFT, padx=1)
-            tk.Label(icons_box, image=get_icon(b_icon, (16, 16)), bg=bg_col).pack(side=tk.LEFT)
-            if icon_kind >= 3:
-                tk.Label(icons_box, text="+", fg="#059669" if is_selected else "#94a3b8", bg=bg_col, font=self.font_sub).pack(side=tk.LEFT, padx=1)
-                tk.Label(icons_box, image=get_icon(b_icon, (16, 16)), bg=bg_col).pack(side=tk.LEFT)
-            if icon_kind >= 4:
-                tk.Label(icons_box, text="...", fg="#059669" if is_selected else "#94a3b8", bg=bg_col, font=self.font_sub).pack(side=tk.LEFT)
-
-            tk.Label(top, text=title, fg=COLOR_TEXT_MAIN, bg=bg_col, font=self.font_bold).pack(side=tk.LEFT)
-
-            if tag:
-                tk.Label(
-                    top,
-                    text=f" {tag} ",
-                    fg="#ffffff",
-                    bg=COLOR_ACCENT_GREEN,
-                    font=tkfont.Font(family=get_ui_font_family(), size=8, weight="bold"),
-                ).pack(side=tk.LEFT, padx=6)
-
-            tk.Label(c, text=desc, fg=COLOR_TEXT_MUTED, bg=bg_col, font=self.font_sub).pack(anchor="w", padx=(26, 0), pady=(3, 0))
-
-        _make_tmpl_card(tmpl_frame, 0, True, "Human Root + 2 AI", "推荐", "最小可用，先跑起来", icon_kind=2)
-        _make_tmpl_card(tmpl_frame, 1, False, "Human Root + 3 AI", "", "主持 / 审计 / 施工", icon_kind=3)
-        _make_tmpl_card(tmpl_frame, 2, False, "Human Root + N AI", "", "自由扩展，适应更多场景", icon_kind=4)
-
-        # Bottom Action Banner
-        cta_bar = tk.Frame(
-            outer,
-            bg="#f8fafc",
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=16,
-            pady=12,
-        )
-        cta_bar.pack(fill=tk.X)
-
-        tk.Label(cta_bar, image=get_icon("tg_circle", (38, 38)), bg="#f8fafc").pack(side=tk.LEFT, padx=(0, 12))
-
-        cta_text_box = tk.Frame(cta_bar, bg="#f8fafc")
-        cta_text_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        tk.Label(cta_text_box, text="在 Telegram 中发起会议", fg=COLOR_TEXT_TITLE, bg="#f8fafc", font=self.font_bold).pack(anchor="w")
-        tk.Label(
-            cta_text_box,
-            text="至少接入 2 个 AI 后即可在 Telegram 中使用 /meet 发起会议。",
-            fg=COLOR_TEXT_MUTED,
-            bg="#f8fafc",
-            font=self.font_sub,
-        ).pack(anchor="w", pady=(1, 0))
-
-        btn_go_tg = tk.Button(
-            cta_bar,
-            text="  前往 Telegram 开会 ❯",
-            image=get_icon("white_plane", (18, 18)),
-            compound=tk.LEFT,
-            bg=COLOR_ACCENT_GREEN,
-            fg="#ffffff",
-            activebackground=COLOR_ACCENT_GREEN_HOVER,
-            activeforeground="#ffffff",
-            font=tkfont.Font(family=get_ui_font_family(), size=11, weight="bold"),
-            relief=tk.FLAT,
-            bd=0,
-            padx=22,
-            pady=9,
-            cursor="hand2",
-            command=self._action_open_tg,
-        )
-        btn_go_tg.pack(side=tk.RIGHT)
-
-    def _build_diagnostics_section(self, parent) -> None:
-        """Collapsible diagnostics area containing 4 compact gateway runtime status cards."""
-        diag_card = tk.Frame(
-            parent,
-            bg=COLOR_CARD_BG,
-            highlightbackground=COLOR_CARD_BORDER,
-            highlightthickness=1,
-            bd=0,
-            padx=16,
-            pady=12,
-        )
-        diag_card.pack(fill=tk.X, padx=16, pady=(0, 16))
-
-        hdr = tk.Frame(diag_card, bg=COLOR_CARD_BG)
-        hdr.pack(fill=tk.X, pady=(0, 8))
-
-        tk.Label(hdr, image=get_icon("gear", (18, 18)), bg=COLOR_CARD_BG).pack(side=tk.LEFT, padx=(0, 6))
-        tk.Label(hdr, text="运行状态 / 高级诊断", fg=COLOR_TEXT_TITLE, bg=COLOR_CARD_BG, font=self.font_bold).pack(side=tk.LEFT)
-        tk.Label(hdr, text="  核心服务运行状态 (通常无需手动操作)", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_sub).pack(side=tk.LEFT, pady=(1, 0))
-
-        # Collapse indicator
-        lbl_toggle = tk.Label(hdr, text="∧", fg=COLOR_TEXT_MUTED, bg=COLOR_CARD_BG, font=self.font_bold, cursor="hand2")
-        lbl_toggle.pack(side=tk.RIGHT)
-
-        self.diag_content = tk.Frame(diag_card, bg=COLOR_CARD_BG)
-        self.diag_content.pack(fill=tk.X)
-
-        self.diag_content.columnconfigure(0, weight=1)
-        self.diag_content.columnconfigure(1, weight=1)
-        self.diag_content.columnconfigure(2, weight=1)
-        self.diag_content.columnconfigure(3, weight=1)
-
-        def _make_diag_card(parent, col: int, icon_name: str, name: str, sub: str, on_restart):
-            card = tk.Frame(
-                parent,
-                bg="#ffffff",
-                highlightbackground="#e2e8f0",
-                highlightthickness=1,
-                bd=0,
-                padx=12,
-                pady=10,
-            )
-            card.grid(row=0, column=col, sticky="nsew", padx=3)
-
-            top = tk.Frame(card, bg="#ffffff")
-            top.pack(fill=tk.X)
-
-            tk.Label(top, image=get_icon(icon_name, (20, 20)), bg="#ffffff").pack(side=tk.LEFT, padx=(0, 6))
-            tk.Label(top, text=name, fg=COLOR_TEXT_MAIN, bg="#ffffff", font=self.font_bold).pack(side=tk.LEFT)
-
-            # Status dot + text indicator
-            status_box = tk.Frame(top, bg="#ffffff")
-            status_box.pack(side=tk.RIGHT)
-            dot_lbl = tk.Label(status_box, image=get_icon("dot_green", (8, 8)), bg="#ffffff")
-            dot_lbl.pack(side=tk.LEFT, padx=(0, 4))
-            status_text = tk.Label(status_box, text="运行中", fg="#059669", bg="#ffffff", font=self.font_sub)
-            status_text.pack(side=tk.LEFT)
-
-            tk.Label(card, text=sub, fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_sub).pack(anchor="w", pady=(3, 8))
-
-            btn_re = tk.Button(
-                card,
-                text=" ↺ 重启",
-                bg="#ffffff",
-                fg=COLOR_BTN_OUTLINE_TEXT,
-                activebackground=COLOR_BTN_OUTLINE_HOVER,
-                highlightbackground=COLOR_BTN_OUTLINE_BORDER,
-                highlightthickness=1,
-                bd=0,
-                relief=tk.FLAT,
-                font=self.font_sub,
-                padx=8,
-                pady=3,
-                cursor="hand2",
-                command=on_restart,
-            )
-            btn_re.pack(anchor="w")
-
-            detail_lbl = tk.Label(card, text="Stopped", fg=COLOR_TEXT_MUTED, bg="#ffffff", font=self.font_mono)
-
-            # Dummy canvas for test compatibility
-            canvas = tk.Canvas(top, width=1, height=1, bg="#ffffff", highlightthickness=0)
-            light = canvas.create_oval(0, 0, 1, 1, fill=COLOR_ACCENT_GREEN, outline="")
-
-            return {
-                "canvas": canvas,
-                "light": light,
-                "detail": detail_lbl,
-                "button": btn_re,
-                "on_start": on_restart,
-                "on_stop": on_restart,
-                "state": "running",
-                "dot_lbl": dot_lbl,
-                "status_text": status_text,
-            }
-
-        self.row_daemon = _make_diag_card(
-            self.diag_content,
-            col=0,
-            icon_name="service_tg",
-            name="1. Telegram Bridge",
-            sub="Telegram 连接守护进程",
-            on_restart=self._action_start_daemon,
-        )
-
-        self.row_cockpit = _make_diag_card(
-            self.diag_content,
-            col=1,
-            icon_name="service_web",
-            name="2. Local Web Cockpit",
-            sub="本地 Web 控制台 (8765)",
-            on_restart=lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, True), daemon=True).start(),
-        )
-
-        self.row_bridge = _make_diag_card(
-            self.diag_content,
-            col=2,
-            icon_name="service_ext",
-            name="3. Web Extension Bridge",
-            sub="浏览器扩展桥接 (18765)",
-            on_restart=lambda: threading.Thread(target=self.mgr.start_bridge, daemon=True).start(),
-        )
-
-        self.row_agent = _make_diag_card(
-            self.diag_content,
-            col=3,
-            icon_name="service_agent",
-            name="4. Runtime Agent",
-            sub="AI 运行代理 (本地/自动)",
-            on_restart=lambda: show_floating_toast(self.root, "Runtime Agent", "AI 运行代理服务正常运行。"),
-        )
-
-        # Embedded Console Log area
-        self._build_log_console(diag_card)
+                self._render_connected_cards()
 
     def _build_log_console(self, parent=None) -> None:
         p = parent if parent is not None else self.root

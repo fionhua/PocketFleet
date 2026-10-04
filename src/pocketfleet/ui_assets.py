@@ -356,6 +356,110 @@ def _draw_mini_silhouette(d: ImageDraw.ImageDraw, w: int, h: int, s: int, is_hum
         d.ellipse([cx + 2*s - er, cy - er, cx + 2*s + er, cy + er], fill="#ffffff")
 
 
+def _draw_icon_openai(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Classic emerald spiral loop for OpenAI."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#10a37f"
+    sw = max(2, int(2.4 * s))
+    # Draw 6 rotated rounded loops
+    for i in range(6):
+        angle = math.radians(i * 60)
+        lx = cx + 3.5 * s * math.cos(angle)
+        ly = cy + 3.5 * s * math.sin(angle)
+        ex = cx + 9.0 * s * math.cos(angle + math.radians(45))
+        ey = cy + 9.0 * s * math.sin(angle + math.radians(45))
+        d.line([(lx, ly), (ex, ey)], fill=col, width=sw)
+    d.ellipse([cx - 2.5*s, cy - 2.5*s, cx + 2.5*s, cy + 2.5*s], fill=col)
+
+
+def _draw_icon_antigravity(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Graceful emerald leaf icon for Antigravity."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#10b981"
+    # Curved leaf petal
+    pts = [
+        (cx - 7 * s, cy + 7 * s),
+        (cx - 4 * s, cy - 4 * s),
+        (cx + 7 * s, cy - 7 * s),
+        (cx + 6 * s, cy + 3 * s),
+        (cx - 2 * s, cy + 6 * s),
+    ]
+    d.polygon(pts, fill=col)
+    # Leaf stem
+    d.line([(cx - 7 * s, cy + 7 * s), (cx + 4 * s, cy - 4 * s)], fill="#ffffff", width=max(1, int(1.5 * s)))
+
+
+def _draw_icon_claude(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Anthropic Claude orange sunburst / spark."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#d97706"
+    sw = max(2, int(2.2 * s))
+    # 8-ray asterisk with rounded ends
+    for i in range(8):
+        rad = math.radians(i * 45)
+        d.line([(cx - 8*s*math.cos(rad), cy - 8*s*math.sin(rad)), (cx + 8*s*math.cos(rad), cy + 8*s*math.sin(rad))], fill=col, width=sw)
+    d.ellipse([cx - 2.5*s, cy - 2.5*s, cx + 2.5*s, cy + 2.5*s], fill=col)
+
+
+def _draw_icon_aider(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Aider chainlink in slate gray."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#475569"
+    sw = max(2, int(2.5 * s))
+    d.line([(cx - 6*s, cy - 2*s), (cx - 1*s, cy - 7*s)], fill=col, width=sw)
+    d.line([(cx - 6*s, cy - 2*s), (cx - 3*s, cy + 2*s)], fill=col, width=sw)
+    d.line([(cx + 1*s, cy - 3*s), (cx + 6*s, cy + 2*s)], fill=col, width=sw)
+    d.line([(cx + 3*s, cy + 7*s), (cx + 6*s, cy + 2*s)], fill=col, width=sw)
+    d.line([(cx - 3*s, cy - 3*s), (cx + 3*s, cy + 3*s)], fill=col, width=sw)
+
+
+def _draw_icon_github(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """GitHub Octocat silhouette."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#181717"
+    r = 7.5 * s
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col)
+    # Cat ears
+    d.polygon([(cx - 6*s, cy - 5*s), (cx - 3*s, cy - 8*s), (cx - 1*s, cy - 5*s)], fill=col)
+    d.polygon([(cx + 6*s, cy - 5*s), (cx + 3*s, cy - 8*s), (cx + 1*s, cy - 5*s)], fill=col)
+    # Inner face cut
+    d.ellipse([cx - 4.5*s, cy - 2*s, cx + 4.5*s, cy + 5*s], fill="#ffffff")
+    d.ellipse([cx - 2.8*s, cy - 0.5*s, cx - 1.2*s, cy + 1.5*s], fill=col)
+    d.ellipse([cx + 1.2*s, cy - 0.5*s, cx + 2.8*s, cy + 1.5*s], fill=col)
+
+
+def _draw_icon_copy(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Copy clipboard icon."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#64748b"
+    sw = max(1, int(1.4 * s))
+    # Back rectangle
+    d.rectangle([cx - 2*s, cy - 5*s, cx + 5*s, cy + 2*s], outline=col, width=sw)
+    # Front rectangle
+    d.rectangle([cx - 5*s, cy - 2*s, cx + 2*s, cy + 5*s], outline=col, width=sw, fill="#ffffff")
+
+
+def _draw_icon_more(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Vertical 3 dots."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#64748b"
+    r = 1.4 * s
+    d.ellipse([cx - r, cy - 5*s - r, cx + r, cy - 5*s + r], fill=col)
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col)
+    d.ellipse([cx - r, cy + 5*s - r, cx + r, cy + 5*s + r], fill=col)
+
+
+def _draw_icon_doc(d: ImageDraw.ImageDraw, w: int, h: int, s: int):
+    """Document icon for view logs."""
+    cx, cy = w * 0.5, h * 0.5
+    col = "#475569"
+    sw = max(1, int(1.5 * s))
+    d.rectangle([cx - 4*s, cy - 6*s, cx + 4*s, cy + 6*s], outline=col, width=sw)
+    d.line([(cx - 2*s, cy - 3*s), (cx + 2*s, cy - 3*s)], fill=col, width=sw)
+    d.line([(cx - 2*s, cy), (cx + 2*s, cy)], fill=col, width=sw)
+    d.line([(cx - 2*s, cy + 3*s), (cx + 1*s, cy + 3*s)], fill=col, width=sw)
+
+
 # ==============================================================================
 # Public Asset Accessor
 # ==============================================================================
@@ -408,6 +512,14 @@ def get_pil_icon(name: str, size: Tuple[int, int] = (24, 24)) -> Image.Image:
         "bot_green_small": lambda d, w, h, s: _draw_mini_silhouette(d, w, h, s, False, "#059669"),
         "human_gray_small": lambda d, w, h, s: _draw_mini_silhouette(d, w, h, s, True, "#94a3b8"),
         "bot_gray_small": lambda d, w, h, s: _draw_mini_silhouette(d, w, h, s, False, "#94a3b8"),
+        "icon_openai": _draw_icon_openai,
+        "icon_antigravity": _draw_icon_antigravity,
+        "icon_claude": _draw_icon_claude,
+        "icon_aider": _draw_icon_aider,
+        "icon_github": _draw_icon_github,
+        "icon_copy": _draw_icon_copy,
+        "icon_more": _draw_icon_more,
+        "icon_doc": _draw_icon_doc,
     }
 
     fn = draw_map.get(name)
