@@ -127,7 +127,7 @@ class TestMeetingAndEcho(unittest.TestCase):
         self.assertEqual(self.loop._active_meeting["topic"], "重构 Telegram 研讨流")
         self.assertEqual(self.loop._active_meeting["host"], "lead")
         # Verify announcement
-        announcement = self.primary_transport.sent_messages[-1]
+        announcement = self.primary_transport.sent_messages[0]
         self.assertIn("重构 Telegram 研讨流", announcement.text)
         self.assertIn("5 分钟", announcement.text)
 
@@ -206,7 +206,8 @@ class TestMeetingAndEcho(unittest.TestCase):
 
         task = self.loop.handle_message(msg, forced_seat="chat")
         with _CODEAI_LOCK:
-            self.assertEqual(len(_CODEAI_QUEUE), 0, "Target @AiSoulJudgeBot was erroneously put into web chat queue!")
+            chat_items = [it for it in _CODEAI_QUEUE if it.get("target") == "chat"]
+            self.assertEqual(len(chat_items), 0, "Target @AiSoulJudgeBot was erroneously put into web chat queue!")
 
     def test_pop_codeai_message_principal_isolation(self):
         """Unauthorized clients like Doubao must not pull tasks intended for ChatGPT/Settlement."""
@@ -256,6 +257,53 @@ class TestMeetingAndEcho(unittest.TestCase):
         with _CODEAI_LOCK:
             self.assertEqual(len(_CODEAI_QUEUE), 1)
             self.assertEqual(_CODEAI_QUEUE[0]["content"], "New non-meeting task")
+
+    def test_pure_gateway_autonomous_dispatch_without_subprocess(self):
+        """Autonomous seat dispatch routes to bridge_server and never puts into local work_queue."""
+        import time
+        from unittest.mock import patch
+        from pocketfleet.core import FleetSeatsConfig, SeatConfig
+        from pocketfleet.bridge_server import _CODEAI_QUEUE, _CODEAI_LOCK
+
+        with _CODEAI_LOCK:
+            _CODEAI_QUEUE.clear()
+
+        seats_cfg = FleetSeatsConfig(
+            seats={
+                "builder": SeatConfig(
+                    role="builder",
+                    name="泥蛇",
+                    engine="codex",
+                    bot_username="@AiSoulMudSnakeBot",
+                    bot_token="test_tok",
+                ),
+            }
+        )
+        self.loop.seats_config = seats_cfg
+
+        msg = InboundMessage(
+            message_id=888,
+            chat_id=111,
+            sender_id=123,
+            sender_name="Alice",
+            text="[Telegram]re:@AiSoulMudSnakeBot 请泥蛇给出算法定桩方案",
+            is_bot=False,
+            timestamp=time.time() - 2.0,
+        )
+
+        # Even if local codex executor is unavailable/absent, Pure Gateway succeeds
+        with patch.object(self.loop.executors[WorkerType.CODEX], "is_available", return_value=False):
+            task = self.loop.handle_message(msg)
+
+        self.assertIsNotNone(task)
+        # CRITICAL PURE GATEWAY INVARIANTS:
+        # 1. Local work_queue must be empty (Zero local subprocess forking)
+        self.assertEqual(self.loop.work_queue.qsize(), 0)
+        # 2. Bridge queue has the message dispatched to target builder
+        with _CODEAI_LOCK:
+            self.assertEqual(len(_CODEAI_QUEUE), 1)
+            self.assertEqual(_CODEAI_QUEUE[0]["target"], "builder")
+            self.assertIn("请泥蛇给出算法定桩方案", _CODEAI_QUEUE[0]["content"])
 
 
 if __name__ == "__main__":

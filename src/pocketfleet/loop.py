@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import re
 import threading
@@ -170,6 +171,7 @@ class DispatchLoop:
         authorized_user_ids: Optional[Set[int]] = None,
         on_chat_bound: Optional[Any] = None,
         seats_config: Optional[FleetSeatsConfig] = None,
+        pure_gateway_mode: Optional[bool] = None,
     ) -> None:
         self.transport = transport
         self.workspace_cwd = workspace_cwd
@@ -188,6 +190,11 @@ class DispatchLoop:
         self.meeting_started_at: float = 0.0
         self.meeting_concluded_at: float = 0.0
         self.meeting_participants: set[str] = set()
+
+        if pure_gateway_mode is not None:
+            self.pure_gateway_mode = pure_gateway_mode
+        else:
+            self.pure_gateway_mode = os.environ.get("POCKETFLEET_PURE_GATEWAY", "0").lower() in ("1", "true", "yes")
 
         if seats_config:
             self.seats_config = seats_config
@@ -1267,6 +1274,51 @@ class DispatchLoop:
             inbound_message_id=msg.message_id,
             sender_role=target_role or ("builder" if worker_type == WorkerType.CODEX else "lead"),
         )
+
+        # --- [PURE GATEWAY & AUTONOMOUS SEAT ROUTING: Zero Local Subprocess Execution] ---
+        is_autonomous = False
+        target_seat_obj = None
+        if target_role and self.seats_config and getattr(self.seats_config, "seats", None):
+            target_seat_obj = self.seats_config.seats.get(target_role)
+            if target_seat_obj and target_seat_obj.bot_username:
+                is_autonomous = True
+
+        if getattr(self, "pure_gateway_mode", False) and worker_type != WorkerType.SIMULATION:
+            is_autonomous = True
+
+        if is_autonomous:
+            from .bridge_server import enqueue_codeai_message
+            effective_target = target_role or ("builder" if worker_type == WorkerType.CODEX else "lead")
+            enqueue_codeai_message(
+                content=enveloped_prompt,
+                filename=f"Telegram_to_{effective_target}_{msg.message_id}.txt",
+                raw=True,
+                channel="duty-wake",
+                source=f"telegram:{msg.chat_id}:{msg.message_id}",
+                target=effective_target,
+                original_timestamp=getattr(msg, "timestamp", None),
+            )
+            self.state_store.record_message_start(
+                msg.message_id, msg.chat_id, raw_prompt, effective_target
+            )
+
+            # Update active meeting watchdog activity if meeting in progress
+            if self._active_meeting and self._active_meeting.get("active"):
+                self._last_meeting_activity_ts = time.time()
+                self._active_meeting["turn_count"] = self._active_meeting.get("turn_count", 0) + 1
+
+            # In direct private chat with Gateway bot, acknowledge dispatch to user
+            if msg.chat_id > 0 and not msg.is_bot:
+                seat_name = target_seat_obj.name if target_seat_obj else effective_target
+                bot_u = f" ({target_seat_obj.bot_username})" if (target_seat_obj and target_seat_obj.bot_username) else ""
+                ack_card = f"📡 *[PocketFleet 纯网关路由]* 消息已派发至席位 `{seat_name}`{bot_u}。"
+                self._send_immediate_or_outbox(msg.chat_id, ack_card, reply_to_message_id=msg.message_id)
+
+            logger.info(
+                "Pure Gateway dispatched message %s to autonomous seat '%s' without local subprocess execution",
+                msg.message_id, effective_target
+            )
+            return task
 
         executor = self.select_worker(worker_type)
         if not executor:
