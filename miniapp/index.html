@@ -934,7 +934,21 @@
       });
 
       function doFallback() {
-        // Fallback: If MTProto not linked, try Cloudflare Pages /api/meet
+        // Fallback 1: Native Telegram WebApp sendData (Zero-cost, direct back to Telegram bot)
+        if (tg && typeof tg.sendData === "function") {
+          try {
+            tg.sendData(jsonStr);
+            showToast("🚀 会议指令已直接送达 Telegram！");
+            setTimeout(() => {
+              if (tg && tg.close) { try { tg.close(); } catch(e){} }
+            }, 600);
+            return;
+          } catch(e) {
+            console.warn("tg.sendData not available in current WebApp mode:", e);
+          }
+        }
+
+        // Fallback 2: Try Cloudflare Pages /api/meet
         fetch("/api/meet", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

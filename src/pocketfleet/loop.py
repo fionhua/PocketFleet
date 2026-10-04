@@ -11,8 +11,10 @@ Implements the Battle-Hardened Architecture:
 """
 from __future__ import annotations
 
+import json
 import logging
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -63,36 +65,94 @@ def defang_telegram_mentions(text: str) -> str:
 class TelegramEnvelopeHeader:
     raw_tag: str
     action: str  # "re" or "mailto"
-    target_bot: str  # e.g. "@AiSoulMudSnakeBot"
+    target_bot: str  # e.g. "@AiSoulMudSnakeBot", "ENTJ指挥官", etc.
     reply_mode: str  # "waitReply" or "NoReply"
     body: str
+    target_role: Optional[str] = None  # "builder", "lead", "chat", "human", or None
 
 
 def parse_telegram_envelope(text: str) -> Optional[TelegramEnvelopeHeader]:
-    """Parse strictly locked canonical grammar:
-    [Telegram]re:@BotId;[waitReply]
-    [Telegram]re:@BotId;[NoReply]
-    [Telegram]mailto:@BotId;[waitReply]
-    [Telegram]mailto:@BotId;[NoReply]
+    """Robust Fuzzy Envelope Parser supporting:
+    - All bracket types: [], (), （）, 【】, {}, 〔〕, 「」, 『』, or omitted brackets
+    - Separators: :, ：, ;, ；, |, whitespace
+    - Prefixes: [Telegram], (Telegram), （Telegram）, 【Telegram】, Telegram, TG, or omitted
+    - Actions: re, mailto, to, reply, at
+    - Targets: @BotName, Chinese seat names (泥蛇/裁决者/结算主机/指挥官), or empty (re:;)
+    - Modes: waitReply/等待回复/需回, NoReply/免回/无需回复
     """
+    if not text:
+        return None
+    text_s = text.strip()
+
     import re
     m = re.match(
-        r"^\[Telegram\];?(re|mailto):(@[a-zA-Z0-9_]+);?\[(waitReply|NoReply)\]\s*(.*)",
-        text.strip(),
+        r"^(?:[\[\(（【{〔「『]\s*(?:Telegram|TG|电报)\s*[\]\)）】}〕」』]\s*[;；:：,，\s]*|Telegram\s*|TG\s*)?"
+        r"(re|mailto|to|reply|at)\s*[:：=]\s*"
+        r"(@[a-zA-Z0-9_]+|[\u4e00-\u9fa5a-zA-Z0-9_]+)?\s*"
+        r"[;；:：,，\s]*"
+        r"(?:[\[\(（【{〔「『]\s*)?"
+        r"(waitReply|wait_reply|wait|NoReply|no_reply|noreply|等待回复|需回|请回|待回|免回|无需回复|不需回复|仅同步|入席确认)?"
+        r"(?:\s*[\]\)）】}〕」』])?\s*"
+        r"(.*)$",
+        text_s,
         flags=re.IGNORECASE | re.DOTALL,
     )
     if not m:
         return None
+
     action = m.group(1).lower()
-    target = m.group(2)
-    mode = "waitReply" if "wait" in m.group(3).lower() else "NoReply"
+    raw_target = (m.group(2) or "").strip()
+    raw_mode = (m.group(3) or "").lower()
     body = m.group(4).strip()
+    raw_tag = text_s[: len(text_s) - len(body)].strip()
+
+    # Determine reply_mode
+    if any(nr in raw_mode for nr in ["noreply", "no_reply", "免回", "无需回复", "不需回复", "仅同步", "入席确认"]):
+        reply_mode = "NoReply"
+    elif any(wr in raw_mode for wr in ["wait", "等待回复", "需回", "请回", "待回"]):
+        reply_mode = "waitReply"
+    elif any(h in raw_target.lower() for h in ["指挥官", "commander", "human", "entj"]):
+        reply_mode = "NoReply"
+    else:
+        reply_mode = "waitReply"
+
+    # Determine target_role and canonical target_bot
+    target_role = None
+    target_bot = raw_target
+    t_low = raw_target.lower().lstrip("@")
+
+    if any(h in t_low for h in ["指挥官", "commander", "human", "entj"]):
+        target_role = "human"
+        target_bot = "ENTJ指挥官"
+    elif any(k in t_low for k in ["mudsnake", "泥蛇", "aisoulmudsnakebot", "builder", "施工", "主力程序员"]):
+        target_role = "builder"
+        target_bot = "@AiSoulMudSnakeBot"
+    elif any(k in t_low for k in ["judge", "裁决者", "aisouljudgebot", "lead", "审计", "架构守门"]):
+        target_role = "lead"
+        target_bot = "@AiSoulJudgeBot"
+    elif any(k in t_low for k in ["settlement", "结算", "结算主机", "aisoulsettlementbot", "chat", "主持"]):
+        target_role = "chat"
+        target_bot = "@AiSoulSettlementBot"
+    elif not raw_target:
+        # Empty target e.g. Telegramre:;waitReply - infer from body
+        b_low = body[:200].lower()
+        if any(k in b_low for k in ["泥蛇", "aisoulmudsnakebot", "施工席", "主力程序员"]):
+            target_role = "builder"
+            target_bot = "@AiSoulMudSnakeBot"
+        elif any(k in b_low for k in ["裁决者", "aisouljudgebot", "审计席", "架构守门"]):
+            target_role = "lead"
+            target_bot = "@AiSoulJudgeBot"
+        elif any(k in b_low for k in ["结算主机", "aisoulsettlementbot", "主持席"]):
+            target_role = "chat"
+            target_bot = "@AiSoulSettlementBot"
+
     return TelegramEnvelopeHeader(
-        raw_tag=m.group(0)[:len(text.strip()) - len(body)].strip(),
+        raw_tag=raw_tag,
         action=action,
-        target_bot=target,
-        reply_mode=mode,
+        target_bot=target_bot,
+        reply_mode=reply_mode,
         body=body,
+        target_role=target_role,
     )
 
 
@@ -177,12 +237,18 @@ class DispatchLoop:
         # Multi-seat secondary transports for seats with dedicated bot tokens (e.g. chat seat / 结算主机)
         self.secondary_transports: dict[str, Any] = {}
         primary_tok = bot_token
+        from .transport.telegram import TelegramTransport
+        is_live_telegram = isinstance(self.transport, TelegramTransport)
         if self.seats_config and getattr(self.seats_config, "seats", None):
             for role_k, s_cfg in self.seats_config.seats.items():
+                if role_k == "lead":
+                    continue
                 s_tok = s_cfg.get_token() if hasattr(s_cfg, "get_token") else getattr(s_cfg, "bot_token", "")
-                if s_tok and s_tok != primary_tok and role_k not in self.secondary_transports:
+                if not is_live_telegram:
+                    # In test environments with mock transport, route all seats through the mock transport
+                    self.secondary_transports[role_k] = self.transport
+                elif s_tok and s_tok != primary_tok and role_k not in self.secondary_transports:
                     try:
-                        from .transport.telegram import TelegramTransport
                         self.secondary_transports[role_k] = TelegramTransport(
                             bot_token=s_tok,
                             state_store=self.state_store,
@@ -659,8 +725,15 @@ class DispatchLoop:
         reply_to_message_id: Optional[int] = None,
         parse_mode: Optional[str] = "Markdown",
         reply_markup: Optional[dict] = None,
+        sender_role: Optional[str] = None,
     ) -> None:
         """Attempt immediate transport delivery; fallback to persistent outbox on failure."""
+        trans = None
+        if sender_role and sender_role != "lead" and getattr(self, "secondary_transports", None):
+            trans = self.secondary_transports.get(sender_role)
+        if not trans:
+            trans = self.transport
+
         msg = OutboundMessage(
             chat_id=chat_id,
             text=text,
@@ -671,7 +744,7 @@ class DispatchLoop:
         ok = False
 
         try:
-            ok = self.transport.send_message(msg)
+            ok = trans.send_message(msg)
         except Exception as exc:
             logger.warning("Immediate send failed: %s. Enqueuing to outbox.", exc)
 
@@ -773,7 +846,6 @@ class DispatchLoop:
 
             # Internal fleet bots MUST explicitly direct to another bot via @mention (e.g. @AiSoulMudSnakeBot)
             # This strictly prevents unaddressed bot chatter or echoes from entering the default worker queue!
-            import re
             has_explicit_peer_mention = bool(re.search(r"@([a-zA-Z0-9_]+bot)\b", raw_text, flags=re.IGNORECASE))
             if not has_explicit_peer_mention:
                 logger.debug("Dropped internal fleet bot broadcast without explicit peer mention from @%s", s_name)
@@ -856,7 +928,6 @@ class DispatchLoop:
         # Telegram Mini App submission (web_app_data)
         if clean_text.startswith("{") and ("topic" in clean_text or "meet" in clean_text or "action" in clean_text):
             try:
-                import json
                 data = json.loads(clean_text)
                 if isinstance(data, dict) and (data.get("action") == "meet" or "topic" in data):
                     m_topic = data.get("topic", "").strip()
@@ -877,7 +948,6 @@ class DispatchLoop:
 
         # Check for Commander's formal Starfleet Council Kickoff Announcement
         if "【人类指挥官 · PocketFleet联席会议启幕指令】" in clean_text or "PocketFleet联席会议启幕指令" in clean_text:
-            import re
             m_top = re.search(r"📌\s*会议议题[：:]\s*(.+)", clean_text)
             topic_extracted = m_top.group(1).strip() if m_top else "战队联席研讨"
             m_host = re.search(r"会议主持人[【（(](.*?)[】）)]\s*[（(](@[a-zA-Z0-9_]+bot)[)）]", clean_text, re.IGNORECASE)
@@ -916,14 +986,40 @@ class DispatchLoop:
             elif clean_text.lower().startswith("/meet"):
                 arg = clean_text[5:].strip()
             return self._handle_fleet_meeting(msg=msg, meet_arg=arg)
-        # Detect bot mention before stripping to auto-route to designated seat
-        import re
+        # Strict Envelope Target Routing Priority (P0 Fix)
+        # If message has an envelope with target_role, route strictly by target_role!
+        target_role: Optional[str] = None
         mentioned_worker: WorkerType | None = None
+        is_chat_seat: bool = (forced_seat == "chat")
+
+        if env:
+            logger.info("Parsed fuzzy envelope: target=%s, role=%s, mode=%s", env.target_bot, env.target_role, env.reply_mode)
+            # If target is human Commander, do not route to AI worker!
+            if env.target_role == "human":
+                logger.info("Envelope directed to Human Commander (%s). Recorded without triggering AI execution.", env.target_bot)
+                return None
+            target_role = env.target_role
+            if env.target_role == "chat":
+                is_chat_seat = True
+            elif env.target_role == "builder":
+                mentioned_worker = WorkerType.CODEX
+            elif env.target_role == "lead":
+                mentioned_worker = WorkerType.ANTIGRAVITY
+
+        if env and env.body:
+            text = env.body
+        else:
+            text = re.sub(r"@[a-zA-Z0-9_]+bot\b", "", raw_text, flags=re.IGNORECASE).strip()
+            if not text:
+                text = raw_text
+
+        # Secondary fallback: detect bot mention if not already resolved by envelope
         match_bot = re.search(r"@([a-zA-Z0-9_]+bot)\b", raw_text, flags=re.IGNORECASE)
-        if match_bot and self.seats_config and getattr(self.seats_config, "seats", None):
+        if not is_chat_seat and mentioned_worker is None and match_bot and self.seats_config and getattr(self.seats_config, "seats", None):
             bot_tag = "@" + match_bot.group(1).lower()
             for r_key, seat in self.seats_config.seats.items():
                 if seat.bot_username and seat.bot_username.lower() == bot_tag:
+                    target_role = r_key
                     s_eng = (seat.engine or "").lower().strip()
                     if s_eng == "codex":
                         mentioned_worker = WorkerType.CODEX
@@ -935,22 +1031,20 @@ class DispatchLoop:
                         mentioned_worker = WorkerType.AIDER
                     break
 
-        text = re.sub(r"@[a-zA-Z0-9_]+bot\b", "", raw_text, flags=re.IGNORECASE).strip()
-        if not text:
-            text = raw_text
-
         # Route Chat AI seat (e.g. 结算主机 / ChatGPT Web via Port 18765 Web Bridge)
-        is_chat_seat = (forced_seat == "chat")
         if not is_chat_seat and self.seats_config and getattr(self.seats_config, "seats", None):
             chat_seat = self.seats_config.seats.get("chat")
             if chat_seat:
                 c_uname = (chat_seat.bot_username or "").lower().strip()
                 if c_uname and match_bot and ("@" + match_bot.group(1).lower()) == c_uname:
                     is_chat_seat = True
+                    target_role = "chat"
                 elif match_bot and ("@" + match_bot.group(1).lower()) == "@aisoulsettlementbot":
                     is_chat_seat = True
+                    target_role = "chat"
                 elif not match_bot and (text.startswith("/chat") or raw_text.startswith("/chat")):
                     is_chat_seat = True
+                    target_role = "chat"
 
         if is_chat_seat:
             if self.state_store.is_message_processed(msg.message_id, chat_id=msg.chat_id):
@@ -1100,7 +1194,7 @@ class DispatchLoop:
 
         # Parse worker and prompt
         worker_type, prompt = self.parse_command(text)
-        if mentioned_worker is not None and worker_type == self.default_worker:
+        if mentioned_worker is not None:
             worker_type = mentioned_worker
 
         if not prompt:
@@ -1121,6 +1215,7 @@ class DispatchLoop:
             worker=worker_type,
             chat_id=msg.chat_id,
             inbound_message_id=msg.message_id,
+            sender_role=target_role or ("builder" if worker_type == WorkerType.CODEX else "lead"),
         )
 
         executor = self.select_worker(worker_type)
@@ -1289,7 +1384,12 @@ class DispatchLoop:
             # Strict Order: Only after successfully sending or writing to durable outbox, record delivery!
             if chat_id:
                 try:
-                    self._send_immediate_or_outbox(chat_id, reply_text, reply_to_message_id=reply_to_id)
+                    self._send_immediate_or_outbox(
+                        chat_id=chat_id,
+                        text=reply_text,
+                        reply_to_message_id=reply_to_id,
+                        sender_role=ev.seat_id or "lead",
+                    )
                     # Atomically claim telegram delivery right via event_deliveries table
                     self.session_hub.try_record_event_delivery(ev.event_id, destination="telegram")
                     if reply_to_id:
@@ -1425,10 +1525,12 @@ class DispatchLoop:
                     preview=(stderr or stdout)[-150:] if (stderr or stdout) else f"Exit code {code}",
                 )
 
+            sender_role = getattr(task, "sender_role", None) or ("builder" if executor.name == "codex" else "lead")
             self._send_immediate_or_outbox(
                 chat_id=msg.chat_id,
                 text=reply_text,
                 reply_to_message_id=msg.message_id,
+                sender_role=sender_role,
             )
 
             self.work_queue.task_done()

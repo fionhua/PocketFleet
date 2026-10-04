@@ -77,6 +77,7 @@ class Task:
     result_text: str = ""
     error_message: str = ""
     exit_code: int | None = None
+    sender_role: str = ""
 
     @property
     def display_prompt(self) -> str:
