@@ -155,7 +155,25 @@ class SeatConfig:
         if self.bot_token:
             return self.bot_token
         if self.bot_token_env:
-            return (os.environ.get(self.bot_token_env) or "").strip()
+            token = (os.environ.get(self.bot_token_env) or "").strip()
+            if token:
+                return token
+        # Commercial decoupling backward compatibility fallback:
+        if self.role == SeatRole.CHAT.value:
+            for env_name in ("TELEGRAM_BOT_ADVISOR_TOKEN", "TELEGRAM_BOT_CHAT_TOKEN", "TELEGRAM_BOT_SANDBOX_TOKEN"):
+                val = (os.environ.get(env_name) or "").strip()
+                if val:
+                    return val
+        elif self.role == SeatRole.LEAD.value:
+            for env_name in ("TELEGRAM_BOT_TECHLEAD_TOKEN", "TELEGRAM_BOT_LEAD_TOKEN", "TELEGRAM_BOT_JUDGE_TOKEN"):
+                val = (os.environ.get(env_name) or "").strip()
+                if val:
+                    return val
+        elif self.role == SeatRole.BUILDER.value:
+            for env_name in ("TELEGRAM_BOT_BUILDER_TOKEN", "TELEGRAM_BOT_MUDSNAKE_TOKEN"):
+                val = (os.environ.get(env_name) or "").strip()
+                if val:
+                    return val
         return ""
 
     def to_dict(self) -> dict:
@@ -341,7 +359,7 @@ def validate_seats_config(config: FleetSeatsConfig) -> None:
 
 
 def get_default_seats_config() -> FleetSeatsConfig:
-    """Default trial triad preset: 地球Sandbox(Gemini) / 裁决者(Antigravity) / 泥蛇(Codex)."""
+    """Standard commercial triad preset: Advisor(Chat) / TechLead(Lead) / Builder(Builder)."""
     return FleetSeatsConfig(
         context_window=20,
         no_situ=True,
@@ -349,30 +367,30 @@ def get_default_seats_config() -> FleetSeatsConfig:
         seats={
             SeatRole.CHAT.value: SeatConfig(
                 role=SeatRole.CHAT.value,
-                name="地球Sandbox",
-                engine="gemini",
-                bot_token_env="TELEGRAM_BOT_SANDBOX_TOKEN",
-                bot_username="@AiSoulAlphaSandboxBot",
+                name="Advisor",
+                engine="chatgpt",
+                bot_token_env="TELEGRAM_BOT_ADVISOR_TOKEN",
+                bot_username="@YourAdvisorBot",
                 description="对话AI·推演与宏观对账",
-                command="gemini",
+                command="chatgpt",
                 read_watermark=0,
             ),
             SeatRole.LEAD.value: SeatConfig(
                 role=SeatRole.LEAD.value,
-                name="裁决者",
+                name="TechLead",
                 engine="antigravity",
-                bot_token_env="TELEGRAM_BOT_JUDGE_TOKEN",
-                bot_username="@AiSoulJudgeBot",
+                bot_token_env="TELEGRAM_BOT_TECHLEAD_TOKEN",
+                bot_username="@YourTechLeadBot",
                 description="施工指挥·架构守门与改卷验收",
                 command="agy",
                 read_watermark=0,
             ),
             SeatRole.BUILDER.value: SeatConfig(
                 role=SeatRole.BUILDER.value,
-                name="泥蛇",
+                name="Builder",
                 engine="codex",
-                bot_token_env="TELEGRAM_BOT_MUDSNAKE_TOKEN",
-                bot_username="@AiSoulMudSnakeBot",
+                bot_token_env="TELEGRAM_BOT_BUILDER_TOKEN",
+                bot_username="@YourBuilderBot",
                 description="主力程序员·核心施工与算法定桩",
                 command="codex",
                 read_watermark=0,

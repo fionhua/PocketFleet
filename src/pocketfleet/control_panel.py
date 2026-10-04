@@ -3211,12 +3211,12 @@ class AntigravityTracksDialog(tk.Toplevel):
             if cand.source == "ide":
                 toast_msg = (
                     f"会话已同步至执行环境：\n“{clean_snip}”\n(UUID: {cid_short})\n\n"
-                    f"✅ 已完成数据原子克隆。在 Telegram 发送指令，裁决者将直接在此会话施工！"
+                    f"✅ 已完成数据原子克隆。在 Telegram 发送指令，对应席位的 AI 将直接在此会话施工！"
                 )
             else:
                 toast_msg = (
                     f"已锁定 CLI 会话为施工续轨：\n“{clean_snip}”\n(UUID: {cid_short})\n\n"
-                    f"在 Telegram 发送指令，裁决者将直接在此轨道继续施工！"
+                    f"在 Telegram 发送指令，对应席位的 AI 将直接在此轨道继续施工！"
                 )
 
             show_floating_toast(
@@ -3869,11 +3869,6 @@ class PocketFleetControlApp:
                 is_running=is_b,
                 detail=cache.get("detail_b", "Offline"),
             )
-            self._update_row(
-                self.row_agent,
-                is_running=True,
-                detail=cache.get("detail_a", "Triad: ..."),
-            )
 
             color = "green" if (is_d and is_c and is_b) else ("cyan" if (is_d or is_c or is_b) else "yellow")
             if self.tray_icon and color != self._tray_status_color:
@@ -3922,42 +3917,31 @@ class PocketFleetControlApp:
         # Row 1: Telegram Daemon
         self.row_daemon = self._create_service_row(
             table_card,
-            name="1. Telegram Bridge Daemon",
+            name="1. Telegram Starfleet Gateway",
             on_start=self._action_start_daemon,
             on_stop=lambda: threading.Thread(target=self.mgr.stop_daemon, daemon=True).start(),
             aux_text="Open TG",
             aux_cmd=self._action_open_tg,
         )
 
-        # Row 2: Local Web Cockpit
-        self.row_cockpit = self._create_service_row(
-            table_card,
-            name="2. Local Web Cockpit (UI)",
-            on_start=lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, True), daemon=True).start(),
-            on_stop=lambda: threading.Thread(target=self.mgr.stop_cockpit, daemon=True).start(),
-            aux_text="Open Browser",
-            aux_cmd=self._action_open_browser,
-        )
-
-        # Row 3: Web Extension Bridge
+        # Row 2: Web Extension Bridge (Port 18765)
         self.row_bridge = self._create_service_row(
             table_card,
-            name="3. Web Extension Bridge",
+            name="2. Web Extension Bridge (18765)",
             on_start=lambda: threading.Thread(target=self.mgr.start_bridge, daemon=True).start(),
             on_stop=lambda: threading.Thread(target=self.mgr.stop_bridge, daemon=True).start(),
             aux_text="Install Ext",
             aux_cmd=self._action_install_ext,
         )
 
-        # Row 4: Coding Agent Target
-        self.row_agent = self._create_service_row(
+        # Row 3: Local Web Cockpit (Port 8765)
+        self.row_cockpit = self._create_service_row(
             table_card,
-            name="4. AI Coding Agent",
-            on_start=None,
-            on_stop=None,
-            aux_text="Docs",
-            aux_cmd=lambda: webbrowser.open("https://fionhua.github.io/PocketFleet/"),
-            is_readonly=True,
+            name="3. Local Web Cockpit (UI)",
+            on_start=lambda: threading.Thread(target=lambda: self.mgr.start_cockpit(8765, True), daemon=True).start(),
+            on_stop=lambda: threading.Thread(target=self.mgr.stop_cockpit, daemon=True).start(),
+            aux_text="Open Browser",
+            aux_cmd=self._action_open_browser,
         )
 
     def _create_service_row(
@@ -4029,52 +4013,91 @@ class PocketFleetControlApp:
         hdr = tk.Frame(card, bg=COLOR_SURFACE, padx=12, pady=6)
         hdr.pack(fill=tk.X)
 
+        title_frame = tk.Frame(hdr, bg=COLOR_SURFACE)
+        title_frame.pack(side=tk.LEFT, fill=tk.Y)
+
         tk.Label(
-            hdr,
-            text="👥 Fleet Triad Seats (三席位战队独立编排):",
+            title_frame,
+            text="👥 AI 研发小队 · Telegram 接入配置 (AI Team Telegram Connectors):",
             fg=COLOR_INFO,
             bg=COLOR_SURFACE,
             font=self.font_bold,
-        ).pack(side=tk.LEFT)
+        ).pack(anchor="w")
 
-        btn_cfg = tk.Button(
+        tk.Label(
+            title_frame,
+            text="每个席位对应一个专属 Telegram Bot。在此直接配置代号、用户名与 Token，实现极简接入。",
+            fg=COLOR_TEXT_SOFT,
+            bg=COLOR_SURFACE,
+            font=self.font_sub,
+        ).pack(anchor="w", pady=(2, 0))
+
+        btn_adv = tk.Button(
             hdr,
-            text="⚙️ 配置三席位 (Configure Seats)",
+            text="⚙️ 专家/高级设置 (Advanced)...",
+            bg=COLOR_CONTROL,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_CONTROL_HOVER,
+            activeforeground=COLOR_TEXT,
+            font=self.font_sub,
+            relief=tk.FLAT,
+            padx=10,
+            pady=3,
+            cursor="hand2",
+            command=self.open_three_seats_dialog,
+        )
+        btn_adv.pack(side=tk.RIGHT)
+
+        # Container for the 3 seat cards
+        self.seats_container = tk.Frame(card, bg=COLOR_SURFACE_ALT, padx=8, pady=8)
+        self.seats_container.pack(fill=tk.X, padx=8, pady=(0, 4))
+        self.seats_container.columnconfigure(0, weight=1)
+        self.seats_container.columnconfigure(1, weight=1)
+        self.seats_container.columnconfigure(2, weight=1)
+
+        # Global Action Bar for Direct In-Place Saving
+        action_bar = tk.Frame(card, bg=COLOR_SURFACE, padx=12, pady=8)
+        action_bar.pack(fill=tk.X)
+
+        self.btn_save_seats = tk.Button(
+            action_bar,
+            text="💾 一键保存并应用席位配置 (Save & Apply Seats)",
             bg=COLOR_PRIMARY,
             fg="#ffffff",
             activebackground=COLOR_PRIMARY_HOVER,
             activeforeground="#ffffff",
             font=self.font_bold,
             relief=tk.FLAT,
-            padx=12,
-            pady=3,
+            padx=16,
+            pady=5,
             cursor="hand2",
-            command=self.open_three_seats_dialog,
+            command=self._save_inline_seats_config,
         )
-        btn_cfg.pack(side=tk.RIGHT)
+        self.btn_save_seats.pack(side=tk.RIGHT)
 
-        # Container for the 3 seat cards
-        self.seats_container = tk.Frame(card, bg=COLOR_SURFACE_ALT, padx=10, pady=8)
-        self.seats_container.pack(fill=tk.X, padx=8, pady=(0, 8))
-        self.seats_container.columnconfigure(0, weight=1)
-        self.seats_container.columnconfigure(1, weight=1)
-        self.seats_container.columnconfigure(2, weight=1)
+        self.inline_save_status_lbl = tk.Label(
+            action_bar,
+            text="修改上方 Bot 信息后点击保存即可就地生效，无需弹窗。",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_SURFACE,
+            font=self.font_sub,
+        )
+        self.inline_save_status_lbl.pack(side=tk.LEFT)
 
+        self.seat_entries = {}
         self._render_seat_cards()
 
     def _render_seat_cards(self) -> None:
         for widget in self.seats_container.winfo_children():
             widget.destroy()
 
+        self.seat_entries = {}
         seats_cfg = self.mgr.load_seats_config()
-        track_ctrl = AntigravityTrackController(workspace_cwd=REPO_ROOT)
-        bound_id = track_ctrl.get_current_bound_id()
-        bound_summary = f"{bound_id[:8]}...{bound_id[-4:]}" if bound_id else "未绑定"
 
         seat_roles = [
-            ("chat", "💬 人类交互席 (Chat)", COLOR_INFO),
-            ("lead", "🎖️ 规划席·CTO (Lead)", COLOR_SUCCESS),
-            ("builder", "🛠️ 执行席·主力 (Builder)", COLOR_WARNING),
+            ("chat", "💬 交互顾问席 (Advisor / Chat)", COLOR_INFO),
+            ("lead", "🎖️ 技术首席席 (Tech Lead / Lead)", COLOR_SUCCESS),
+            ("builder", "🛠️ 主力工程席 (Builder / Core)", COLOR_WARNING),
         ]
 
         # Dynamically append any extended code seats if configured
@@ -4085,9 +4108,10 @@ class PocketFleetControlApp:
         for col, (role_key, role_label, accent_color) in enumerate(seat_roles):
             self.seats_container.columnconfigure(col, weight=1)
             seat = seats_cfg.seats.get(role_key)
-            card_sub = tk.Frame(self.seats_container, bg=COLOR_SURFACE, bd=1, relief=tk.RIDGE, padx=10, pady=8)
+            card_sub = tk.Frame(self.seats_container, bg=COLOR_SURFACE, bd=1, relief=tk.RIDGE, padx=8, pady=8)
             card_sub.grid(row=0, column=col, sticky="nsew", padx=4)
 
+            # Role Header
             tk.Label(
                 card_sub,
                 text=role_label,
@@ -4097,61 +4121,144 @@ class PocketFleetControlApp:
                 anchor="w",
             ).pack(fill=tk.X)
 
-            name_text = seat.name if seat else "未配置"
-            eng_text = (seat.engine.upper() if seat else "UNKNOWN")
-            token_env = seat.bot_token_env if seat else ""
-            desc = seat.description if seat else ""
-            user = seat.bot_username if seat else ""
-            token_val = (seat.get_token() or os.environ.get(token_env) or "").strip() if seat else ""
+            # Field: AI Name
+            tk.Label(card_sub, text="代号 / 昵称 (Name):", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub, anchor="w").pack(fill=tk.X, pady=(4, 1))
+            commercial_default_names = {
+                "chat": "Advisor",
+                "lead": "TechLead",
+                "builder": "Builder",
+            }
+            raw_name = seat.name if seat else ""
+            if not raw_name or raw_name in ("地球Sandbox", "裁决者", "泥蛇"):
+                name_val = commercial_default_names.get(role_key, role_key.capitalize())
+            else:
+                name_val = raw_name
+            ent_name = tk.Entry(card_sub, bg=COLOR_INPUT_BG, fg=COLOR_TEXT, font=self.font_regular, relief=tk.FLAT)
+            ent_name.insert(0, name_val)
+            ent_name.pack(fill=tk.X, pady=(0, 4))
 
-            tk.Label(
-                card_sub,
-                text=f"代号: {name_text}",
-                fg=COLOR_TEXT,
-                bg=COLOR_SURFACE,
-                font=self.font_bold,
-                anchor="w",
-            ).pack(fill=tk.X, pady=(4, 0))
+            # Field: Bot Username
+            tk.Label(card_sub, text="Telegram 用户名 (@Username):", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub, anchor="w").pack(fill=tk.X, pady=(2, 1))
+            raw_user = seat.bot_username if seat else ""
+            if raw_user in ("@AiSoulAlphaSandboxBot", "@AiSoulJudgeBot", "@AiSoulMudSnakeBot"):
+                user_val = f"@{name_val}Bot"
+            else:
+                user_val = raw_user
+            ent_user = tk.Entry(card_sub, bg=COLOR_INPUT_BG, fg=COLOR_TEXT, font=self.font_regular, relief=tk.FLAT)
+            ent_user.insert(0, user_val)
+            ent_user.pack(fill=tk.X, pady=(0, 4))
 
-            tk.Label(
-                card_sub,
-                text=f"引擎: {eng_text}",
-                fg=COLOR_INFO,
-                bg=COLOR_SURFACE,
-                font=self.font_sub,
-                anchor="w",
-            ).pack(fill=tk.X)
+            # Field: Bot Token
+            token_frame = tk.Frame(card_sub, bg=COLOR_SURFACE)
+            token_frame.pack(fill=tk.X, pady=(2, 1))
+            tk.Label(token_frame, text="Bot Token (HTTP API):", fg=COLOR_TEXT_MUTED, bg=COLOR_SURFACE, font=self.font_sub).pack(side=tk.LEFT)
 
-            if seat and seat.engine.lower() == "antigravity":
-                tk.Label(
-                    card_sub,
-                    text="轨道: 🟢 已就绪" if bound_id else "轨道: ⚪ 待绑定",
-                    fg=COLOR_SUCCESS if bound_id else COLOR_TEXT_MUTED,
-                    bg=COLOR_SURFACE,
+            token_val = (seat.get_token() or os.environ.get(seat.bot_token_env if seat else "") or "").strip() if seat else ""
+            ent_token = tk.Entry(card_sub, bg=COLOR_INPUT_BG, fg=COLOR_TEXT, font=self.font_mono, relief=tk.FLAT, show="•")
+            ent_token.insert(0, token_val)
+            ent_token.pack(fill=tk.X, pady=(0, 4))
+
+            # Show/Hide Token Toggle
+            def _toggle_token_visibility(entry_widget=ent_token, btn=None):
+                if entry_widget.cget("show") == "•":
+                    entry_widget.config(show="")
+                    if btn: btn.config(text="🙈 隐藏")
+                else:
+                    entry_widget.config(show="•")
+                    if btn: btn.config(text="👁️ 显示")
+
+            btn_eye = tk.Button(token_frame, text="👁️ 显示", bg=COLOR_SURFACE, fg=COLOR_TEXT_SOFT, font=self.font_sub, relief=tk.FLAT, padx=2, pady=0, cursor="hand2")
+            btn_eye.config(command=lambda e=ent_token, b=btn_eye: _toggle_token_visibility(e, b))
+            btn_eye.pack(side=tk.RIGHT)
+
+            # Status line
+            status_frame = tk.Frame(card_sub, bg=COLOR_SURFACE)
+            status_frame.pack(fill=tk.X, pady=(4, 0))
+
+            has_valid = bool(token_val and user_val)
+            status_icon = "🟢" if has_valid else "🔴"
+            status_text = f"状态: {status_icon} {'已就绪' if has_valid else '待配置'}"
+            status_fg = COLOR_SUCCESS if has_valid else COLOR_DANGER
+            lbl_st = tk.Label(status_frame, text=status_text, fg=status_fg, bg=COLOR_SURFACE, font=self.font_sub)
+            lbl_st.pack(side=tk.LEFT)
+
+            if role_key == "chat":
+                # Quick link for web bridge
+                btn_web = tk.Button(
+                    status_frame,
+                    text="打开网页端",
+                    bg=COLOR_CONTROL,
+                    fg=COLOR_INFO,
                     font=self.font_sub,
-                    anchor="w",
-                ).pack(fill=tk.X)
+                    relief=tk.FLAT,
+                    padx=4,
+                    pady=0,
+                    cursor="hand2",
+                    command=lambda: webbrowser.open("https://chatgpt.com"),
+                )
+                btn_web.pack(side=tk.RIGHT)
 
-            tg_status_text = f"TG: 🟢 {user}" if (token_val and user) else "TG: 🔴 待配置"
-            tg_status_color = COLOR_SUCCESS if (token_val and user) else COLOR_DANGER
-            tk.Label(
-                card_sub,
-                text=tg_status_text,
-                fg=tg_status_color,
-                bg=COLOR_SURFACE,
-                font=self.font_sub,
-                anchor="w",
-            ).pack(fill=tk.X)
+            self.seat_entries[role_key] = {
+                "name": ent_name,
+                "username": ent_user,
+                "token": ent_token,
+                "status_lbl": lbl_st,
+                "token_env": seat.bot_token_env if seat else f"TELEGRAM_BOT_{role_key.upper()}_TOKEN",
+            }
 
-            if desc:
-                tk.Label(
-                    card_sub,
-                    text=f"职责: {desc}",
-                    fg=COLOR_TEXT_SOFT,
-                    bg=COLOR_SURFACE,
-                    font=self.font_sub,
-                    anchor="w",
-                ).pack(fill=tk.X, pady=(2, 0))
+    def _save_inline_seats_config(self) -> None:
+        try:
+            seats_cfg = self.mgr.load_seats_config()
+            for role_key, fields in self.seat_entries.items():
+                name_in = fields["name"].get().strip()
+                user_in = fields["username"].get().strip()
+                token_in = fields["token"].get().strip()
+                env_var = fields["token_env"]
+
+                if user_in and not user_in.startswith("@"):
+                    user_in = "@" + user_in
+
+                if not name_in:
+                    messagebox.showwarning("提示", f"席位 {role_key} 必须填写名称！", parent=self.root)
+                    return
+
+                seat_obj = seats_cfg.seats.get(role_key)
+                if seat_obj:
+                    seat_obj.name = name_in
+                    seat_obj.bot_username = user_in
+                    seat_obj.bot_token = token_in
+                else:
+                    seats_cfg.seats[role_key] = SeatConfig(
+                        role=role_key,
+                        name=name_in,
+                        engine="gemini" if role_key == "chat" else ("antigravity" if role_key == "lead" else "codex"),
+                        bot_token_env=env_var,
+                        bot_username=user_in,
+                        description=f"{name_in} 席位",
+                        command="gemini" if role_key == "chat" else ("agy" if role_key == "lead" else "codex"),
+                        read_watermark=0,
+                        bot_token=token_in,
+                    )
+
+                if token_in and env_var:
+                    try:
+                        save_token_to_env(token_in, env_path=REPO_ROOT / ".env", var_name=env_var)
+                        os.environ[env_var] = token_in
+                    except Exception as env_err:
+                        logger.warning("Failed saving token to .env for %s: %s", role_key, env_err)
+
+            validate_seats_config(seats_cfg)
+            self.mgr.save_seats_config(seats_cfg)
+            self.append_log("💾 [SEATS] 席位配置已就地保存并成功生效。")
+            if hasattr(self, "inline_save_status_lbl"):
+                now_str = datetime.now().strftime("%H:%M:%S")
+                self.inline_save_status_lbl.config(
+                    text=f"✅ 配置已于 {now_str} 成功就地保存生效！",
+                    fg=COLOR_SUCCESS,
+                )
+            self._render_seat_cards()
+        except Exception as e:
+            messagebox.showerror("保存失败", f"无法保存席位配置:\n{e}", parent=self.root)
 
     def open_three_seats_dialog(self) -> None:
         ThreeSeatsConfigDialog(self.root, fleet_mgr=self.mgr, on_save_callback=self._on_seats_saved)

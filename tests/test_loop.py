@@ -423,8 +423,8 @@ class TestDispatchLoop(unittest.TestCase):
         self.assertNotIn("@AiSoulJudgeBot", defanged)
         self.assertNotIn("@AiSoulSettlementBot", defanged)
         self.assertNotIn("@RandomBot", defanged)
-        self.assertIn("裁决者 (免回)", defanged)
-        self.assertIn("结算主机 (免回)", defanged)
+        self.assertIn("[AiSoulJudgeBot · 免回]", defanged)
+        self.assertIn("[AiSoulSettlementBot · 免回]", defanged)
         self.assertIn("[RandomBot · 免回]", defanged)
 
     def test_fleet_meeting_kickoff_and_briefing(self):

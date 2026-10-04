@@ -327,13 +327,27 @@ def format_commander_kickoff_announcement(body: dict) -> str:
         p_tags.insert(0, host)
 
     wd = body.get("watchdog_minutes") or 15
-    human = (body.get("human") or "ENTJ指挥官").strip()
+    human = (body.get("human") or "指挥官").strip()
 
-    name_map = {
-        "@aisoulsettlementbot": ("结算主机", "方案推演与会议对账"),
-        "@aisouljudgebot": ("裁决者", "架构守门与防御审计"),
-        "@aisoulmudsnakebot": ("泥蛇", "工程定桩与算法实现"),
-    }
+    name_map = {}
+    try:
+        from .core import get_default_seats_config
+        def_cfg = get_default_seats_config()
+        for s in def_cfg.seats.values():
+            if s.bot_username:
+                name_map[s.bot_username.lower()] = (s.name, s.description)
+    except Exception:
+        pass
+
+    # Generic commercial fallbacks
+    name_map.update({
+        "@youradvisorbot": ("Advisor", "需求拆解与会话对账"),
+        "@yourtechleadbot": ("TechLead", "架构设计与方案审查"),
+        "@yourbuilderbot": ("Builder", "核心实现与代码交付"),
+        "@aisoulsettlementbot": ("Advisor", "需求拆解与会话对账"),
+        "@aisouljudgebot": ("TechLead", "架构设计与方案审查"),
+        "@aisoulmudsnakebot": ("Builder", "核心实现与代码交付"),
+    })
 
     host_info = name_map.get(host.lower(), (host, "会议主持与推进"))
     host_display_name = host_info[0]
@@ -343,13 +357,14 @@ def format_commander_kickoff_announcement(body: dict) -> str:
     for tag in p_tags:
         info = name_map.get(tag.lower(), (tag, "席位协同"))
         d_name, d_role = info[0], info[1]
-        if tag.lower() == host.lower():
+        t_low = tag.lower()
+        if t_low == host.lower():
             breakdown_lines.append(f"• 🎛️ 【主持席】{d_name} (`{tag}`)：负责把控研讨主轴、拆解分工、推进议程并最终汇总收敛。")
-        elif "judge" in tag.lower():
-            breakdown_lines.append(f"• ⚖️ 【审计席】{d_name} (`{tag}`)：负责架构守门、合规与防御型逻辑审计、防漏洞防崩塌。")
+        elif any(k in t_low for k in ["lead", "judge", "architect", "tech"]):
+            breakdown_lines.append(f"• 🎖️ 【技术首席席】{d_name} (`{tag}`)：负责架构守门、技术方案审查、合规审计与防崩溃防漏洞。")
             other_nodes.append(f"【{d_name}】")
-        elif "mudsnake" in tag.lower():
-            breakdown_lines.append(f"• 🐍 【施工席】{d_name} (`{tag}`)：负责工程定桩、技术可行性验证、代码与落地实现。")
+        elif any(k in t_low for k in ["builder", "mudsnake", "code", "dev"]):
+            breakdown_lines.append(f"• 🛠️ 【主力工程席】{d_name} (`{tag}`)：负责工程落地、代码编写、技术验证与功能交付。")
             other_nodes.append(f"【{d_name}】")
         else:
             breakdown_lines.append(f"• 🤖 【协同席】{d_name} (`{tag}`)：{d_role}。")
@@ -512,7 +527,7 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
                                 b_u = "@" + b_u
                             s_name = s.get("name", rk)
                             s_desc = "方案推演与会议对账" if rk == "chat" else ("架构守门与审计" if rk == "lead" else "工程定桩与算法落地")
-                            s_icon = "🎛️" if rk == "chat" else ("⚖️" if rk == "lead" else "🐍")
+                            s_icon = "💬" if rk == "chat" else ("🎖️" if rk == "lead" else "🛠️")
                             s_color = "#a855f7" if rk == "chat" else ("#00e5ff" if rk == "lead" else "#10b981")
                             seats_payload.append({
                                 "bot": b_u,
@@ -526,11 +541,25 @@ class PocketFleetBridgeHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.error("Error reading seats config: %s", e)
             if not seats_payload:
-                seats_payload = [
-                    {"bot": "@AiSoulSettlementBot", "name": "结算主机", "role": "方案推演与会议对账", "icon": "🎛️", "color": "#a855f7", "is_host": True, "selected": True},
-                    {"bot": "@AiSoulJudgeBot", "name": "裁决者", "role": "架构守门与审计", "icon": "⚖️", "color": "#00e5ff", "is_host": False, "selected": True},
-                    {"bot": "@AiSoulMudSnakeBot", "name": "泥蛇", "role": "工程定桩与算法落地", "icon": "🐍", "color": "#10b981", "is_host": False, "selected": True}
-                ]
+                try:
+                    from .core import get_default_seats_config
+                    def_cfg = get_default_seats_config()
+                    for r_k, s in def_cfg.seats.items():
+                        seats_payload.append({
+                            "bot": s.bot_username,
+                            "name": s.name,
+                            "role": s.description,
+                            "icon": "💬" if r_k == "chat" else ("🎖️" if r_k == "lead" else "🛠️"),
+                            "color": "#a855f7" if r_k == "chat" else ("#00e5ff" if r_k == "lead" else "#10b981"),
+                            "is_host": (r_k == "chat"),
+                            "selected": True,
+                        })
+                except Exception:
+                    seats_payload = [
+                        {"bot": "@YourAdvisorBot", "name": "Advisor", "role": "交互顾问·需求澄清与会议对账", "icon": "💬", "color": "#a855f7", "is_host": True, "selected": True},
+                        {"bot": "@YourLeadBot", "name": "TechLead", "role": "技术首席·架构规划与质量守门", "icon": "🎖️", "color": "#00e5ff", "is_host": False, "selected": True},
+                        {"bot": "@YourBuilderBot", "name": "Builder", "role": "主力工程·核心实现与功能定桩", "icon": "🛠️", "color": "#10b981", "is_host": False, "selected": True},
+                    ]
             self._send_json_response(200, {"ok": True, "seats": seats_payload})
             return
 

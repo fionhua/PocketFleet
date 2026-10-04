@@ -33,31 +33,31 @@ class TestThreeSeatsConfig(unittest.TestCase):
         # 1. Chat Seat
         chat = cfg.seats[SeatRole.CHAT.value]
         self.assertEqual(chat.role, "chat")
-        self.assertEqual(chat.name, "地球Sandbox")
-        self.assertEqual(chat.engine, "gemini")
-        self.assertEqual(chat.bot_token_env, "TELEGRAM_BOT_SANDBOX_TOKEN")
-        self.assertEqual(chat.bot_username, "@AiSoulAlphaSandboxBot")
-        self.assertIn("推演", chat.description)
-        self.assertEqual(chat.command, "gemini")
+        self.assertEqual(chat.name, "Advisor")
+        self.assertEqual(chat.engine, "chatgpt")
+        self.assertEqual(chat.bot_token_env, "TELEGRAM_BOT_ADVISOR_TOKEN")
+        self.assertEqual(chat.bot_username, "@YourAdvisorBot")
+        self.assertIn("对账", chat.description)
+        self.assertEqual(chat.command, "chatgpt")
         self.assertEqual(chat.read_watermark, 0)
 
         # 2. Lead Seat
         lead = cfg.seats[SeatRole.LEAD.value]
         self.assertEqual(lead.role, "lead")
-        self.assertEqual(lead.name, "裁决者")
+        self.assertEqual(lead.name, "TechLead")
         self.assertEqual(lead.engine, "antigravity")
-        self.assertEqual(lead.bot_token_env, "TELEGRAM_BOT_JUDGE_TOKEN")
-        self.assertEqual(lead.bot_username, "@AiSoulJudgeBot")
+        self.assertEqual(lead.bot_token_env, "TELEGRAM_BOT_TECHLEAD_TOKEN")
+        self.assertEqual(lead.bot_username, "@YourTechLeadBot")
         self.assertEqual(lead.command, "agy")
         self.assertEqual(lead.read_watermark, 0)
 
         # 3. Builder Seat
         builder = cfg.seats[SeatRole.BUILDER.value]
         self.assertEqual(builder.role, "builder")
-        self.assertEqual(builder.name, "泥蛇")
+        self.assertEqual(builder.name, "Builder")
         self.assertEqual(builder.engine, "codex")
-        self.assertEqual(builder.bot_token_env, "TELEGRAM_BOT_MUDSNAKE_TOKEN")
-        self.assertEqual(builder.bot_username, "@AiSoulMudSnakeBot")
+        self.assertEqual(builder.bot_token_env, "TELEGRAM_BOT_BUILDER_TOKEN")
+        self.assertEqual(builder.bot_username, "@YourBuilderBot")
         self.assertEqual(builder.command, "codex")
         self.assertEqual(builder.read_watermark, 0)
 
@@ -85,9 +85,9 @@ class TestThreeSeatsConfig(unittest.TestCase):
             self.assertEqual(loaded.seats["chat"].read_watermark, 1001)
             self.assertEqual(loaded.seats["lead"].read_watermark, 1002)
             self.assertEqual(loaded.seats["builder"].read_watermark, 1003)
-            self.assertEqual(loaded.seats["chat"].name, "地球Sandbox")
-            self.assertEqual(loaded.seats["lead"].name, "裁决者")
-            self.assertEqual(loaded.seats["builder"].name, "泥蛇")
+            self.assertEqual(loaded.seats["chat"].name, "Advisor")
+            self.assertEqual(loaded.seats["lead"].name, "TechLead")
+            self.assertEqual(loaded.seats["builder"].name, "Builder")
 
     def test_missing_seat_fails_loud(self):
         """Configuration missing any of the 3 required seats must raise ValueError."""

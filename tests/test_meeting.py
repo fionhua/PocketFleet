@@ -54,8 +54,8 @@ class TestMeetingAndEcho(unittest.TestCase):
         defanged = defang_telegram_mentions(text)
         self.assertNotIn("@AiSoulJudgeBot", defanged)
         self.assertNotIn("@AiSoulMudSnakeBot", defanged)
-        self.assertIn("裁决者 (免回)", defanged)
-        self.assertIn("泥蛇 (免回)", defanged)
+        self.assertIn("AiSoulJudgeBot · 免回", defanged)
+        self.assertIn("AiSoulMudSnakeBot · 免回", defanged)
 
     def test_meet_command_initiates_meeting(self):
         msg = InboundMessage(

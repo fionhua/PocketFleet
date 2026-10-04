@@ -391,7 +391,11 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
     def test_tg_config_button_and_status_display(self):
         """Verify dedicated 'TG设置' button exists and status label updates correctly."""
         with mock.patch("pocketfleet.control_panel.CONFIG_FILE", self.config_file), \
-             mock.patch.dict(os.environ, {"TELEGRAM_BOT_JUDGE_TOKEN": ""}):
+             mock.patch.dict(os.environ, {
+                 "TELEGRAM_BOT_TECHLEAD_TOKEN": "",
+                 "TELEGRAM_BOT_LEAD_TOKEN": "",
+                 "TELEGRAM_BOT_JUDGE_TOKEN": "",
+             }):
             dialog = ThreeSeatsConfigDialog(self.root, self.mgr)
             w_lead = dialog.widgets["lead"]
 
@@ -405,10 +409,10 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             self.assertIn("待配置", lbl_status.cget("text"))
 
             # 3. When token is populated in env, capsule updates to '已就位'
-            with mock.patch.dict(os.environ, {"TELEGRAM_BOT_JUDGE_TOKEN": "123456789:AaBbCcDdEeFfGgHhIiJj1234"}):
+            with mock.patch.dict(os.environ, {"TELEGRAM_BOT_TECHLEAD_TOKEN": "123456789:AaBbCcDdEeFfGgHhIiJj1234"}):
                 dialog._update_seat_tg_capsule("lead")
                 self.assertIn("已就位", lbl_status.cget("text"))
-                self.assertIn("裁决者", w_lead["lbl_bot_badge"].cget("text"))
+                self.assertIn("TechLead", w_lead["lbl_bot_badge"].cget("text"))
 
             dialog.destroy()
 
@@ -670,6 +674,7 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
              mock.patch.dict(
                  os.environ,
                  {
+                     "TELEGRAM_BOT_TECHLEAD_TOKEN": "",
                      "TELEGRAM_BOT_LEAD_TOKEN": "",
                      "TELEGRAM_BOT_JUDGE_TOKEN": "",
                  },
@@ -706,8 +711,8 @@ class TestThreeSeatsConfigDialog(unittest.TestCase):
             memo_text = dialog.txt_memo.get("1.0", tk.END).strip()
             self.assertIn("[来自TG多AI协作];[人类用户:ENTJ指挥官];参与者:", memo_text)
             self.assertIn("回复格式要求:以 [Telegram]re:{someone} 或 [Telegram][mailto:{someone}] 为开头（指明单一收件人）。", memo_text)
-            self.assertIn("@AiSoulJudgeBot", memo_text)
-            self.assertIn("@AiSoulMudSnakeBot", memo_text)
+            self.assertIn("@YourTechLeadBot", memo_text)
+            self.assertIn("@YourBuilderBot", memo_text)
 
             # Test detected human name update
             dialog._apply_detected_human_name("泥蛇结算闭环者")

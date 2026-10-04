@@ -49,17 +49,8 @@ logger = logging.getLogger(__name__)
 def defang_telegram_mentions(text: str) -> str:
     """Transform active @BotName mentions into read-only display text so recipients don't re-trigger."""
     import re
-    replacements = {
-        r"@aisoulsettlementbot\b": "结算主机 (免回)",
-        r"@aisouljudgebot\b": "裁决者 (免回)",
-        r"@aisoulmudsnakebot\b": "泥蛇 (免回)",
-    }
-    defanged = text
-    for pattern, rep in replacements.items():
-        defanged = re.sub(pattern, rep, defanged, flags=re.IGNORECASE)
-    # Generic fallback: defang any remaining @[name]bot into [name · 免回]
-    defanged = re.sub(r"@([a-zA-Z0-9_]+bot)\b", r"[\1 · 免回]", defanged, flags=re.IGNORECASE)
-    return defanged
+    # Generic commercial defang: transform any @BotName into [BotName · 免回]
+    return re.sub(r"@([a-zA-Z0-9_]+bot)\b", r"[\1 · 免回]", text, flags=re.IGNORECASE)
 
 
 @dataclass
@@ -78,7 +69,7 @@ def parse_telegram_envelope(text: str) -> Optional[TelegramEnvelopeHeader]:
     - Separators: :, ：, ;, ；, |, whitespace
     - Prefixes: [Telegram], (Telegram), （Telegram）, 【Telegram】, Telegram, TG, or omitted
     - Actions: re, mailto, to, reply, at
-    - Targets: @BotName, Chinese seat names (泥蛇/裁决者/结算主机/指挥官), or empty (re:;)
+    - Targets: @BotName, seat names (Advisor/TechLead/Builder/Commander), or empty (re:;)
     - Modes: waitReply/等待回复/需回, NoReply/免回/无需回复
     """
     if not text:
@@ -122,30 +113,33 @@ def parse_telegram_envelope(text: str) -> Optional[TelegramEnvelopeHeader]:
     target_bot = raw_target
     t_low = raw_target.lower().lstrip("@")
 
-    if any(h in t_low for h in ["指挥官", "commander", "human", "entj"]):
+    if any(h in t_low for h in ["指挥官", "commander", "human", "entj", "user", "admin", "用户"]):
         target_role = "human"
-        target_bot = "ENTJ指挥官"
-    elif any(k in t_low for k in ["mudsnake", "泥蛇", "aisoulmudsnakebot", "builder", "施工", "主力程序员"]):
+        target_bot = raw_target or "指挥官"
+    elif any(k in t_low for k in ["builder", "施工", "主力程序员", "工程", "研发", "开发", "mudsnake", "泥蛇", "aisoulmudsnakebot"]):
         target_role = "builder"
-        target_bot = "@AiSoulMudSnakeBot"
-    elif any(k in t_low for k in ["judge", "裁决者", "aisouljudgebot", "lead", "审计", "架构守门"]):
+        if not target_bot:
+            target_bot = "@BuilderBot"
+    elif any(k in t_low for k in ["lead", "techlead", "审计", "架构", "架构守门", "技术", "技术首席", "主管", "judge", "裁决者", "aisouljudgebot"]):
         target_role = "lead"
-        target_bot = "@AiSoulJudgeBot"
-    elif any(k in t_low for k in ["settlement", "结算", "结算主机", "aisoulsettlementbot", "chat", "主持"]):
+        if not target_bot:
+            target_bot = "@TechLeadBot"
+    elif any(k in t_low for k in ["chat", "advisor", "主持", "顾问", "交互", "settlement", "结算", "结算主机", "aisoulsettlementbot"]):
         target_role = "chat"
-        target_bot = "@AiSoulSettlementBot"
+        if not target_bot:
+            target_bot = "@AdvisorBot"
     elif not raw_target:
         # Empty target e.g. Telegramre:;waitReply - infer from body
         b_low = body[:200].lower()
-        if any(k in b_low for k in ["泥蛇", "aisoulmudsnakebot", "施工席", "主力程序员"]):
+        if any(k in b_low for k in ["builder", "工程", "研发", "施工席", "主力程序员", "泥蛇", "aisoulmudsnakebot"]):
             target_role = "builder"
-            target_bot = "@AiSoulMudSnakeBot"
-        elif any(k in b_low for k in ["裁决者", "aisouljudgebot", "审计席", "架构守门"]):
+            target_bot = "@BuilderBot"
+        elif any(k in b_low for k in ["lead", "techlead", "技术首席", "审计席", "架构守门", "裁决者", "aisouljudgebot"]):
             target_role = "lead"
-            target_bot = "@AiSoulJudgeBot"
-        elif any(k in b_low for k in ["结算主机", "aisoulsettlementbot", "主持席"]):
+            target_bot = "@TechLeadBot"
+        elif any(k in b_low for k in ["chat", "advisor", "顾问", "主持席", "结算主机", "aisoulsettlementbot"]):
             target_role = "chat"
-            target_bot = "@AiSoulSettlementBot"
+            target_bot = "@AdvisorBot"
 
     return TelegramEnvelopeHeader(
         raw_tag=raw_tag,
@@ -413,9 +407,9 @@ class DispatchLoop:
         lead_u = (lead_seat.bot_username if lead_seat else "@AiSoulJudgeBot") or "@AiSoulJudgeBot"
         builder_u = (builder_seat.bot_username if builder_seat else "@AiSoulMudSnakeBot") or "@AiSoulMudSnakeBot"
 
-        chat_name = (chat_seat.name if chat_seat else "结算主机") or "结算主机"
-        lead_name = (lead_seat.name if lead_seat else "裁决者") or "裁决者"
-        builder_name = (builder_seat.name if builder_seat else "泥蛇") or "泥蛇"
+        chat_name = (chat_seat.name if chat_seat else "Advisor") or "Advisor"
+        lead_name = (lead_seat.name if lead_seat else "TechLead") or "TechLead"
+        builder_name = (builder_seat.name if builder_seat else "Builder") or "Builder"
 
         import re
         topic = meet_arg.strip()
@@ -608,13 +602,13 @@ class DispatchLoop:
             self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "chatgpt_web_meeting")
             if not connected:
                 warning_text = (
-                    f"⚠️ [PocketFleet 网桥提醒] 结算主机网页端未就绪（{reason}）。\n"
-                    f"📌 会议公文已在本地网桥队列安全待命，请在浏览器中打开 ChatGPT 网页，确认扩展显示 🟢 已就绪即可自动推进！"
+                    f"⚠️ [PocketFleet 网桥提醒] 交互顾问席（{chat_name}）网页端未就绪（{reason}）。\n"
+                    f"📌 会议公文已在本地网桥队列安全待命，请在浏览器中打开对应网页，确认扩展显示 🟢 已就绪即可自动推进！"
                 )
                 self._send_immediate_or_outbox(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=reply_id)
 
         elif host_role == "lead":
-            # Host is Lead (e.g. 裁决者 / Antigravity)
+            # Host is Lead (TechLead / Antigravity)
             self.state_store.record_message_start(msg.message_id, msg.chat_id, topic, "antigravity_meeting")
             if hasattr(self, "session_hub") and self.session_hub:
                 self.session_hub.enqueue_task(
@@ -1124,16 +1118,15 @@ class DispatchLoop:
                 original_timestamp=getattr(msg, "timestamp", None),
             )
             self.state_store.record_message_start(msg.message_id, msg.chat_id, clean_prompt, "chatgpt_web")
-            logger.info("Enqueued message %s for Chat AI / 结算主机 to Web Bridge (Port 18765), connected=%s", msg.message_id, connected)
+            chat_seat = self.seats_config.seats.get("chat") if self.seats_config else None
+            chat_display = (chat_seat.name if chat_seat else "交互顾问 (Advisor)") or "交互顾问 (Advisor)"
+            logger.info("Enqueued message %s for Chat AI (%s) to Web Bridge (Port 18765), connected=%s", msg.message_id, chat_display, connected)
 
-            # 严禁本地擅自冒用结算主机身份签发假回执！
-            # 真实结算主机的回复必须且只能由 ChatGPT 网页端生成后通过 Web Bridge 回传。
-            # 若网桥物理未连通，通过主网关（self.transport）如实向指挥官告警，绝不自欺欺人。
             if not connected:
                 warning_text = (
-                    f"⚠️ [PocketFleet 网桥提醒] 结算主机网页端未就绪（{reason}）\n\n"
-                    f"📌 任务已在本地网桥队列安全待命（ID: {msg.message_id}），但尚未送达 ChatGPT 页面。\n"
-                    f"👉 请在浏览器中打开 ChatGPT 网页，并确认扩展浮窗显示 🟢「控制链在线，协同网桥已就绪」。"
+                    f"⚠️ [PocketFleet 网桥提醒] {chat_display} 网页端未就绪（{reason}）\n\n"
+                    f"📌 任务已在本地网桥队列安全待命（ID: {msg.message_id}），但尚未送达 Web 端。\n"
+                    f"👉 请在浏览器中打开对应网页，并确认扩展浮窗显示 🟢「控制链在线，协同网桥已就绪」。"
                 )
                 self.transport.send_message(OutboundMessage(chat_id=msg.chat_id, text=warning_text, reply_to_message_id=msg.message_id))
             return None
