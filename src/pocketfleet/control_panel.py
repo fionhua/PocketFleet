@@ -3585,6 +3585,7 @@ class FleetManager:
                 authorized_user_ids=auth_uids,
                 on_chat_bound=self._on_chat_auto_bound,
                 seats_config=seats_cfg,
+                pure_gateway_mode=True,
             )
 
             telemetry.allowed_chat_ids = list(allowed_ids) if allowed_ids else []
